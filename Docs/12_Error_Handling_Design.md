@@ -212,7 +212,217 @@ struct RepositoryError
 
 ---
 
-## 7. Final Rules
+## 7. 全局异常拦截器 (Global Exception Handler)
+
+在 C++23 + Drogon 环境中，除了预期的 `std::expected` 错误流程外，第三方库或基础设施（如 JsonCpp 解析错误、PostgreSQL 驱动崩溃、内存分配失败等）仍可能抛出非预期异常。
+
+### 7.1 设计目标
+
+1. **统一兜底**：捕获所有未被 Use Case 或 Controller 显式处理的异常
+2. **安全响应**：避免泄露 SQL 片段、内存地址、堆栈跟踪等敏感信息
+3. **可追溯**：生成唯一 `trace_id`，关联服务端日志便于排查
+4. **标准格式**：统一返回 500 状态码和结构化 JSON
+
+### 7.2 Drogon 全局异常处理器配置
+
+Drogon 支持通过 `setExceptionHandler` 注册全局异常处理器：
+
+```cpp
+// main.cpp 或 Application 初始化代码
+#include <drogon/drogon.h>
+#include <uuid/uuid.h> // 或使用 Boost.UUID
+
+void setupGlobalExceptionHandler() {
+    drogon::app().setExceptionHandler([](const std::exception& e,
+                                          const drogon::HttpRequestPtr& req,
+                                          std::function<void(drogon::HttpResponsePtr)>&& callback) {
+        // 1. 生成唯一追踪 ID
+        std::string traceId = generateTraceId();
+
+        // 2. 记录服务端日志（包含完整异常信息）
+        LOG_ERROR << "[trace_id=" << traceId << "] "
+                  << "Unhandled exception: " << e.what()
+                  << " | path=" << req->path()
+                  << " | method=" << req->methodString();
+
+        // 可选：记录堆栈跟踪（生产环境推荐）
+        // LOG_ERROR << "Stack trace: " << getStackTrace();
+
+        // 3. 构造安全的前端响应（不泄露敏感信息）
+        Json::Value errorBody;
+        errorBody["error_code"] = "INTERNAL_SERVER_ERROR";
+        errorBody["message"] = "An unexpected error occurred. Please contact support if the problem persists.";
+        errorBody["trace_id"] = traceId;
+        errorBody["path"] = req->path();
+        errorBody["timestamp"] = getCurrentTimestampISO8601();
+
+        auto response = drogon::HttpResponse::newHttpJsonResponse(errorBody);
+        response->setStatusCode(drogon::k500InternalServerError);
+        response->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+
+        callback(response);
+    });
+}
+
+// 应用启动时调用
+int main() {
+    setupGlobalExceptionHandler();
+    
+    drogon::app().addListener("0.0.0.0", 8080);
+    drogon::app().run();
+    return 0;
+}
+```
+
+### 7.3 TraceId 生成策略
+
+TraceId 用于关联前端错误和服务端日志，推荐格式：
+
+```cpp
+std::string generateTraceId() {
+    // 方案 1: UUID v4
+    uuid_t uuid;
+    uuid_generate_random(uuid);
+    char uuid_str[37];
+    uuid_unparse(uuid, uuid_str);
+    return std::string(uuid_str);
+
+    // 方案 2: 时间戳 + 随机数（更轻量）
+    auto now = std::chrono::system_clock::now();
+    auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now.time_since_epoch()
+    ).count();
+    
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> dis(1000, 9999);
+    
+    return "trace-" + std::to_string(timestamp) + "-" + std::to_string(dis(gen));
+}
+```
+
+### 7.4 分层异常处理策略
+
+**Infrastructure 层**
+
+捕获所有底层异常，转换为 `std::expected` 错误：
+
+```cpp
+// Repository 实现中
+std::expected<Account, RepositoryError> AccountRepositoryImpl::findById(int64_t id) {
+    try {
+        auto result = dbClient_->execSqlSync(
+            "SELECT * FROM accounts WHERE id = $1", id
+        );
+        
+        if (result.empty()) {
+            return std::unexpected(RepositoryError{
+                RepositoryStatus::NotFound, 
+                "Account not found"
+            });
+        }
+        
+        return mapToAccount(result[0]);
+        
+    } catch (const drogon::orm::DrogonDbException& e) {
+        LOG_ERROR << "Database exception in findById: " << e.base().what();
+        return std::unexpected(RepositoryError{
+            RepositoryStatus::DatabaseError,
+            "Database query failed"
+        });
+    } catch (const std::exception& e) {
+        LOG_ERROR << "Unexpected exception in findById: " << e.what();
+        return std::unexpected(RepositoryError{
+            RepositoryStatus::DatabaseError,
+            "Unexpected database error"
+        });
+    }
+}
+```
+
+**Application 层**
+
+Use Case 不应抛出异常，所有错误通过 `std::expected` 返回：
+
+```cpp
+std::expected<void, UseCaseError> CreateTransferUseCase::execute(const TransferInputDTO& dto) {
+    // 所有错误都通过 std::unexpected 返回
+    auto sourceAccount = accountRepo_->findById(dto.sourceAccountId);
+    if (!sourceAccount) {
+        return std::unexpected(UseCaseError::AccountNotFound);
+    }
+    
+    // ... 业务逻辑
+}
+```
+
+**Presentation 层**
+
+Controller 负责最后一道防线，处理预期的 `std::expected` 错误：
+
+```cpp
+void TransferController::createTransfer(
+    const drogon::HttpRequestPtr& req,
+    std::function<void(const drogon::HttpResponsePtr&)>&& callback)
+{
+    try {
+        // 1. 解析 JSON
+        auto jsonPtr = req->getJsonObject();
+        if (!jsonPtr) {
+            callback(createErrorResponse(400, "BAD_REQUEST", "Invalid JSON body"));
+            return;
+        }
+
+        // 2. 调用 Use Case
+        auto result = createTransferUseCase_->execute(dto);
+
+        // 3. 处理预期错误
+        if (!result) {
+            callback(mapUseCaseErrorToHttp(result.error()));
+            return;
+        }
+
+        // 4. 成功响应
+        callback(drogon::HttpResponse::newHttpJsonResponse(successBody));
+        
+    } catch (const std::exception& e) {
+        // 这里不应该到达，但作为安全边界
+        // 全局异常处理器会兜底
+        throw;
+    }
+}
+```
+
+### 7.5 生产环境安全规约
+
+1. **绝不返回给前端**：
+   - 异常堆栈跟踪
+   - SQL 查询语句
+   - 文件路径（如 `/home/user/pfh/src/...`）
+   - 内存地址
+   - 数据库连接字符串
+   - JWT 密钥或 token 内容
+
+2. **必须记录到服务端日志**：
+   - 完整异常信息 `e.what()`
+   - 请求路径和方法
+   - TraceId
+   - 用户 ID（如果已认证）
+   - 可选：堆栈跟踪
+
+3. **前端响应只包含**：
+   - 固定的通用错误消息
+   - TraceId（用户可提供给客服）
+   - 时间戳
+   - 请求路径（不泄露参数）
+
+4. **监控告警**：
+   - 全局异常处理器触发时，应发送监控告警
+   - 统计异常频率，超过阈值自动告警
+
+---
+
+## 8. Final Rules
 
 1. 可预期业务失败用 `std::expected`
 2. Domain 不抛业务异常
@@ -221,3 +431,6 @@ struct RepositoryError
 5. 错误响应格式稳定
 6. 关键操作失败和危险操作必须可审计
 7. 测试必须覆盖错误映射和事务回滚路径
+8. 全局异常处理器必须配置，作为最后安全边界
+9. 生产环境绝不向前端泄露异常堆栈、SQL 或敏感配置
+10. 所有未预期异常必须生成 TraceId 并记录到审计日志

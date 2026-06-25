@@ -77,6 +77,44 @@ Indexes:
 UNIQUE(username)
 ```
 
+### 3.1 密码存储规范
+
+`users.password_hash` 必须只存储强哈希结果，绝不允许存储明文、中间结果或弱哈希。
+
+#### 推荐算法
+
+**首选：Argon2id**
+
+- 哈希格式使用 PHC 字符串标准，例如：
+  ```
+  $argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>
+  ```
+- Argon2id 是当前密码哈希的最佳实践，兼顾侧信道防御与内存硬度。
+- PHC 格式自带算法版本、参数、salt，便于未来升级和迁移验证。
+
+**备选：bcrypt**
+
+- 如果暂时无法集成 Argon2id 库，可退到 bcrypt。
+- 成本因子（cost factor）至少设为 10，更推荐按服务器压测设为 12+。
+- bcrypt 已被广泛验证，但抗 ASIC 攻击能力弱于 Argon2id。
+
+#### 严格禁止
+
+- 明文存储
+- MD5
+- SHA1
+- 单次 SHA256（无 salt、无迭代）
+- 自研哈希算法
+
+#### Pepper 可选策略
+
+可选择性增加一层全局 pepper（即应用层密钥），用于进一步防御数据库泄漏攻击：
+
+- pepper 从环境变量（如 `PFH_PASSWORD_PEPPER`）或密钥管理服务读取。
+- pepper **不入库**、**不进 Git**、**不写入配置文件**。
+- pepper 在哈希前与密码拼接，例如：`hash(password + pepper + salt)`。
+- 如果未来需轮换 pepper，必须保留旧 pepper 以验证历史密码，或强制用户重置密码。
+
 ### User Preferences Table
 
 扩展偏好单独存储，避免继续膨胀 `users` 表。
@@ -989,7 +1027,382 @@ BalanceCalculationService
 
 ---
 
-## 22. 最终原则
+# 23. 数据库版本演进与迁移机制 (Database Schema Migration)
+
+随着系统升级，数据库结构会发生变化（新增表、修改字段、添加索引等）。必须采用结构化的迁移机制，确保开发、测试、生产环境的数据库架构保持一致且可追溯。
+
+## 23.1 迁移工具选型
+
+**推荐方案：Flyway**
+
+- **语言无关**：基于 SQL 文件，不绑定特定编程语言
+- **版本化**：每个迁移脚本有唯一版本号（如 `V1__initial_schema.sql`）
+- **状态追踪**：通过 `flyway_schema_history` 表记录已执行的迁移
+- **幂等性**：已执行的迁移不会重复执行
+- **回滚支持**：通过 Undo 脚本（商业版）或手动编写回滚 SQL
+- **跨平台**：支持 PostgreSQL、MySQL、Oracle 等
+
+**备选方案：Liquibase**
+
+- 支持 XML/YAML/JSON 格式
+- 更强的回滚和条件迁移能力
+- 学习曲线略陡
+
+**不推荐：手动 SQL 脚本**
+
+- 难以追踪执行状态
+- 容易重复执行
+- 无法自动化集成
+
+## 23.2 Flyway 集成方式
+
+### 方案 A：独立 CLI 工具（推荐）
+
+在应用启动前，通过 CI/CD 或启动脚本独立运行 Flyway：
+
+```bash
+# flyway.conf 配置文件
+flyway.url=jdbc:postgresql://localhost:5432/pfh
+flyway.user=pfh_user
+flyway.password=${DB_PASSWORD}
+flyway.locations=filesystem:./migrations
+flyway.baselineOnMigrate=true
+flyway.validateOnMigrate=true
+
+# 执行迁移
+flyway migrate
+```
+
+**优势**：
+- 与应用代码解耦
+- 支持独立运维
+- 适合容器化部署（在应用容器启动前运行 init 容器）
+
+### 方案 B：嵌入式集成
+
+在 C++ 应用启动时，通过 `system()` 调用 Flyway CLI：
+
+```cpp
+// infrastructure/database/MigrationRunner.cpp
+#include <cstdlib>
+#include <filesystem>
+
+class MigrationRunner {
+public:
+    static bool runMigrations(const std::string& dbUrl, 
+                              const std::string& dbUser,
+                              const std::string& dbPassword) {
+        // 设置环境变量
+        setenv("FLYWAY_URL", dbUrl.c_str(), 1);
+        setenv("FLYWAY_USER", dbUser.c_str(), 1);
+        setenv("FLYWAY_PASSWORD", dbPassword.c_str(), 1);
+        
+        // 执行 Flyway
+        int result = system("flyway migrate");
+        
+        if (result != 0) {
+            LOG_ERROR << "Database migration failed with code " << result;
+            return false;
+        }
+        
+        LOG_INFO << "Database migration completed successfully";
+        return true;
+    }
+};
+
+// main.cpp
+int main() {
+    // 1. 执行数据库迁移
+    if (!MigrationRunner::runMigrations(
+        "jdbc:postgresql://localhost:5432/pfh",
+        "pfh_user",
+        std::getenv("DB_PASSWORD")
+    )) {
+        LOG_FATAL << "Failed to migrate database, aborting startup";
+        return 1;
+    }
+    
+    // 2. 启动 Drogon 应用
+    drogon::app().addListener("0.0.0.0", 8080);
+    drogon::app().run();
+    return 0;
+}
+```
+
+**优势**：
+- 应用启动自动执行迁移
+- 适合开发环境
+
+**劣势**：
+- 需要在运行环境安装 Flyway CLI
+- 应用无法控制迁移细节
+
+## 23.3 迁移脚本组织结构
+
+```
+project/
+├── migrations/
+│   ├── V1__initial_schema.sql
+│   ├── V2__add_user_preferences.sql
+│   ├── V3__add_refresh_tokens.sql
+│   ├── V4__add_locale_to_category_templates.sql
+│   ├── V5__add_exchange_rate_indices.sql
+│   └── R__seed_default_categories.sql  (可重复执行)
+├── src/
+├── CMakeLists.txt
+└── flyway.conf
+```
+
+**命名规范**
+
+- **版本化迁移**：`V<版本号>__<描述>.sql`
+  - `V1__initial_schema.sql`
+  - `V2.1__add_user_email.sql`（支持小数版本）
+- **可重复迁移**：`R__<描述>.sql`
+  - 每次 checksum 变化时重新执行
+  - 适合视图、存储过程、种子数据
+- **Undo 迁移**（可选）：`U<版本号>__<描述>.sql`
+  - `U2__remove_user_email.sql`
+
+## 23.4 迁移脚本示例
+
+### V1__initial_schema.sql
+
+```sql
+-- Version 1: Initial Schema
+-- Date: 2026-06-25
+-- Description: Create core tables (users, accounts, transactions, currencies)
+
+-- Users
+CREATE TABLE users (
+    id BIGSERIAL PRIMARY KEY,
+    username VARCHAR(64) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    base_currency_code CHAR(3) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Accounts
+CREATE TYPE account_type AS ENUM ('cash', 'savings', 'credit', 'digital_wallet', 'investment', 'crypto', 'other');
+CREATE TYPE account_category AS ENUM ('asset', 'liability');
+
+CREATE TABLE accounts (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id),
+    name VARCHAR(128) NOT NULL,
+    type account_type NOT NULL,
+    subtype VARCHAR(64) NOT NULL,
+    category account_category NOT NULL,
+    currency_code CHAR(3) NOT NULL,
+    description TEXT,
+    is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+    archived_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_accounts_user_id ON accounts(user_id);
+CREATE INDEX idx_accounts_user_type ON accounts(user_id, type);
+
+-- Transactions
+CREATE TYPE transaction_type AS ENUM ('income', 'expense', 'transfer', 'adjustment');
+
+CREATE TABLE transactions (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id),
+    account_id BIGINT NOT NULL REFERENCES accounts(id),
+    category_id BIGINT,
+    type transaction_type NOT NULL,
+    amount NUMERIC(20,8) NOT NULL,
+    currency_code CHAR(3) NOT NULL,
+    description TEXT,
+    transfer_group_id UUID,
+    deleted_at TIMESTAMPTZ,
+    transaction_time TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    version BIGINT NOT NULL DEFAULT 1
+);
+
+CREATE INDEX idx_transactions_account_id ON transactions(account_id);
+CREATE INDEX idx_transactions_user_time ON transactions(user_id, transaction_time);
+CREATE INDEX idx_transactions_time ON transactions(transaction_time);
+
+-- ... 其他表 ...
+```
+
+### V2__add_user_preferences.sql
+
+```sql
+-- Version 2: User Preferences
+-- Date: 2026-06-26
+-- Description: Add user_preferences table for extended settings
+
+CREATE TYPE theme_mode AS ENUM ('system', 'light', 'dark');
+CREATE TYPE default_home_page AS ENUM ('dashboard', 'transactions', 'reports', 'accounts');
+CREATE TYPE report_period AS ENUM ('current_month', 'last_month', 'last_3_months', 'current_year', 'custom');
+
+CREATE TABLE user_preferences (
+    user_id BIGINT PRIMARY KEY REFERENCES users(id),
+    base_currency_code CHAR(3) NOT NULL,
+    locale VARCHAR(16) NOT NULL DEFAULT 'zh-CN',
+    timezone VARCHAR(64) NOT NULL DEFAULT 'Asia/Shanghai',
+    date_format VARCHAR(32) NOT NULL DEFAULT 'YYYY-MM-DD',
+    number_format VARCHAR(32) NOT NULL DEFAULT '1,234.56',
+    theme theme_mode NOT NULL DEFAULT 'system',
+    default_home_page default_home_page NOT NULL DEFAULT 'dashboard',
+    default_report_period report_period NOT NULL DEFAULT 'current_month',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 为现有用户初始化默认偏好
+INSERT INTO user_preferences (user_id, base_currency_code, locale, timezone)
+SELECT id, base_currency_code, 'zh-CN', 'Asia/Shanghai'
+FROM users
+ON CONFLICT (user_id) DO NOTHING;
+```
+
+### V3__add_refresh_tokens.sql
+
+```sql
+-- Version 3: Refresh Tokens
+-- Date: 2026-06-27
+-- Description: Add refresh_tokens table for JWT authentication
+
+CREATE TABLE refresh_tokens (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id),
+    token_hash VARCHAR(64) NOT NULL UNIQUE,
+    session_id VARCHAR(64) NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    revoked_at TIMESTAMPTZ
+);
+
+CREATE INDEX idx_refresh_tokens_user_session ON refresh_tokens(user_id, session_id);
+CREATE INDEX idx_refresh_tokens_expires ON refresh_tokens(expires_at);
+```
+
+## 23.5 迁移执行流程
+
+### 开发环境
+
+```bash
+# 1. 本地启动 PostgreSQL
+docker-compose up -d postgres
+
+# 2. 执行迁移
+flyway migrate
+
+# 3. 启动应用
+./build/pfh-server
+```
+
+### CI/CD 流程
+
+```yaml
+# .github/workflows/deploy.yml
+jobs:
+  deploy:
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Run database migrations
+        env:
+          FLYWAY_URL: ${{ secrets.DB_URL }}
+          FLYWAY_USER: ${{ secrets.DB_USER }}
+          FLYWAY_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        run: |
+          flyway migrate
+      
+      - name: Deploy application
+        run: |
+          docker-compose up -d app
+```
+
+### 生产环境
+
+```bash
+# 方案 1: 蓝绿部署
+# 1. 先迁移数据库（向后兼容）
+flyway migrate
+
+# 2. 更新应用代码
+kubectl rollout restart deployment/pfh-api
+
+# 方案 2: Kubernetes Init Container
+# 在应用容器启动前运行迁移
+apiVersion: v1
+kind: Pod
+spec:
+  initContainers:
+  - name: db-migration
+    image: flyway/flyway:latest
+    command: ["flyway", "migrate"]
+    env:
+    - name: FLYWAY_URL
+      value: "jdbc:postgresql://db:5432/pfh"
+  containers:
+  - name: app
+    image: pfh-api:latest
+```
+
+## 23.6 迁移最佳实践
+
+1. **向后兼容**：
+   - 新增字段必须有默认值或允许 NULL
+   - 删除字段分两步：先停用（应用不再使用），再删除（下个版本）
+   - 重命名字段：先新增 → 双写 → 迁移数据 → 删除旧字段
+
+2. **幂等性**：
+   - 使用 `IF NOT EXISTS` / `IF EXISTS`
+   - 避免硬编码 ID 或数据
+
+3. **事务性**：
+   - 每个迁移脚本在单独的事务中执行
+   - 避免在迁移中执行长时间锁表操作
+
+4. **测试**：
+   - 在测试数据库先验证
+   - 准备回滚脚本
+   - 大规模数据迁移先在副本上测试性能
+
+5. **文档化**：
+   - 每个迁移脚本顶部注释说明目的
+   - 记录破坏性变更
+
+## 23.7 回滚策略
+
+**场景 1：迁移失败**
+
+Flyway 自动回滚事务，数据库保持迁移前状态。
+
+**场景 2：应用部署失败需回滚**
+
+```bash
+# 手动回滚到指定版本（需要 Undo 脚本）
+flyway undo
+
+# 或手动执行回滚 SQL
+psql -U pfh_user -d pfh -f rollback_v3.sql
+```
+
+**场景 3：数据迁移错误**
+
+准备补偿脚本：
+
+```sql
+-- V4.1__fix_data_migration.sql
+-- 修复 V4 中的数据错误
+UPDATE accounts SET type = 'savings' WHERE type = 'saving'; -- 修正拼写错误
+```
+
+---
+
+## 24. 最终原则
 
 1. Transaction 永远是真实数据
 
@@ -1001,7 +1414,7 @@ BalanceCalculationService
 
 5. 外部同步必须幂等
 
-6. 数据库结构无需为了第三阶段重构
+6. **数据库迁移必须版本化、可追溯、可回滚**
 
 7. 所有统计都能从流水重新计算
 
