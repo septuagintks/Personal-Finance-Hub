@@ -519,8 +519,316 @@ void TransferController::createTransfer(
 
 ---
 
-## 6. 安全与防御性边界提示
+## 6. 身份认证与安全规约 (Authentication & Security)
+
+### 6.1 JWT Access Token 规范
+
+**有效期**
+
+- 推荐：15 分钟
+- 短期有效期降低 token 泄漏风险，配合 Refresh Token 机制保证用户体验。
+
+**Payload 结构**
+
+JWT Payload 必须控制精简，**严禁**放入邮箱、手机号、密码哈希等敏感信息。
+
+推荐结构：
+
+```json
+{
+  "iss": "pfh-api",
+  "aud": "pfh-client",
+  "sub": "userId",
+  "sid": "sessionId",
+  "jti": "unique-token-id",
+  "roles": ["USER"],
+  "iat": 1710000000,
+  "nbf": 1710000000,
+  "exp": 1710000900
+}
+```
+
+字段语义：
+
+- `iss` (Issuer): 签发方，固定为 `pfh-api`
+- `aud` (Audience): 受众方，固定为 `pfh-client`
+- `sub` (Subject): 用户 ID
+- `sid` (Session ID): 登录会话标识，用于会话撤销
+- `jti` (JWT ID): 单个 token 的唯一 ID，用于黑名单撤销
+- `roles`: 用户角色数组，预留 RBAC 扩展
+- `iat` (Issued At): 签发时间戳
+- `nbf` (Not Before): 生效时间戳
+- `exp` (Expiration): 过期时间戳
+
+**签名算法**
+
+- 如果使用对称加密（HMAC），必须采用 HS256 或更高强度算法。
+- 密钥必须足够长且随机（至少 256 bit）。
+- 更正式的方案推荐使用非对称算法（RS256 / EdDSA），服务端私钥签发，网关或资源服务用公钥验证。
+
+---
+
+### 6.2 Refresh Token 机制
+
+**PFH 必须采用 Refresh Token 机制，不得使用单 Token 方案。**
+
+单 Token 方案在登出和泄漏控制上都比较弱；既然后续已经预留 Redis，就应将 `jti` 黑名单和 `sid` 会话撤销设计进去。
+
+**Token 格式**
+
+- Refresh Token 推荐使用**不透明随机字符串**，不要用 JWT。
+- 长度至少 32 字节，使用密码学安全的随机生成器（如 `/dev/urandom`、`std::random_device`）。
+
+**有效期**
+
+- 普通登录：7-30 天
+- 可按"记住我"选项调整为更长时间（如 90 天）
+
+**存储规则**
+
+- 服务端**只存 Refresh Token 的哈希值**，不存明文。
+- 推荐使用 SHA256 或更强的哈希算法。
+- 数据库表结构示例：
+
+```sql
+CREATE TABLE refresh_tokens (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id),
+    token_hash VARCHAR(64) NOT NULL UNIQUE,
+    session_id VARCHAR(64) NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    revoked_at TIMESTAMPTZ,
+    INDEX (user_id, session_id),
+    INDEX (expires_at)
+);
+```
+
+**Refresh Token 轮换 (Rotation)**
+
+每次刷新时执行 Refresh Token 轮换，增强安全性：
+
+1. 客户端提交旧 refresh token
+2. 服务端验证旧 token 有效且未作废
+3. 作废旧 refresh token（设置 `revoked_at`）
+4. 签发新 refresh token 和新 access token
+5. 返回新 token 对给客户端
+
+**泄漏检测**
+
+如果检测到已作废的 refresh token 被再次使用，说明可能发生了 token 泄漏：
+
+- 立即撤销整个 `sid` 或 token family
+- 记录安全事件到 `audit_logs`
+- 可选：通知用户异常登录
+
+---
+
+### 6.3 Redis 黑名单机制
+
+**Access Token 黑名单**
+
+登出时：
+
+1. 删除或标记该 `sid` 对应的 refresh token 记录
+2. 将当前 access token 的 `jti` 加入 Redis 黑名单
+3. TTL 设置为 `access_token.exp - now`（自动过期清理）
+
+Redis Key 设计：
+
+```
+jwt:deny:pfh-api:<jti>
+```
+
+**注意事项**
+
+- 不建议用原始 JWT 或 JWT hash 当黑名单 key，直接用 `iss + jti` 更清晰。
+- 黑名单只需存在性检查，value 可以为空字符串或撤销时间戳。
+- 每次验证 JWT 时，必须先检查 `jti` 是否在黑名单中。
+
+**Session 撤销**
+
+撤销整个 `sid` 时：
+
+```
+jwt:revoke:sid:<sessionId>
+```
+
+所有包含该 `sid` 的 access token 均视为无效，即使未单独加入黑名单。
+
+---
+
+### 6.4 JwtFilter 规则
+
+**放行路径**
+
+以下接口无需 JWT 验证：
+
+- 登录：`POST /api/v1/auth/login`
+- 注册：`POST /api/v1/auth/register`
+- 刷新 token：`POST /api/v1/auth/refresh`
+- 公开资源（如货币元数据）：`GET /api/v1/currencies`
+
+**验证流程**
+
+其他接口统一要求：
+
+```
+Authorization: Bearer <access_token>
+```
+
+验证步骤：
+
+1. 提取 Bearer token
+2. 验证签名
+3. 检查 `exp` 是否过期
+4. 检查 `nbf` 是否生效
+5. 验证 `iss` 和 `aud` 是否匹配
+6. 检查 `jti` 是否在 Redis 黑名单中
+7. 检查 `sid` 是否被撤销
+8. 将 `sub` (userId) 注入到请求上下文
+
+**校验失败统一返回**
+
+状态码：`401 Unauthorized`
+
+响应体：
+
+```json
+{
+  "code": "UNAUTHORIZED",
+  "message": "Invalid or expired access token",
+  "path": "/api/v1/...",
+  "timestamp": "2026-06-25T..."
+}
+```
+
+**安全原则**
+
+- 不要把 token 解析失败的具体原因暴露得太细，比如"签名错误""密钥不匹配"。
+- 统一使用 `Invalid or expired access token` 等模糊描述。
+- 避免泄露签名算法、密钥位置、解析器版本等内部信息。
+
+---
+
+### 6.5 密钥配置
+
+**环境变量注入**
+
+JWT Secret / 私钥**绝对不得**写在代码或普通配置文件中。
+
+必须使用环境变量，例如：
+
+```bash
+PFH_JWT_SECRET=<强随机密钥>
+PFH_PASSWORD_PEPPER=<可选 pepper>
+```
+
+**密钥强度要求**
+
+- 如果使用 HMAC（HS256），密钥必须至少 256 bit（32 字节），且由密码学安全的随机生成器生成。
+- 更正式的方案可以用 RS256 / EdDSA：
+  - 服务端私钥签发
+  - 网关或资源服务用公钥验证
+  - 私钥妥善保管，定期轮换
+
+**密钥轮换**
+
+- 支持多版本密钥共存，验证时尝试所有活跃密钥。
+- 签发时使用最新密钥。
+- 逐步淘汰旧密钥，确保所有使用旧密钥签发的 token 过期后再彻底移除。
+
+---
+
+### 6.6 认证接口设计
+
+**登录**
+
+```
+POST /api/v1/auth/login
+```
+
+请求：
+
+```json
+{
+  "username": "user@example.com",
+  "password": "plaintext-password"
+}
+```
+
+响应（200 OK）：
+
+```json
+{
+  "accessToken": "eyJhbGc...",
+  "refreshToken": "random-opaque-string",
+  "expiresIn": 900,
+  "tokenType": "Bearer"
+}
+```
+
+**刷新 Token**
+
+```
+POST /api/v1/auth/refresh
+```
+
+请求：
+
+```json
+{
+  "refreshToken": "random-opaque-string"
+}
+```
+
+响应（200 OK）：
+
+```json
+{
+  "accessToken": "eyJhbGc...",
+  "refreshToken": "new-random-opaque-string",
+  "expiresIn": 900,
+  "tokenType": "Bearer"
+}
+```
+
+**登出**
+
+```
+POST /api/v1/auth/logout
+```
+
+请求头：
+
+```
+Authorization: Bearer <access_token>
+```
+
+请求体：
+
+```json
+{
+  "refreshToken": "random-opaque-string"
+}
+```
+
+响应：`204 No Content`
+
+服务端操作：
+
+1. 验证 access token，提取 `jti` 和 `sid`
+2. 将 `jti` 加入 Redis 黑名单
+3. 作废数据库中对应的 refresh token
+4. 写入审计日志
+
+---
+
+## 7. 安全与防御性边界提示
 
 1. **大数损失防御**：在 JSON 反序列化时，**严禁**允许前端将金额作为数字类型传输（如 `"amount": 45.12` 会因 JsonCpp 内部转为 double 导致二进制精度丢失）。所有金额输入和输出，在 JSON 中**必须映射为纯字符串**（如 `"amount": "45.12"`）。
 2. **越权防御**：在 `CreateTransferUseCase` 中，读取账户后，必须在应用层强校验 `account.getUserId() == currentUserId`。严禁仅凭前端传入的 `sourceAccountId` 就盲目扣款。
 3. **频率限制预留**：对于创建流水和转账接口，后续可在路由宏上挂载 `RateLimiterFilter`，防止前端异常重试导致的表爆满。
+4. **密钥隔离**：所有敏感密钥（JWT Secret、Password Pepper、数据库密码）必须通过环境变量注入，绝不写入代码或配置文件。
+5. **Token 泄漏防御**：采用 Refresh Token 轮换机制，检测到旧 token 重用时立即撤销整个会话。
+6. **黑名单自动清理**：Redis 黑名单 key 必须设置 TTL，避免内存泄漏。
