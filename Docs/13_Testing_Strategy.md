@@ -203,6 +203,7 @@ unit tests
 repository integration tests
 api smoke tests
 format/lint check
+markdownlint check
 ```
 
 合并阻断规则：
@@ -211,6 +212,7 @@ format/lint check
 2. Domain Layer 覆盖率低于目标禁止合并
 3. Dangerous Delete、Transfer、ExchangeRate 相关测试失败禁止合并
 4. 新增 API 必须包含成功路径和至少一个错误路径测试
+5. 文档必须通过 `markdownlint` 校验，且每个设计文档的 `Version` 字段旁必须注明对应的代码 Tag 或 Git Commit Hash（例如 `Version: 1.0 (Aligns with Commit #a1b2c3d)`），确保文档与代码版本双向关联。
 
 ---
 
