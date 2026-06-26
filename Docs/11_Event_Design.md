@@ -215,7 +215,7 @@ public:
 
 ### 4.2 事务完成后的自动派发
 
-在基础设施层（Drogon UoW 实现）拦截 Commit 状态。
+在基础设施层（Drogon UoW 实现）拦截 Commit 状态。必须确保事件派发逻辑紧跟在**数据库连接真正 Commit 成功**的物理动作之后，而不是仅仅在 `action()` 返回 `has_value()` 时。
 
 ```cpp
 // infrastructure/persistence/DrogonUnitOfWork.cpp (改造片段)
@@ -244,22 +244,30 @@ public:
         auto result = action();
 
         if (result.has_value()) {
-            // 这里 Drogon 的 trans 析构会自动 commit，如果你显式 commit 可以放这里
-
-            // 事务执行成功，派发所有暂存的事件！
-            for (const auto& ev : pendingEvents_) {
-                eventBus_->publish(ev);
+            // 显式提交事务，并捕获物理提交结果
+            try {
+                // 假设 Drogon 事务对象支持显式 commit()
+                // 只有在底层连接真正 Commit 成功后，才派发事件
+                trans->commit(); 
+                
+                for (const auto& ev : pendingEvents_) {
+                    eventBus_->publish(ev);
+                }
+                pendingEvents_.clear();
+                return {};
+            } catch (const std::exception& e) {
+                LOG_ERROR << "Transaction commit failed physically: " << e.what();
+                pendingEvents_.clear();
+                return std::unexpected(RepositoryError{RepositoryStatus::DatabaseError, "Physical commit failed"});
             }
-            pendingEvents_.clear();
-            return {};
         } else {
-            // 回滚，直接丢弃暂存的事件
+            // 显式回滚，直接丢弃暂存的事件
+            trans->rollback();
             pendingEvents_.clear();
             return std::unexpected(result.error());
         }
     }
 };
-
 ```
 
 ---
