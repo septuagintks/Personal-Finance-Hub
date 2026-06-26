@@ -116,15 +116,15 @@ API Test 启动测试版 Drogon App，使用测试数据库。
 
 错误映射必须覆盖：
 
-| 场景 | 期望状态码 |
-| --- | --- |
-| JSON 非法 | 400 |
-| 未登录 | 401 |
-| 访问其他用户资源 | 403 |
-| 账户不存在 | 404 |
-| 重复分类名或版本冲突 | 409 |
-| 转账金额不平衡 | 422 |
-| 数据库故障 | 500 |
+| 场景                 | 期望状态码 |
+| -------------------- | ---------- |
+| JSON 非法            | 400        |
+| 未登录               | 401        |
+| 访问其他用户资源     | 403        |
+| 账户不存在           | 404        |
+| 重复分类名或版本冲突 | 409        |
+| 转账金额不平衡       | 422        |
+| 数据库故障           | 500        |
 
 金额字段规则：
 
@@ -180,12 +180,12 @@ DangerousDeleteAccount_WhenConfirmed_CleansDataAndWritesAuditLog
 
 建议覆盖率目标：
 
-| Layer | Target |
-| --- | --- |
-| Domain Layer | >= 90% |
-| Application Layer | >= 80% |
+| Layer                | Target |
+| -------------------- | ------ |
+| Domain Layer         | >= 90% |
+| Application Layer    | >= 80% |
 | Infrastructure Layer | >= 60% |
-| Presentation Layer | >= 60% |
+| Presentation Layer   | >= 60% |
 
 覆盖率不是唯一目标。
 金融核心规则、错误路径、事务回滚路径必须优先于机械覆盖率。

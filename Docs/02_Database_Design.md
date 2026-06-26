@@ -242,15 +242,15 @@ Indexes:
 
 默认子分类：
 
-| type | 默认 subtype 示例 | 默认 category |
-| --- | --- | --- |
-| cash | 现金、零钱包、备用金 | asset |
-| savings | 银行卡、借记卡、活期账户、定期账户 | asset |
-| credit | 信用卡、花呗、京东白条、借贷账户 | liability |
-| digital_wallet | 支付宝、微信支付、PayPal、Apple Pay | asset |
-| investment | 股票账户、基金账户、券商账户、养老金账户 | asset |
-| crypto | 比特币、以太坊、交易所账户、硬件钱包 | asset |
-| other | 自定义 | asset |
+| type           | 默认 subtype 示例                        | 默认 category |
+| -------------- | ---------------------------------------- | ------------- |
+| cash           | 现金、零钱包、备用金                     | asset         |
+| savings        | 银行卡、借记卡、活期账户、定期账户       | asset         |
+| credit         | 信用卡、花呗、京东白条、借贷账户         | liability     |
+| digital_wallet | 支付宝、微信支付、PayPal、Apple Pay      | asset         |
+| investment     | 股票账户、基金账户、券商账户、养老金账户 | asset         |
+| crypto         | 比特币、以太坊、交易所账户、硬件钱包     | asset         |
+| other          | 自定义                                   | asset         |
 
 余额允许为负数。
 总资产/净值统计按所有账户余额折算到用户基准货币后直接求和，负数余额自然抵减总额。
@@ -401,15 +401,15 @@ Indexes:
 
 预设二级分类只在必要时创建，例如：
 
-| board | 一级分类 | 二级分类示例 |
-| --- | --- | --- |
-| expense | 餐饮 | 早餐、午餐、晚餐、咖啡、外卖、聚餐 |
-| expense | 日常 | 水费、电费、燃气费、物业费、生活用品 |
-| expense | 交通 | 地铁、公交、打车、加油、停车 |
-| expense | 财务 | 手续费、利息支出、汇兑损耗 |
-| income | 工资 | 基本工资、绩效、补贴 |
-| income | 投资 | 股息、基金收益、利息、卖出收益 |
-| income | 红包 | 亲友红包、平台红包 |
+| board   | 一级分类 | 二级分类示例                         |
+| ------- | -------- | ------------------------------------ |
+| expense | 餐饮     | 早餐、午餐、晚餐、咖啡、外卖、聚餐   |
+| expense | 日常     | 水费、电费、燃气费、物业费、生活用品 |
+| expense | 交通     | 地铁、公交、打车、加油、停车         |
+| expense | 财务     | 手续费、利息支出、汇兑损耗           |
+| income  | 工资     | 基本工资、绩效、补贴                 |
+| income  | 投资     | 股息、基金收益、利息、卖出收益       |
+| income  | 红包     | 亲友红包、平台红包                   |
 
 规则：
 
@@ -587,26 +587,28 @@ updated_at TIMESTAMPTZ NOT NULL
 当高并发写入事务（或多笔流水同时并发导入）时，若不加控制地更新 `account_balance_cache`，极易发生**死锁（Deadlock）**或**数据不一致**。
 
 1. **悲观锁防死锁策略**：在涉及余额变动的事务中（如记账、转账、导入），必须在事务开始时对**聚合根（Account）**加锁。
-   * **规则 1**：始终通过 `SELECT ... FOR UPDATE` 锁住 `accounts` 表，而不是直接锁缓存表。
-   * **规则 2**：跨账户转账时，必须按 `account_id` 升序加锁。例如，账户 `3` 向账户 `1` 转账，加锁顺序必须是：先锁 `1`，再锁 `3`。这能从根本上消除死锁环路。
+   - **规则 1**：始终通过 `SELECT ... FOR UPDATE` 锁住 `accounts` 表，而不是直接锁缓存表。
+   - **规则 2**：跨账户转账时，必须按 `account_id` 升序加锁。例如，账户 `3` 向账户 `1` 转账，加锁顺序必须是：先锁 `1`，再锁 `3`。这能从根本上消除死锁环路。
 2. **缓存更新排他锁**：在 Repository 层通过数据库排他性语句更新，确保并发写入下的账目准确。
 
 ### 9.2 缓存自愈机制 (Self-Healing)
 
 由于缓存可能因非正常渠道修改而失效，设计一个**双向校验与自愈服务**：
+
 1. **触发时机**：
-   * 每日凌晨由 `Scheduler` 触发定时对账任务。
-   * 用户在前端点击“重建账户余额”按钮。
-   * 系统检测到 `source_version` 异常不连续时。
+   - 每日凌晨由 `Scheduler` 触发定时对账任务。
+   - 用户在前端点击“重建账户余额”按钮。
+   - 系统检测到 `source_version` 异常不连续时。
 2. **自愈逻辑**：
+
    ```sql
    -- 1. 计算真实的流水聚合余额
-   SELECT COALESCE(SUM(CASE WHEN type = 'income' THEN amount 
-                            WHEN type = 'expense' THEN -amount 
+   SELECT COALESCE(SUM(CASE WHEN type = 'income' THEN amount
+                            WHEN type = 'expense' THEN -amount
                             ELSE 0 END), 0) AS real_balance,
           MAX(id) AS max_tx_id,
           COALESCE(MAX(version), 0) AS max_version
-   FROM transactions 
+   FROM transactions
    WHERE account_id = $1 AND deleted_at IS NULL;
 
    -- 2. 强制覆盖更新缓存表
@@ -652,12 +654,12 @@ CHECK (precision >= 0 AND precision <= 12)
 示例：
 
 | code | symbol | precision | display_name | is_crypto |
-| --- | --- | --- | --- | --- |
-| USD | $ | 2 | US Dollar | false |
-| CNY | ¥ | 2 | Chinese Yuan | false |
-| EUR | € | 2 | Euro | false |
-| JPY | ¥ | 0 | Japanese Yen | false |
-| BTC | ₿ | 8 | Bitcoin | true |
+| ---- | ------ | --------- | ------------ | --------- |
+| USD  | $      | 2         | US Dollar    | false     |
+| CNY  | ¥      | 2         | Chinese Yuan | false     |
+| EUR  | €      | 2         | Euro         | false     |
+| JPY  | ¥      | 0         | Japanese Yen | false     |
+| BTC  | ₿      | 8         | Bitcoin      | true      |
 
 规则：
 
@@ -1108,6 +1110,7 @@ flyway migrate
 ```
 
 **优势**：
+
 - 与应用代码解耦
 - 支持独立运维
 - 适合容器化部署（在应用容器启动前运行 init 容器）
@@ -1123,22 +1126,22 @@ flyway migrate
 
 class MigrationRunner {
 public:
-    static bool runMigrations(const std::string& dbUrl, 
+    static bool runMigrations(const std::string& dbUrl,
                               const std::string& dbUser,
                               const std::string& dbPassword) {
         // 设置环境变量
         setenv("FLYWAY_URL", dbUrl.c_str(), 1);
         setenv("FLYWAY_USER", dbUser.c_str(), 1);
         setenv("FLYWAY_PASSWORD", dbPassword.c_str(), 1);
-        
+
         // 执行 Flyway
         int result = system("flyway migrate");
-        
+
         if (result != 0) {
             LOG_ERROR << "Database migration failed with code " << result;
             return false;
         }
-        
+
         LOG_INFO << "Database migration completed successfully";
         return true;
     }
@@ -1155,7 +1158,7 @@ int main() {
         LOG_FATAL << "Failed to migrate database, aborting startup";
         return 1;
     }
-    
+
     // 2. 启动 Drogon 应用
     drogon::app().addListener("0.0.0.0", 8080);
     drogon::app().run();
@@ -1164,10 +1167,12 @@ int main() {
 ```
 
 **优势**：
+
 - 应用启动自动执行迁移
 - 适合开发环境
 
 **劣势**：
+
 - 需要在运行环境安装 Flyway CLI
 - 应用无法控制迁移细节
 
@@ -1200,7 +1205,7 @@ project/
 
 ## 23.4 迁移脚本示例
 
-### V1__initial_schema.sql
+### V1\_\_initial_schema.sql
 
 ```sql
 -- Version 1: Initial Schema
@@ -1266,7 +1271,7 @@ CREATE INDEX idx_transactions_time ON transactions(transaction_time);
 -- ... 其他表 ...
 ```
 
-### V2__add_user_preferences.sql
+### V2\_\_add_user_preferences.sql
 
 ```sql
 -- Version 2: User Preferences
@@ -1298,7 +1303,7 @@ FROM users
 ON CONFLICT (user_id) DO NOTHING;
 ```
 
-### V3__add_refresh_tokens.sql
+### V3\_\_add_refresh_tokens.sql
 
 ```sql
 -- Version 3: Refresh Tokens
@@ -1343,7 +1348,7 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-      
+
       - name: Run database migrations
         env:
           FLYWAY_URL: ${{ secrets.DB_URL }}
@@ -1351,7 +1356,7 @@ jobs:
           FLYWAY_PASSWORD: ${{ secrets.DB_PASSWORD }}
         run: |
           flyway migrate
-      
+
       - name: Deploy application
         run: |
           docker-compose up -d app

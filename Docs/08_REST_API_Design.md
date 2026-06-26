@@ -36,7 +36,7 @@ Architecture: Clean Architecture (Presentation Layer)
 | **找不到资源 (NotFound)**                    | `404 Not Found`             | 账户、流水或分类 ID 不存在               |
 | **冲突 (Conflict)**                          | `409 Conflict`              | 重复分类名、版本冲突、重复提交           |
 | **违反金融业务规则 (DomainRuleViolation)**   | `422 Unprocessable Entity`  | 账户已归档、跨币种金额不平衡、汇率非法   |
-| **外部服务失败 (ExternalServiceError)**       | `502 Bad Gateway`           | 汇率 API 或同步 Provider 不可用          |
+| **外部服务失败 (ExternalServiceError)**      | `502 Bad Gateway`           | 汇率 API 或同步 Provider 不可用          |
 | **系统级故障 (InfrastructureFailure)**       | `500 Internal Server Error` | 数据库死锁、连接超时，前端提示“系统繁忙” |
 
 ---
@@ -171,8 +171,18 @@ Architecture: Clean Architecture (Presentation Layer)
     { "label": "Credit", "amount": "-4500.00", "percentage": "-3.7%" }
   ],
   "topExpenseCategories": [
-    { "categoryId": "12", "categoryName": "餐饮", "amount": "1200.00", "percentage": "30.8%" },
-    { "categoryId": "18", "categoryName": "交通", "amount": "650.00", "percentage": "16.7%" }
+    {
+      "categoryId": "12",
+      "categoryName": "餐饮",
+      "amount": "1200.00",
+      "percentage": "30.8%"
+    },
+    {
+      "categoryId": "18",
+      "categoryName": "交通",
+      "amount": "650.00",
+      "percentage": "16.7%"
+    }
   ],
   "reportPeriodStart": "2026-06-01",
   "reportPeriodEnd": "2026-07-01",
@@ -234,7 +244,14 @@ Architecture: Clean Architecture (Presentation Layer)
     "source": "system",
     "parentId": null,
     "children": [
-      { "id": 13, "name": "早餐", "board": "expense", "source": "system", "parentId": 12, "children": [] }
+      {
+        "id": 13,
+        "name": "早餐",
+        "board": "expense",
+        "source": "system",
+        "parentId": 12,
+        "children": []
+      }
     ]
   }
 ]
@@ -312,9 +329,27 @@ PUT /api/v1/users/me/preferences
 
 ```json
 [
-  { "code": "CNY", "symbol": "¥", "precision": 2, "displayName": "Chinese Yuan", "isCrypto": false },
-  { "code": "JPY", "symbol": "¥", "precision": 0, "displayName": "Japanese Yen", "isCrypto": false },
-  { "code": "BTC", "symbol": "₿", "precision": 8, "displayName": "Bitcoin", "isCrypto": true }
+  {
+    "code": "CNY",
+    "symbol": "¥",
+    "precision": 2,
+    "displayName": "Chinese Yuan",
+    "isCrypto": false
+  },
+  {
+    "code": "JPY",
+    "symbol": "¥",
+    "precision": 0,
+    "displayName": "Japanese Yen",
+    "isCrypto": false
+  },
+  {
+    "code": "BTC",
+    "symbol": "₿",
+    "precision": 8,
+    "displayName": "Bitcoin",
+    "isCrypto": true
+  }
 ]
 ```
 

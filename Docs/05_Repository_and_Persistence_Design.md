@@ -400,8 +400,8 @@ public:
 在高并发写入事务（或多笔流水同时并发导入）时，若不加控制地更新 `account_balance_cache`，极易发生**死锁（Deadlock）**或**数据不一致**。
 
 1. **悲观锁防死锁策略**：在涉及余额变动的事务中（如记账、转账、导入），必须在事务开始时对**聚合根（Account）**加锁。
-   * **规则 1**：始终通过 `SELECT ... FOR UPDATE` 锁住 `accounts` 表，而不是直接锁缓存表。
-   * **规则 2**：跨账户转账时，必须按 `account_id` 升序加锁。例如，账户 `3` 向账户 `1` 转账，加锁顺序必须是：先锁 `1`，再锁 `3`。这能从根本上消除死锁环路。
+   - **规则 1**：始终通过 `SELECT ... FOR UPDATE` 锁住 `accounts` 表，而不是直接锁缓存表。
+   - **规则 2**：跨账户转账时，必须按 `account_id` 升序加锁。例如，账户 `3` 向账户 `1` 转账，加锁顺序必须是：先锁 `1`，再锁 `3`。这能从根本上消除死锁环路。
 2. **缓存更新排他锁**：在 Repository 层通过数据库排他性语句更新，确保并发写入下的账目准确。
 
 ### 4.2 应用层事务接口
@@ -445,7 +445,7 @@ public:
     std::expected<void, RepositoryError> lockAccounts(AccountId fromId, AccountId toId) {
         int64_t first = std::min(fromId.value(), toId.value());
         int64_t second = std::max(fromId.value(), toId.value());
-        
+
         try {
             dbClient_->execSqlSync("SELECT id FROM accounts WHERE id = $1 FOR UPDATE", first);
             dbClient_->execSqlSync("SELECT id FROM accounts WHERE id = $2 FOR UPDATE", second);

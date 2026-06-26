@@ -47,19 +47,19 @@ struct IDomainEvent {
 
 ### 2.2.1 必备事件清单
 
-| Event | 必备字段 | 触发来源 | 典型订阅者 |
-| --- | --- | --- | --- |
-| TransactionCreated | userId, transactionId, accountId, occurredAt | CreateTransactionUseCase | BalanceCacheInvalidator, ReportCacheInvalidator |
-| TransactionDeleted | userId, transactionId, accountId, occurredAt | DeleteTransactionUseCase | BalanceCacheInvalidator, AuditLogHandler |
-| TransferCompleted | userId, transferGroupId, sourceAccountId, targetAccountId, occurredAt | CreateTransferUseCase | BalanceCacheInvalidator, ReportCacheInvalidator |
-| AccountArchived | userId, accountId, occurredAt | ArchiveAccountUseCase | DashboardCacheInvalidator, AuditLogHandler |
-| AccountDangerouslyDeleted | userId, accountId, occurredAt | DangerousDeleteAccountUseCase | AuditLogHandler, SecurityNotificationHandler |
-| CategoryCreated | userId, categoryId, board, occurredAt | CreateCategoryUseCase / InitializeDefaultCategoriesUseCase | CategoryTreeCacheInvalidator |
-| CategoryDeleted | userId, categoryId, board, occurredAt | DeleteCategoryUseCase | CategoryTreeCacheInvalidator, ReportCacheInvalidator |
-| ExchangeRateRefreshed | provider, baseCurrency, targetCurrency, fetchedAt | RefreshExchangeRateUseCase | LatestRateCacheInvalidator, AuditLogHandler |
-| SyncCompleted | userId, provider, syncJobId, importedCount, skippedCount, occurredAt | RunSyncJobUseCase | ReconciliationJob, AuditLogHandler |
-| UserPreferenceUpdated | userId, occurredAt | UpdateUserPreferenceUseCase | FrontendPreferenceCacheInvalidator, ReportCacheInvalidator |
-| AuditLogRecorded | auditLogId, operatorUserId, action, resourceType, occurredAt | AuditLogHandler | SecurityNotificationHandler |
+| Event                     | 必备字段                                                              | 触发来源                                                   | 典型订阅者                                                 |
+| ------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------- |
+| TransactionCreated        | userId, transactionId, accountId, occurredAt                          | CreateTransactionUseCase                                   | BalanceCacheInvalidator, ReportCacheInvalidator            |
+| TransactionDeleted        | userId, transactionId, accountId, occurredAt                          | DeleteTransactionUseCase                                   | BalanceCacheInvalidator, AuditLogHandler                   |
+| TransferCompleted         | userId, transferGroupId, sourceAccountId, targetAccountId, occurredAt | CreateTransferUseCase                                      | BalanceCacheInvalidator, ReportCacheInvalidator            |
+| AccountArchived           | userId, accountId, occurredAt                                         | ArchiveAccountUseCase                                      | DashboardCacheInvalidator, AuditLogHandler                 |
+| AccountDangerouslyDeleted | userId, accountId, occurredAt                                         | DangerousDeleteAccountUseCase                              | AuditLogHandler, SecurityNotificationHandler               |
+| CategoryCreated           | userId, categoryId, board, occurredAt                                 | CreateCategoryUseCase / InitializeDefaultCategoriesUseCase | CategoryTreeCacheInvalidator                               |
+| CategoryDeleted           | userId, categoryId, board, occurredAt                                 | DeleteCategoryUseCase                                      | CategoryTreeCacheInvalidator, ReportCacheInvalidator       |
+| ExchangeRateRefreshed     | provider, baseCurrency, targetCurrency, fetchedAt                     | RefreshExchangeRateUseCase                                 | LatestRateCacheInvalidator, AuditLogHandler                |
+| SyncCompleted             | userId, provider, syncJobId, importedCount, skippedCount, occurredAt  | RunSyncJobUseCase                                          | ReconciliationJob, AuditLogHandler                         |
+| UserPreferenceUpdated     | userId, occurredAt                                                    | UpdateUserPreferenceUseCase                                | FrontendPreferenceCacheInvalidator, ReportCacheInvalidator |
+| AuditLogRecorded          | auditLogId, operatorUserId, action, resourceType, occurredAt          | AuditLogHandler                                            | SecurityNotificationHandler                                |
 
 命名规则：
 

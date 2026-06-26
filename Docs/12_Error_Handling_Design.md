@@ -41,17 +41,17 @@ enum class ErrorKind
 
 语义：
 
-| ErrorKind | 含义 | 示例 |
-| --- | --- | --- |
-| ValidationError | 请求格式或字段基础校验失败 | amount 不是字符串、缺少 accountId |
-| DomainRuleViolation | 字段格式正确，但违反业务规则 | 转账金额不平衡、账户已归档 |
-| NotFound | 资源不存在或不属于当前用户 | accountId 不存在 |
-| AuthenticationError | 未登录或 token 失效 | JWT 过期 |
-| AuthorizationError | 已登录但无权限 | 访问其他用户账户 |
-| Conflict | 资源版本冲突或唯一约束冲突 | 重复分类名、乐观锁版本不一致 |
-| ExternalServiceError | 外部服务不可用或返回非法数据 | 汇率 API 超时 |
-| DatabaseError | 数据库连接、事务、约束等故障 | deadlock、connection lost |
-| InternalError | 未分类的系统内部错误 | 未预期异常 |
+| ErrorKind            | 含义                         | 示例                              |
+| -------------------- | ---------------------------- | --------------------------------- |
+| ValidationError      | 请求格式或字段基础校验失败   | amount 不是字符串、缺少 accountId |
+| DomainRuleViolation  | 字段格式正确，但违反业务规则 | 转账金额不平衡、账户已归档        |
+| NotFound             | 资源不存在或不属于当前用户   | accountId 不存在                  |
+| AuthenticationError  | 未登录或 token 失效          | JWT 过期                          |
+| AuthorizationError   | 已登录但无权限               | 访问其他用户账户                  |
+| Conflict             | 资源版本冲突或唯一约束冲突   | 重复分类名、乐观锁版本不一致      |
+| ExternalServiceError | 外部服务不可用或返回非法数据 | 汇率 API 超时                     |
+| DatabaseError        | 数据库连接、事务、约束等故障 | deadlock、connection lost         |
+| InternalError        | 未分类的系统内部错误         | 未预期异常                        |
 
 ---
 
@@ -59,17 +59,17 @@ enum class ErrorKind
 
 Presentation 层统一映射：
 
-| ErrorKind | HTTP Status |
-| --- | --- |
-| ValidationError | 400 Bad Request |
-| AuthenticationError | 401 Unauthorized |
-| AuthorizationError | 403 Forbidden |
-| NotFound | 404 Not Found |
-| Conflict | 409 Conflict |
-| DomainRuleViolation | 422 Unprocessable Entity |
-| ExternalServiceError | 502 Bad Gateway |
-| DatabaseError | 500 Internal Server Error |
-| InternalError | 500 Internal Server Error |
+| ErrorKind            | HTTP Status               |
+| -------------------- | ------------------------- |
+| ValidationError      | 400 Bad Request           |
+| AuthenticationError  | 401 Unauthorized          |
+| AuthorizationError   | 403 Forbidden             |
+| NotFound             | 404 Not Found             |
+| Conflict             | 409 Conflict              |
+| DomainRuleViolation  | 422 Unprocessable Entity  |
+| ExternalServiceError | 502 Bad Gateway           |
+| DatabaseError        | 500 Internal Server Error |
+| InternalError        | 500 Internal Server Error |
 
 错误响应格式：
 
@@ -173,11 +173,11 @@ struct RepositoryError
 映射规则：
 
 | RepositoryStatus | UseCaseError / ErrorKind |
-| --- | --- |
-| NotFound | NotFound |
-| ValidationError | ValidationError |
-| Conflict | Conflict |
-| DatabaseError | DatabaseError |
+| ---------------- | ------------------------ |
+| NotFound         | NotFound                 |
+| ValidationError  | ValidationError          |
+| Conflict         | Conflict                 |
+| DatabaseError    | DatabaseError            |
 
 ---
 
@@ -267,7 +267,7 @@ void setupGlobalExceptionHandler() {
 // 应用启动时调用
 int main() {
     setupGlobalExceptionHandler();
-    
+
     drogon::app().addListener("0.0.0.0", 8080);
     drogon::app().run();
     return 0;
@@ -292,11 +292,11 @@ std::string generateTraceId() {
     auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
         now.time_since_epoch()
     ).count();
-    
+
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_int_distribution<> dis(1000, 9999);
-    
+
     return "trace-" + std::to_string(timestamp) + "-" + std::to_string(dis(gen));
 }
 ```
@@ -314,16 +314,16 @@ std::expected<Account, RepositoryError> AccountRepositoryImpl::findById(int64_t 
         auto result = dbClient_->execSqlSync(
             "SELECT * FROM accounts WHERE id = $1", id
         );
-        
+
         if (result.empty()) {
             return std::unexpected(RepositoryError{
-                RepositoryStatus::NotFound, 
+                RepositoryStatus::NotFound,
                 "Account not found"
             });
         }
-        
+
         return mapToAccount(result[0]);
-        
+
     } catch (const drogon::orm::DrogonDbException& e) {
         LOG_ERROR << "Database exception in findById: " << e.base().what();
         return std::unexpected(RepositoryError{
@@ -351,7 +351,7 @@ std::expected<void, UseCaseError> CreateTransferUseCase::execute(const TransferI
     if (!sourceAccount) {
         return std::unexpected(UseCaseError::AccountNotFound);
     }
-    
+
     // ... 业务逻辑
 }
 ```
@@ -384,7 +384,7 @@ void TransferController::createTransfer(
 
         // 4. 成功响应
         callback(drogon::HttpResponse::newHttpJsonResponse(successBody));
-        
+
     } catch (const std::exception& e) {
         // 这里不应该到达，但作为安全边界
         // 全局异常处理器会兜底

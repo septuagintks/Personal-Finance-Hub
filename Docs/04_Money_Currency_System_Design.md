@@ -186,13 +186,13 @@ private:
 
 示例：
 
-| code | symbol | precision | displayName | isCrypto |
-| --- | --- | --- | --- | --- |
-| USD | $ | 2 | US Dollar | false |
-| CNY | ¥ | 2 | Chinese Yuan | false |
-| JPY | ¥ | 0 | Japanese Yen | false |
-| BTC | ₿ | 8 | Bitcoin | true |
-| ETH | Ξ | 8 | Ethereum | true |
+| code | symbol | precision | displayName  | isCrypto |
+| ---- | ------ | --------- | ------------ | -------- |
+| USD  | $      | 2         | US Dollar    | false    |
+| CNY  | ¥      | 2         | Chinese Yuan | false    |
+| JPY  | ¥      | 0         | Japanese Yen | false    |
+| BTC  | ₿      | 8         | Bitcoin      | true     |
+| ETH  | Ξ      | 8         | Ethereum     | true     |
 
 规则：
 
