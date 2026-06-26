@@ -386,15 +386,15 @@ enum class AccountCategory
 
 默认子分类示例：
 
-| AccountType | 默认子分类 |
-| --- | --- |
-| Savings | 银行卡、借记卡、活期账户、定期账户 |
-| Credit | 信用卡、花呗、京东白条、借贷账户 |
-| DigitalWallet | 支付宝、微信支付、PayPal、Apple Pay |
-| Investment | 股票账户、基金账户、券商账户、养老金账户 |
-| Cash | 现金、零钱包、备用金 |
-| Crypto | 比特币、以太坊、交易所账户、硬件钱包 |
-| Other | 自定义 |
+| AccountType   | 默认子分类                               |
+| ------------- | ---------------------------------------- |
+| Savings       | 银行卡、借记卡、活期账户、定期账户       |
+| Credit        | 信用卡、花呗、京东白条、借贷账户         |
+| DigitalWallet | 支付宝、微信支付、PayPal、Apple Pay      |
+| Investment    | 股票账户、基金账户、券商账户、养老金账户 |
+| Cash          | 现金、零钱包、备用金                     |
+| Crypto        | 比特币、以太坊、交易所账户、硬件钱包     |
+| Other         | 自定义                                   |
 
 行为规则：
 
@@ -512,14 +512,14 @@ enum class CategoryBoard
 
 支出板块默认二级分类示例：
 
-| 一级分类 | 默认二级分类示例 |
-| --- | --- |
-| 餐饮 | 早餐、午餐、晚餐、咖啡、外卖、聚餐 |
-| 日常 | 水费、电费、燃气费、物业费、生活用品、维修 |
-| 交通 | 地铁、公交、打车、加油、停车、高铁、机票 |
-| 医疗 | 挂号、药品、体检、保险、牙科 |
-| 娱乐 | 电影、游戏、会员订阅、演出 |
-| 财务 | 手续费、利息支出、汇兑损耗 |
+| 一级分类 | 默认二级分类示例                           |
+| -------- | ------------------------------------------ |
+| 餐饮     | 早餐、午餐、晚餐、咖啡、外卖、聚餐         |
+| 日常     | 水费、电费、燃气费、物业费、生活用品、维修 |
+| 交通     | 地铁、公交、打车、加油、停车、高铁、机票   |
+| 医疗     | 挂号、药品、体检、保险、牙科               |
+| 娱乐     | 电影、游戏、会员订阅、演出                 |
+| 财务     | 手续费、利息支出、汇兑损耗                 |
 
 收入板块默认一级分类：
 
@@ -529,14 +529,14 @@ enum class CategoryBoard
 
 收入板块默认二级分类示例：
 
-| 一级分类 | 默认二级分类示例 |
-| --- | --- |
-| 工资 | 基本工资、绩效、补贴 |
-| 奖金 | 年终奖、项目奖金 |
-| 投资 | 股息、基金收益、利息、卖出收益 |
-| 兼职 | 劳务收入、咨询收入 |
-| 副业 | 店铺收入、内容收入 |
-| 红包 | 亲友红包、平台红包 |
+| 一级分类 | 默认二级分类示例               |
+| -------- | ------------------------------ |
+| 工资     | 基本工资、绩效、补贴           |
+| 奖金     | 年终奖、项目奖金               |
+| 投资     | 股息、基金收益、利息、卖出收益 |
+| 兼职     | 劳务收入、咨询收入             |
+| 副业     | 店铺收入、内容收入             |
+| 红包     | 亲友红包、平台红包             |
 
 `红包` 在可选分类池中归入 `财务` 大类，但收入板块可以直接把它作为一级分类。
 
@@ -781,6 +781,7 @@ Examples:
 
 Fee or FX loss must be modeled as a standalone Adjustment transaction, or an explicit Expense category.
 It must not be folded into outgoing or incoming transfer amount.
+
 - FX Loss
 - FX Gain
 
@@ -1128,19 +1129,19 @@ Application Use Case 负责：
 
 必备事件清单：
 
-| Event | 触发时机 | 主要用途 |
-| --- | --- | --- |
-| TransactionCreated | 单笔收入、支出、调整流水创建成功 | 失效余额缓存、刷新报表缓存 |
-| TransactionDeleted | 流水软删除或危险删除成功 | 失效余额缓存、写审计 |
-| TransferCompleted | TransferAggregate 完整落盘成功 | 失效两个账户余额缓存、刷新报表缓存 |
-| AccountArchived | 账户归档成功 | 刷新 Dashboard 和账户列表 |
-| AccountDangerouslyDeleted | 账户危险删除成功 | 写高危审计、预警 |
-| CategoryCreated | 用户新增或启用分类 | 刷新分类树缓存 |
-| CategoryDeleted | 用户删除分类 | 保持历史流水展示兼容 |
-| ExchangeRateRefreshed | 新汇率快照插入成功 | 失效最新汇率缓存 |
-| SyncCompleted | 同步任务完成 | 写同步结果、触发对账 |
-| UserPreferenceUpdated | 用户偏好修改成功 | 刷新前端配置和报表默认参数 |
-| AuditLogRecorded | 审计日志写入成功 | 可选的安全通知扩展 |
+| Event                     | 触发时机                         | 主要用途                           |
+| ------------------------- | -------------------------------- | ---------------------------------- |
+| TransactionCreated        | 单笔收入、支出、调整流水创建成功 | 失效余额缓存、刷新报表缓存         |
+| TransactionDeleted        | 流水软删除或危险删除成功         | 失效余额缓存、写审计               |
+| TransferCompleted         | TransferAggregate 完整落盘成功   | 失效两个账户余额缓存、刷新报表缓存 |
+| AccountArchived           | 账户归档成功                     | 刷新 Dashboard 和账户列表          |
+| AccountDangerouslyDeleted | 账户危险删除成功                 | 写高危审计、预警                   |
+| CategoryCreated           | 用户新增或启用分类               | 刷新分类树缓存                     |
+| CategoryDeleted           | 用户删除分类                     | 保持历史流水展示兼容               |
+| ExchangeRateRefreshed     | 新汇率快照插入成功               | 失效最新汇率缓存                   |
+| SyncCompleted             | 同步任务完成                     | 写同步结果、触发对账               |
+| UserPreferenceUpdated     | 用户偏好修改成功                 | 刷新前端配置和报表默认参数         |
+| AuditLogRecorded          | 审计日志写入成功                 | 可选的安全通知扩展                 |
 
 ---
 

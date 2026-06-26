@@ -127,16 +127,19 @@ public:
 **三角折算公式**
 
 已知：
+
 - `EUR → USD` 汇率为 `r1`（例如 1 EUR = 1.08 USD）
 - `USD → CNY` 汇率为 `r2`（例如 1 USD = 7.18 CNY）
 
 推导 `EUR → CNY`：
+
 ```
 1 EUR = r1 USD = r1 × r2 CNY
 因此 EUR → CNY 汇率 = r1 × r2
 ```
 
 推导 `CNY → EUR`（逆向）：
+
 ```
 CNY → EUR = 1 / (r1 × r2)
 ```
@@ -150,10 +153,10 @@ CNY → EUR = 1 / (r1 × r2)
 #include <expected>
 #include "domain/value_objects/ExchangeRate.hpp"
 
-enum class CurrencyConversionError { 
-    MissingPivotRate, 
+enum class CurrencyConversionError {
+    MissingPivotRate,
     InfiniteOrZeroRate,
-    UnsupportedCurrencyPair 
+    UnsupportedCurrencyPair
 };
 
 class CurrencyConversionService {
@@ -199,7 +202,7 @@ public:
         std::optional<std::chrono::system_clock::time_point> timestamp = std::nullopt)
     {
         // 1. 尝试直接查询 Base -> Target
-        auto directRate = timestamp 
+        auto directRate = timestamp
             ? repository.getHistorical(base, target, *timestamp)
             : repository.getLatest(base, target);
 
@@ -254,8 +257,8 @@ public:
 ```cpp
 // 应用层 Use Case 中
 auto rateResult = CurrencyConversionService::findOrCalculateRate(
-    Currency("EUR"), 
-    Currency("CNY"), 
+    Currency("EUR"),
+    Currency("CNY"),
     *exchangeRateRepo_
 );
 
@@ -328,12 +331,12 @@ public:
         if (!fetchedRatesResult) {
             std::string errorMsg = "Failed to fetch rates from " + provider_->getProviderName();
             LOG_ERROR << errorMsg;
-            
+
             // 写入审计日志记录失败
-            auditRepo_->log(AuditAction::RefreshExchangeRate, "ExchangeRate", "bulk", 
-                           std::nullopt, std::nullopt, 
+            auditRepo_->log(AuditAction::RefreshExchangeRate, "ExchangeRate", "bulk",
+                           std::nullopt, std::nullopt,
                            {{"status", "failed"}, {"provider", provider_->getProviderName()}});
-            
+
             return std::unexpected(errorMsg);
         }
 
@@ -348,19 +351,19 @@ public:
         if (!saveResult) {
             std::string errorMsg = "Failed to persist exchange rates to database";
             LOG_ERROR << errorMsg;
-            
+
             auditRepo_->log(AuditAction::RefreshExchangeRate, "ExchangeRate", "bulk",
                            std::nullopt, std::nullopt,
                            {{"status", "db_failed"}, {"count", rates.size()}});
-            
+
             return std::unexpected(errorMsg);
         }
 
         // 3. 写入审计日志记录成功
         auditRepo_->log(AuditAction::RefreshExchangeRate, "ExchangeRate", "bulk",
                        std::nullopt, std::nullopt,
-                       {{"status", "success"}, 
-                        {"count", rates.size()}, 
+                       {{"status", "success"},
+                        {"count", rates.size()},
                         {"provider", provider_->getProviderName()}});
 
         LOG_INFO << "Successfully refreshed " << rates.size() << " exchange rates";
@@ -375,7 +378,9 @@ public:
 当外部 API 完全不可用时，应用层应能够使用数据库中的历史汇率作为降级方案。
 
 #### 3.2.1 多级降级查询链 (Fallback Chain)
+
 在 `CurrencyConversionService` 中，汇率换算采用责任链模式进行降级：
+
 1. **直接汇率**：尝试直接查询 Base -> Target。
 2. **逆向汇率**：尝试查询逆向汇率 Target -> Base，然后取倒数。
 3. **三角折算**：通过 USD 枢纽推导。
@@ -383,8 +388,9 @@ public:
 5. **抛出异常**：若以上均不可得，抛出 `ExchangeRateUnavailableException`。
 
 #### 3.2.2 熔断与告警机制
-* **断路器 (Circuit Breaker)**：如果外部 API 连续请求失败超过 3 次，断路器打开，在接下来的 1 小时内，调度任务不再请求外部 API，直接使用本地历史汇率，避免阻塞系统线程。
-* **事件告警**：一旦触发降级（如使用了超过 24 小时未更新的历史汇率），通过 `EventBus` 发布 `ExchangeRateDegradedEvent`，触发系统审计日志，并通过邮件/Webhook 告警通知管理员。
+
+- **断路器 (Circuit Breaker)**：如果外部 API 连续请求失败超过 3 次，断路器打开，在接下来的 1 小时内，调度任务不再请求外部 API，直接使用本地历史汇率，避免阻塞系统线程。
+- **事件告警**：一旦触发降级（如使用了超过 24 小时未更新的历史汇率），通过 `EventBus` 发布 `ExchangeRateDegradedEvent`，触发系统审计日志，并通过邮件/Webhook 告警通知管理员。
 
 ```cpp
 // application/services/ExchangeRateQueryService.hpp
@@ -474,7 +480,7 @@ public:
    - 前端展示汇率时，必须显示汇率来源和时间戳
    - 使用历史汇率时，前端应提示"使用历史汇率"
 
-```
+````
 
 ---
 
@@ -511,7 +517,7 @@ public:
     OpenExchangeRatesProvider(
         std::string apiKey,
         std::shared_ptr<ICurrencyRepository> currencyRepo)
-        : apiKey_(std::move(apiKey)), 
+        : apiKey_(std::move(apiKey)),
           baseUrl_("https://openexchangerates.org/api/"),
           currencyRepo_(currencyRepo) {}
 
@@ -525,7 +531,7 @@ public:
         }
 
         auto supportedCurrencies = *supportedCurrenciesResult;
-        
+
         // 2. 构建货币白名单（排除 USD 本身）
         std::unordered_set<std::string> targetCurrencies;
         for (const auto& currency : supportedCurrencies) {
@@ -541,7 +547,7 @@ public:
         // 3. 调用外部 API
         auto client = drogon::HttpClient::newHttpClient(baseUrl_);
         auto req = drogon::HttpRequest::newHttpRequest();
-        
+
         // OpenExchangeRates 默认返回所有货币，也可以通过 symbols 参数过滤
         // 例如：latest.json?app_id=xxx&symbols=CNY,EUR,JPY
         std::string symbols = joinCurrencies(targetCurrencies);
@@ -552,7 +558,7 @@ public:
         auto [reqResult, response] = client->sendRequest(req);
 
         if (reqResult != drogon::ReqResult::Ok || response->getStatusCode() != 200) {
-            LOG_ERROR << "Failed to fetch rates from OpenExchangeRates: " 
+            LOG_ERROR << "Failed to fetch rates from OpenExchangeRates: "
                       << static_cast<int>(reqResult);
             return std::unexpected(ProviderError::NetworkFailure);
         }
@@ -564,7 +570,7 @@ public:
         }
 
         const auto& json = *jsonPtr;
-        
+
         // OpenExchangeRates 响应格式：
         // {
         //   "disclaimer": "...",
@@ -585,7 +591,7 @@ public:
         // 5. 转换为领域对象
         std::vector<ExchangeRate> domainRates;
         auto now = std::chrono::system_clock::now();
-        
+
         // 如果 API 返回了时间戳，优先使用
         if (json.isMember("timestamp") && json["timestamp"].isInt64()) {
             auto timestamp = json["timestamp"].asInt64();
@@ -597,7 +603,7 @@ public:
 
         for (auto it = ratesJson.begin(); it != ratesJson.end(); ++it) {
             std::string targetCode = it.name();
-            
+
             // 只保留系统支持的货币
             if (targetCurrencies.find(targetCode) == targetCurrencies.end()) {
                 continue;
@@ -639,7 +645,7 @@ private:
     }
 };
 
-```
+````
 
 **汇率存储规约**
 
@@ -647,7 +653,7 @@ private:
 
 ```sql
 INSERT INTO exchange_rates (base_currency_code, target_currency_code, rate, source, fetched_at)
-VALUES 
+VALUES
   ('USD', 'CNY', 7.18, 'OpenExchangeRates', '2026-06-25 08:00:00'),
   ('USD', 'EUR', 0.92, 'OpenExchangeRates', '2026-06-25 08:00:00'),
   ('USD', 'JPY', 149.50, 'OpenExchangeRates', '2026-06-25 08:00:00');
