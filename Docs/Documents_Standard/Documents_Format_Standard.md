@@ -53,7 +53,22 @@
 
 ---
 
-## 3. 统一文档模板
+## 3. 目录与文件命名规范
+
+### 3.1 核心设计文档命名
+* **规则**：核心设计文档存放在 `Docs/` 根目录下，使用两位数字编号加下划线和英文大写单词（PascalCase 风格，单词间用下划线连接）命名。
+* **示例**：`01_Technical_Architecture.md`、`07.5_Reporting_and_Analytics_Design.md`。
+
+### 3.2 优化与修改记录文档命名
+* **规则**：已完成的优化与修改记录文档存放在 `Docs/Completed_Modifications/` 目录下。
+* **命名格式**：
+  * 正在更改/设计中的文档：必须以 `_Plan` 作为文件名后缀（如 `Documents_Optimize_3_Plan.md`）。
+  * 更改/设计完成并经评审通过的文档：**必须删掉 `_Plan` 后缀**（如 `Documents_Optimize_2.md`）。
+  * 历史已归档的修改记录：使用数字递增命名（如 `Documents_Optimize_1.md`）。
+
+---
+
+## 4. 统一文档模板
 
 所有设计文档应尽量符合以下结构模板：
 
