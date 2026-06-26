@@ -58,6 +58,12 @@ enum class TransferRuleError {
     TransferImbalance
 };
 
+enum class FeeSource {
+    SourceAccount,  // 从源账户（出账账户）扣除
+    TargetAccount,  // 从目标账户（入账账户）扣除
+    ThirdParty      // 从独立的第三方账户扣除（需额外传入 feeAccountId）
+};
+
 class TransferDomainService {
 public:
     // 核心规则：校验并构造一个转账聚合（处理出账、入账、汇率三选二推导及手续费隔离）
@@ -69,6 +75,8 @@ public:
         std::optional<Money> targetAmount,
         std::optional<Decimal> exchangeRate,
         std::optional<Money> feeAmount, // 独立的手续费调整项
+        FeeSource feeSource,            // 手续费扣除来源
+        std::optional<AccountId> feeAccountId, // 第三方手续费账户 ID
         const std::string& description
     );
 };
