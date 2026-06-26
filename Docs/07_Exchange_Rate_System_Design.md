@@ -374,6 +374,18 @@ public:
 
 当外部 API 完全不可用时，应用层应能够使用数据库中的历史汇率作为降级方案。
 
+#### 3.2.1 多级降级查询链 (Fallback Chain)
+在 `CurrencyConversionService` 中，汇率换算采用责任链模式进行降级：
+1. **直接汇率**：尝试直接查询 Base -> Target。
+2. **逆向汇率**：尝试查询逆向汇率 Target -> Base，然后取倒数。
+3. **三角折算**：通过 USD 枢纽推导。
+4. **历史降级**：寻找历史上最接近（但在此时间点之前）的汇率记录。
+5. **抛出异常**：若以上均不可得，抛出 `ExchangeRateUnavailableException`。
+
+#### 3.2.2 熔断与告警机制
+* **断路器 (Circuit Breaker)**：如果外部 API 连续请求失败超过 3 次，断路器打开，在接下来的 1 小时内，调度任务不再请求外部 API，直接使用本地历史汇率，避免阻塞系统线程。
+* **事件告警**：一旦触发降级（如使用了超过 24 小时未更新的历史汇率），通过 `EventBus` 发布 `ExchangeRateDegradedEvent`，触发系统审计日志，并通过邮件/Webhook 告警通知管理员。
+
 ```cpp
 // application/services/ExchangeRateQueryService.hpp
 #pragma once

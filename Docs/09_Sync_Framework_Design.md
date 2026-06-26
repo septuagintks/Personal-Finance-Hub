@@ -100,7 +100,71 @@ public:
 
 依据《02_Database_Design.md》的预留，我们需要一张专门的映射表 `external_transactions` 来记录“什么外部 ID 对应了什么内部流水 ID”。
 
-### 3.1 基础设施层仓储接口
+### 3.1 无唯一 ID 账单的去重与合成唯一键 (Fingerprint Hash)
+
+许多银行导出的 PDF/CSV 账单并不包含全局唯一的交易流水号（或在出入账两端的标识不同）。为了防止用户多次上传同一份 CSV 时产生重复流水，系统必须通过**合成确定性哈希（Deterministic Hash）**来生成幂等指纹 Key。
+
+#### 3.1.1 指纹合成算法设计
+定义一个标准化的指纹生成规则，消除格式、空格及大小写差异：
+1. **交易时间 (`transaction_time`)**：统一转换为 UTC 时间戳字符串（格式：`YYYY-MM-DDTHH:mm:ssZ`）。如果账单只有日期没有具体时间，则统一补零（如 `2026-06-27T00:00:00Z`）。
+2. **金额 (`amount`)**：去除正负号（由借贷方向决定，哈希只取绝对值），统一保留 8 位小数并去除末尾多余的 0（例如 `100` 和 `100.00000000` 统一标准化为 `"100"`）。
+3. **商户/对方名称 (`merchant_name`)**：去除首尾空格，全部转为小写。
+4. **账户 ID (`account_id`)**：引入内部账户 ID 防止跨账户的相同交易发生碰撞。
+
+**拼接公式：**
+$$\text{RawString} = \text{provider} + \text{":"} + \text{account\_id} + \text{":"} + \text{transaction\_time} + \text{":"} + \text{amount} + \text{":"} + \text{merchant\_name}$$
+
+**哈希算法：** 使用 `SHA-256` 生成 64 位的十六进制字符串作为 `external_transaction_id`。
+
+#### 3.1.2 C++ 实现示例
+```cpp
+// infrastructure/utils/IdempotencyFingerprint.hpp
+#pragma once
+#include <string>
+#include <iomanip>
+#include <sstream>
+#include <algorithm>
+#include <openssl/sha.h> // 使用 OpenSSL 计算 SHA-256
+
+class IdempotencyFingerprint {
+public:
+    static std::string generate(
+        const std::string& provider,
+        int64_t accountId,
+        const std::string& utcTime,
+        const std::string& normalizedAmount,
+        const std::string& merchantName) 
+    {
+        // 1. 清理商户名
+        std::string cleanMerchant = merchantName;
+        cleanMerchant.erase(0, cleanMerchant.find_first_not_of(" "));
+        cleanMerchant.erase(cleanMerchant.find_last_not_of(" ") + 1);
+        std::transform(cleanMerchant.begin(), cleanMerchant.end(), cleanMerchant.begin(), ::tolower);
+
+        // 2. 拼接原始字符串
+        std::string raw = provider + ":" + 
+                          std::to_string(accountId) + ":" + 
+                          utcTime + ":" + 
+                          normalizedAmount + ":" + 
+                          cleanMerchant;
+
+        // 3. 计算 SHA-256
+        unsigned char hash[SHA256_DIGEST_LENGTH];
+        SHA256_CTX sha256;
+        SHA256_Init(&sha256);
+        SHA256_Update(&sha256, raw.c_str(), raw.size());
+        SHA256_Final(hash, &sha256);
+
+        std::stringstream ss;
+        for(int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+            ss << std::hex << std::setw(2) << std::setfill('0') << (int)hash[i];
+        }
+        return ss.str();
+    }
+};
+```
+
+### 3.2 基础设施层仓储接口
 
 ```cpp
 // domain/repositories/ISyncMappingRepository.hpp

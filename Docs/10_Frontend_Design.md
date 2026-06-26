@@ -94,6 +94,73 @@ http.interceptors.response.use(
 
 我们将高频使用且不易变动的数据放入全局状态，减少重复的 HTTP 请求。
 
+### 3.0 前端静态元数据缓存策略 (Frontend Static Metadata Caching)
+
+诸如支持的货币元数据列表 (`/api/v1/currencies`)、用户的偏好设置、分类树等数据，属于**低频修改、高频查询**的数据。为了极大减少对 Drogon 后端 API 的并发压力，前端设计中采用**客户端缓存 + 协商缓存**策略。
+
+#### 3.0.1 Pinia + LocalStorage 协同设计
+在 Pinia Store 初始化时优先从客户端本地缓存（`localStorage` 或 `sessionStorage`）读取，并规定在何时触发强制刷新。
+
+```typescript
+// src/stores/metadata.ts
+import { defineStore } from "pinia";
+import { ref } from "vue";
+import http from "@/utils/http";
+
+interface CacheWrapper<T> {
+  version: string;
+  timestamp: number;
+  data: T;
+}
+
+export const useMetadataStore = defineStore("metadata", () => {
+  const currencies = ref<any[]>([]);
+  const CACHE_LIFETIME = 24 * 60 * 60 * 1000; // 24小时缓存有效期
+
+  async function fetchCurrencies(forceRefresh = false) {
+    const cached = localStorage.getItem("cache_currencies");
+    if (cached && !forceRefresh) {
+      const wrapper: CacheWrapper<any[]> = JSON.parse(cached);
+      // 检查缓存是否过期
+      if (Date.now() - wrapper.timestamp < CACHE_LIFETIME) {
+        currencies.value = wrapper.data;
+        return;
+      }
+    }
+
+    // 缓存失效或强制刷新，请求后端
+    try {
+      const data = await http.get("/api/v1/currencies");
+      currencies.value = data;
+      
+      const wrapper: CacheWrapper<any[]> = {
+        version: "1.0", // 可配合后端 ETag/Version
+        timestamp: Date.now(),
+        data
+      };
+      localStorage.setItem("cache_currencies", JSON.stringify(wrapper));
+    } catch (error) {
+      // 容灾：如果后端挂了，继续使用过期的本地缓存
+      if (cached) {
+        const wrapper = JSON.parse(cached);
+        currencies.value = wrapper.data;
+      }
+    }
+  }
+
+  return { currencies, fetchCurrencies };
+});
+```
+
+#### 3.0.2 主动失效与刷新时机
+前端必须在以下**关键生命周期节点**主动清除缓存并重新拉取：
+1. **用户登录成功时**：清除所有本地缓存，防止 A 用户的分类树/偏好泄露给 B 用户。
+2. **用户执行写操作后**：
+   * 用户新增/修改分类 $\rightarrow$ 触发 `fetchCategories(true)` 强制刷新。
+   * 用户修改个人偏好（如基准货币） $\rightarrow$ 触发 `useAuthStore().updatePreference()` 并刷新相关缓存。
+3. **后端 ETag 机制**：
+   Drogon 后端对静态元数据接口开启 `ETag` 支持。前端 Axios 默认支持浏览器缓存，当后端返回 `304 Not Modified` 时，前端直接使用浏览器本地缓存，不占用 Drogon 的业务处理线程。
+
 ### 3.1 认证与偏好 Store (`useAuthStore`)
 
 存储 JWT Token 和用户偏好。基准货币决定所有报表的显示单位，其他偏好决定首页、主题、日期和数字展示。
