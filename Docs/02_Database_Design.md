@@ -571,6 +571,7 @@ PRIMARY KEY(transaction_id, tag_id)
 
 不是事实来源
 
+```sql
 CREATE TABLE account_balance_cache (
 account_id BIGINT PRIMARY KEY REFERENCES accounts(id),
 balance NUMERIC(20,8) NOT NULL,
@@ -579,14 +580,47 @@ source_version BIGINT NOT NULL DEFAULT 0,
 cache_version BIGINT NOT NULL DEFAULT 1,
 updated_at TIMESTAMPTZ NOT NULL
 );
+```
 
-重建逻辑：
+### 9.1 并发安全与死锁预防策略
 
-transactions
--> aggregate
--> balance_cache
+当高并发写入事务（或多笔流水同时并发导入）时，若不加控制地更新 `account_balance_cache`，极易发生**死锁（Deadlock）**或**数据不一致**。
 
-Repository 缓存策略：
+1. **悲观锁防死锁策略**：在涉及余额变动的事务中（如记账、转账、导入），必须在事务开始时对**聚合根（Account）**加锁。
+   * **规则 1**：始终通过 `SELECT ... FOR UPDATE` 锁住 `accounts` 表，而不是直接锁缓存表。
+   * **规则 2**：跨账户转账时，必须按 `account_id` 升序加锁。例如，账户 `3` 向账户 `1` 转账，加锁顺序必须是：先锁 `1`，再锁 `3`。这能从根本上消除死锁环路。
+2. **缓存更新排他锁**：在 Repository 层通过数据库排他性语句更新，确保并发写入下的账目准确。
+
+### 9.2 缓存自愈机制 (Self-Healing)
+
+由于缓存可能因非正常渠道修改而失效，设计一个**双向校验与自愈服务**：
+1. **触发时机**：
+   * 每日凌晨由 `Scheduler` 触发定时对账任务。
+   * 用户在前端点击“重建账户余额”按钮。
+   * 系统检测到 `source_version` 异常不连续时。
+2. **自愈逻辑**：
+   ```sql
+   -- 1. 计算真实的流水聚合余额
+   SELECT COALESCE(SUM(CASE WHEN type = 'income' THEN amount 
+                            WHEN type = 'expense' THEN -amount 
+                            ELSE 0 END), 0) AS real_balance,
+          MAX(id) AS max_tx_id,
+          COALESCE(MAX(version), 0) AS max_version
+   FROM transactions 
+   WHERE account_id = $1 AND deleted_at IS NULL;
+
+   -- 2. 强制覆盖更新缓存表
+   INSERT INTO account_balance_cache (account_id, balance, last_transaction_id, source_version, cache_version, updated_at)
+   VALUES ($1, $real_balance, $max_tx_id, $max_version, 1, NOW())
+   ON CONFLICT (account_id) DO UPDATE SET
+   balance = EXCLUDED.balance,
+   last_transaction_id = EXCLUDED.last_transaction_id,
+   source_version = EXCLUDED.source_version,
+   cache_version = account_balance_cache.cache_version + 1,
+   updated_at = NOW();
+   ```
+
+### 9.3 Repository 缓存策略：
 
 1. 先查询 `account_balance_cache`
 2. 对比 `source_version` 和该账户流水最新版本/最新流水
