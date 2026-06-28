@@ -65,7 +65,7 @@ CREATE TABLE users (
 id BIGSERIAL PRIMARY KEY,
 username VARCHAR(64) NOT NULL UNIQUE,
 password_hash VARCHAR(255) NOT NULL,
-base_currency_code CHAR(3) NOT NULL REFERENCES currencies(code),
+base_currency_code VARCHAR(10) NOT NULL REFERENCES currencies(code),
 categories_initialized BOOLEAN NOT NULL DEFAULT FALSE,
 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -150,7 +150,7 @@ CREATE TYPE report_period AS ENUM (
 
 CREATE TABLE user_preferences (
 user_id BIGINT PRIMARY KEY REFERENCES users(id),
-base_currency_code CHAR(3) NOT NULL REFERENCES currencies(code),
+base_currency_code VARCHAR(10) NOT NULL REFERENCES currencies(code),
 locale VARCHAR(16) NOT NULL DEFAULT 'zh-CN',
 timezone VARCHAR(64) NOT NULL DEFAULT 'Asia/Shanghai',
 date_format VARCHAR(32) NOT NULL DEFAULT 'YYYY-MM-DD',
@@ -222,7 +222,7 @@ name VARCHAR(128) NOT NULL,
 type account_type NOT NULL,
 subtype VARCHAR(64) NOT NULL,
 category account_category NOT NULL,
-currency_code CHAR(3) NOT NULL REFERENCES currencies(code),
+currency_code VARCHAR(10) NOT NULL REFERENCES currencies(code),
 description TEXT,
 is_archived BOOLEAN NOT NULL DEFAULT FALSE,
 archived_at TIMESTAMPTZ,
@@ -645,7 +645,7 @@ Domain 只通过 Repository 获取 `BalanceSnapshot`，不直接感知缓存命�
 
 ```sql
 CREATE TABLE currencies (
-code CHAR(3) PRIMARY KEY,
+code VARCHAR(10) PRIMARY KEY,
 name VARCHAR(64) NOT NULL,
 display_name VARCHAR(64) NOT NULL,
 symbol VARCHAR(16) NOT NULL,
@@ -710,9 +710,9 @@ TransferGroup 不是业务实体，也不是 Domain Entity；不要在领域层�
 CREATE TABLE exchange_rates (
 id BIGSERIAL PRIMARY KEY,
 
-    base_currency_code CHAR(3) NOT NULL REFERENCES currencies(code),
+    base_currency_code VARCHAR(10) NOT NULL REFERENCES currencies(code),
 
-    target_currency_code CHAR(3) NOT NULL REFERENCES currencies(code),
+    target_currency_code VARCHAR(10) NOT NULL REFERENCES currencies(code),
 
     rate NUMERIC(20,10) NOT NULL,
 
@@ -1223,7 +1223,7 @@ CREATE TABLE users (
     id BIGSERIAL PRIMARY KEY,
     username VARCHAR(64) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
-    base_currency_code CHAR(3) NOT NULL,
+    base_currency_code VARCHAR(10) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -1239,7 +1239,7 @@ CREATE TABLE accounts (
     type account_type NOT NULL,
     subtype VARCHAR(64) NOT NULL,
     category account_category NOT NULL,
-    currency_code CHAR(3) NOT NULL,
+    currency_code VARCHAR(10) NOT NULL,
     description TEXT,
     is_archived BOOLEAN NOT NULL DEFAULT FALSE,
     archived_at TIMESTAMPTZ,
@@ -1260,7 +1260,7 @@ CREATE TABLE transactions (
     category_id BIGINT,
     type transaction_type NOT NULL,
     amount NUMERIC(20,8) NOT NULL,
-    currency_code CHAR(3) NOT NULL,
+    currency_code VARCHAR(10) NOT NULL,
     description TEXT,
     transfer_group_id UUID,
     deleted_at TIMESTAMPTZ,
@@ -1290,7 +1290,7 @@ CREATE TYPE report_period AS ENUM ('current_month', 'last_month', 'last_3_months
 
 CREATE TABLE user_preferences (
     user_id BIGINT PRIMARY KEY REFERENCES users(id),
-    base_currency_code CHAR(3) NOT NULL,
+    base_currency_code VARCHAR(10) NOT NULL,
     locale VARCHAR(16) NOT NULL DEFAULT 'zh-CN',
     timezone VARCHAR(64) NOT NULL DEFAULT 'Asia/Shanghai',
     date_format VARCHAR(32) NOT NULL DEFAULT 'YYYY-MM-DD',
