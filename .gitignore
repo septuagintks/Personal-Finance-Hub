@@ -67,7 +67,3 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
-
-
-# docs tasks
-Docs/tasks.md
