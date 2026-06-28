@@ -3,7 +3,7 @@
 ## 📋 待办任务列表
 
 ### 1. 迭代与计划 (Planning)
-- [ ] 制定开发计划文档格式与规范 (更新到`Docs/Standards/Documents_Format_Standard.md`中) <!-- id: 1 -->
+- [x] 制定开发计划文档格式与规范 (更新到`Docs/Standards/Documents_Format_Standard.md`中) <!-- id: 1 -->
 - [ ] 编写开发计划文档 (`Docs/Develop_Plan/Phase_1_Development_Plan.md`) <!-- id: 2 -->
 
 ### 2. 核心金融原语 (Core Financial Primitives)
