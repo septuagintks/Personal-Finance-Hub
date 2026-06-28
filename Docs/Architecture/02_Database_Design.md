@@ -23,6 +23,10 @@ All amounts use:
 
 NUMERIC(20,8)
 
+Exchange rates use:
+
+NUMERIC(20,10) or DECIMAL(30,10)
+
 Example:
 
 999999999999.12345678
@@ -681,7 +685,7 @@ CREATE TABLE transfer_groups (
     created_at TIMESTAMPTZ NOT NULL,
     note TEXT,
     transfer_mode SMALLINT NOT NULL,
-    exchange_rate DECIMAL(30,10),
+    exchange_rate NUMERIC(30,10),
     exchange_rate_provider VARCHAR(64),
     exchange_rate_snapshot_time TIMESTAMPTZ
 );
