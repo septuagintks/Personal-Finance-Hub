@@ -49,7 +49,7 @@ const total = new Decimal(income).minus(new Decimal(expense)).toString();
 
 ### 2.2 全局 HTTP 状态码拦截 (Axios Interceptors)
 
-配合《08_REST_API_Design.md》，前端通过 Axios 拦截器将后端的 `std::expected` 错误映射为全局 UI 提示。
+配合《10_REST_API_Design.md》，前端通过 Axios 拦截器将后端的 `std::expected` 错误映射为全局 UI 提示。
 
 ```typescript
 // src/utils/http.ts
@@ -438,7 +438,7 @@ const previewTargetAmount = computed(() => {
 
 ## 5. 报表展示层设计 (ECharts 协同)
 
-报表页面直接消费《07.5_Reporting_and_Analytics_Design.md》提供的聚合 DTO。前端无需关心汇率换算，只需关注渲染。
+报表页面直接消费《09_Reporting_and_Analytics_Design.md》提供的聚合 DTO。前端无需关心汇率换算，只需关注渲染。
 
 ### 5.1 响应式图表封装
 

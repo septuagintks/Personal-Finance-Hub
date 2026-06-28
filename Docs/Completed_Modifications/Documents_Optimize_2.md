@@ -22,7 +22,7 @@ Status: Approved
 
 - **冲突点**：
   - `01_Technical_Architecture.md` 和 `05_Repository_and_Persistence_Design.md` 明确规定：“Application Layer 绝不能定义通用服务如 `AccountingService`、`ExchangeRateService` 或 `ReportService`”。
-  - 然而，在 `04_Money_Currency_System_Design.md` 中，仍然提到了 `ExchangeRateService` 的职责；在 `07_Exchange_Rate_System_Design.md` 中，也提到了“不要定义单独的 `ExchangeRateService`，避免和应用层汇率刷新用例混淆”。
+  - 然而，在 `04_Money_Currency_System_Design.md` 中，仍然提到了 `ExchangeRateService` 的职责；在 `08_Exchange_Rate_System_Design.md` 中，也提到了“不要定义单独的 `ExchangeRateService`，避免和应用层汇率刷新用例混淆”。
 - **修正方案**：
   - 全面检索并修改所有文档，**彻底删除 `ExchangeRateService`、`AccountingService` 的表述**。
   - 统一使用 **`RefreshExchangeRatesUseCase`**（应用层用例，负责调度与 I/O）和 **`CurrencyConversionService`**（领域服务，负责纯内存折算）。
@@ -54,7 +54,7 @@ Status: Approved
 
 ### 2.3 报表 CQRS 路径下的汇率换算性能优化
 
-- **潜在瓶颈**：`07.5_Reporting_and_Analytics_Design.md` 规定，报表查询绕过 Domain 实体，直接执行 SQL 拿到原始币种数据，然后在内存中调用 `CurrencyConversionService` 进行汇率换算。如果用户有数万条历史流水，直接在内存中对每条流水进行三角折算会导致 CPU 密集型计算，阻塞 Drogon 的 Event Loop。
+- **潜在瓶颈**：`09_Reporting_and_Analytics_Design.md` 规定，报表查询绕过 Domain 实体，直接执行 SQL 拿到原始币种数据，然后在内存中调用 `CurrencyConversionService` 进行汇率换算。如果用户有数万条历史流水，直接在内存中对每条流水进行三角折算会导致 CPU 密集型计算，阻塞 Drogon 的 Event Loop。
 - **完善方案**：
   - 补充“大数量级流水折算方案”：
     - 对于**日/月度聚合报表**，直接在 SQL 中通过 `GROUP BY` 和 `JOIN exchange_rates` 在数据库端完成折算。

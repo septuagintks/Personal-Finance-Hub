@@ -24,7 +24,7 @@ Status: Approved
 
 #### 2. 多币种与三角汇率折算 (Triangular Exchange Rate Conversion) ✅ 已完成
 
-已在 [07_Exchange_Rate_System_Design.md](07_Exchange_Rate_System_Design.md) 中明确规约：
+已在 [08_Exchange_Rate_System_Design.md](08_Exchange_Rate_System_Design.md) 中明确规约：
 
 - **§ 2.3** - 货币转换领域服务与三角折算
   - 以 USD 为固定枢纽货币（Pivot Currency）
@@ -42,7 +42,7 @@ Status: Approved
 
 #### 3. 初始数据的国际化边界 (I18n Initialization Seeding) ✅ 已完成
 
-已在 [06.5_Workflow_and_Lifecycle_Design.md § 7](06.5_Workflow_and_Lifecycle_Design.md) 中明确规约：
+已在 [07_Workflow_and_Lifecycle_Design.md § 7](07_Workflow_and_Lifecycle_Design.md) 中明确规约：
 
 - **语言检测优先级**：前端显式传递 > Accept-Language Header > IP 地理位置 > 系统默认
 - **分类模板多语言存储**：
@@ -58,7 +58,7 @@ Status: Approved
 
 #### 4. Drogon 框架下的全局异常拦截器 (Global Exception Boundary) ✅ 已完成
 
-已在 [12_Error_Handling_Design.md § 7](12_Error_Handling_Design.md) 中明确规约：
+已在 [15_Error_Handling_Design.md § 7](15_Error_Handling_Design.md) 中明确规约：
 
 - **§ 7.1** - 设计目标（统一兜底、安全响应、可追溯、标准格式）
 - **§ 7.2** - Drogon 全局异常处理器配置
@@ -100,7 +100,7 @@ Status: Approved
 
 #### 1. 外部导入对账的幂等指纹 (Idempotency Fingerprint) ✅ 已完成
 
-已在 [09_Sync_Framework_Design.md § 3.1](09_Sync_Framework_Design.md) 中明确规约：
+已在 [11_Sync_Framework_Design.md § 3.1](11_Sync_Framework_Design.md) 中明确规约：
 
 - **无唯一 ID 账单的去重**：许多银行导出的 PDF/CSV 账单并不包含全局唯一的交易流水号。
 - **合成唯一键（Fingerprint Hash）**：通过合成哈希 `Hash(provider + account_id + transaction_time + amount + merchant_name)` 生成一个幂等指纹 Key，使用 SHA-256 算法，以防止用户多次上传同一份 CSV 时产生重复流水。
@@ -118,7 +118,7 @@ Status: Approved
 
 #### 3. 汇率刷新失败容灾策略 (Resiliency for Exchange Rate Sync) ✅ 已完成
 
-已在 [07_Exchange_Rate_System_Design.md § 3.2](07_Exchange_Rate_System_Design.md) 中明确规约：
+已在 [08_Exchange_Rate_System_Design.md § 3.2](08_Exchange_Rate_System_Design.md) 中明确规约：
 
 - **多级降级查询链 (Fallback Chain)**：在 `CurrencyConversionService` 中，汇率换算采用责任链模式进行降级：直接汇率 $\rightarrow$ 逆向汇率 $\rightarrow$ 三角折算 $\rightarrow$ 历史降级 $\rightarrow$ 抛出异常。
 - **熔断与告警机制**：
@@ -127,7 +127,7 @@ Status: Approved
 
 #### 4. 前端静态元数据缓存策略 (Frontend Static Metadata Caching) ✅ 已完成
 
-已在 [10_Frontend_Design.md § 3.0](10_Frontend_Design.md) 中明确规约：
+已在 [13_Frontend_Design.md § 3.0](13_Frontend_Design.md) 中明确规约：
 
 - **Pinia + LocalStorage 协同设计**：在 Pinia Store 初始化时优先从客户端本地缓存（`localStorage` 或 `sessionStorage`）读取，并设置 24 小时缓存有效期。
 - **主动失效与刷新时机**：

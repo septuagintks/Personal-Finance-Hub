@@ -274,7 +274,7 @@ public:
 
 ## 5. 业务用例中的应用：危险删除
 
-让我们回顾《06.5_Workflow_and_Lifecycle_Design.md》中的危险删除流程。加入事件机制后，Use Case 变得非常干净。
+让我们回顾《07_Workflow_and_Lifecycle_Design.md》中的危险删除流程。加入事件机制后，Use Case 变得非常干净。
 
 ```cpp
 // application/use_cases/DangerousDeleteAccountUseCase.cpp
@@ -325,7 +325,7 @@ eventBus->subscribe<AccountDangerouslyDeletedEvent>([emailService](const auto& e
 
 1. 在 `transactions` 等核心表所在同一个 PostgreSQL 库里建一张表 `domain_events_outbox`。
 2. 在 `executeInTransaction` 的同一个事务里，把要把派发的事件作为 JSON 插入到 `outbox` 表中。
-3. 让我们在《09.5_Scheduler_Design.md》中设计的 Scheduler 定时轮询这张表，把还没发送的事件真正发到外部队列或执行。
+3. 让我们在《12_Scheduler_Design.md》中设计的 Scheduler  定时轮询这张表，把还没发送的事件真正发到外部队列或执行。
 
 由于这会引入不小的复杂度，当前版本可以先依靠 C++ 内存派发，但在系统架构层面必须预留切换到发件箱模式的底座。
 
