@@ -178,6 +178,30 @@ Architecture: Clean Architecture + Lightweight DDD
 **边界隔离优势：**
 即便未来在 PG 之前引入了 Redis 集群，也只需要修改 `AccountRepositoryImpl` 的内部流转，Use Case 和 Domain 不需要修改哪怕一行代码。
 
+### 4.3 缓存并发竞争与自愈机制（高并发优化）
+
+在高并发写入（如批量同步导入或多线程记账）时，多个线程同时更新同一个账户的余额缓存，可能会导致**死锁（Deadlock）**或**脏写（Dirty Write）**。为此，系统引入以下并发控制与自愈机制：
+
+1. **行级锁（SELECT FOR UPDATE）**：
+   * 在应用层 Use Case 开启事务后，凡是涉及资金变动的操作，必须显式对 `accounts` 表对应行加锁：
+     ```sql
+     SELECT * FROM accounts WHERE id = 1 FOR UPDATE;
+     ```
+   * 这确保了同一账户的资金变动和缓存更新在数据库层面被强制串行化，彻底杜绝并发死锁。
+2. **乐观锁与版本号（Optimistic Locking）**：
+   * 在 `account_balance_cache` 表中引入 `version INT NOT NULL DEFAULT 0` 字段。
+   * 每次更新缓存时，校验版本号：
+     ```sql
+     UPDATE account_balance_cache 
+     SET balance = 1250.00, version = version + 1, updated_at = NOW()
+     WHERE account_id = 1 AND version = $current_version;
+     ```
+   * 若更新受影响行数为 0，说明存在并发冲突，系统将自动触发“缓存失效并重新计算”的自愈逻辑。
+3. **定时对账自愈任务（Reconciliation Job）**：
+   * 调度器中注册每日定时任务 `ReconciliationJob`。
+   * 该任务在后台现场计算所有账户的流水总和，并与 `account_balance_cache` 中的缓存值进行比对。
+   * 若发现不一致，自动以现场计算的真实值为准重构缓存，并记录 `Warning` 级别审计日志，实现缓存的自动对账与自愈。
+
 ---
 
 ## 5. 异常流与数据一致性保障 (Exception Handling Workflow)

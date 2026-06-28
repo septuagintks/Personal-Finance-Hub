@@ -273,13 +273,43 @@ std::expected<SyncJobResultDTO, UseCaseError> RunSyncJobUseCase::execute(
         }
     }
 
-    // 4. (预留) 余额对账校验逻辑
-    // ...
+    // 4. 余额对账差错处理与人工平账机制
+    // 对账失败时，系统不会中断同步，而是生成一条差错记录并持久化到 sync_discrepancies 表中，状态标记为 PENDING_MANUAL_REVIEW
+    // 允许用户在前端点击“一键平账”，系统自动生成一条类型为 TransactionType::Adjustment 的特殊流水，并将差错单状态更新为 RESOLVED
 
     return result;
 }
 
 ```
+
+### 4.1 余额对账差错处理与人工平账机制
+
+在同步流程的最后阶段，系统会对比“外部平台宣告的余额（`fetchRemoteBalance`）”与“系统内部推导的余额（`accountRepo_->balanceOf`）”。若两者不一致，系统将触发以下差错处理与人工平账机制：
+
+1. **生成待处理差错单（Discrepancy Record）**：
+   * 对账失败时，系统不会中断同步或直接报错，而是生成一条差错记录并持久化到 `sync_discrepancies` 表中：
+     ```sql
+     CREATE TABLE sync_discrepancies (
+         id BIGSERIAL PRIMARY KEY,
+         user_id BIGINT NOT NULL REFERENCES users(id),
+         account_id BIGINT NOT NULL REFERENCES accounts(id),
+         sync_job_id BIGINT NOT NULL,
+         external_balance NUMERIC(20,8) NOT NULL,
+         internal_balance NUMERIC(20,8) NOT NULL,
+         difference NUMERIC(20,8) NOT NULL,
+         status VARCHAR(32) NOT NULL DEFAULT 'PENDING_MANUAL_REVIEW', -- PENDING_MANUAL_REVIEW, RESOLVED, IGNORED
+         resolution_tx_id BIGINT REFERENCES transactions(id),
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+     );
+     ```
+   * 差错单状态标记为 `PENDING_MANUAL_REVIEW`（待人工审核），并通过 `EventBus` 发布 `SyncDiscrepancyDetectedEvent`，在前端 Dashboard 弹出醒目的对账差异警告。
+2. **人工平账机制（One-Click Reconciliation）**：
+   * 系统在应用层提供 `ResolveDiscrepancyUseCase`。当用户在前端点击“一键平账”时，系统将自动生成一条类型为 `TransactionType::Adjustment` 的特殊流水：
+     * **金额**：等于差错单中的 `difference`（可正可负）。
+     * **分类**：归入系统预设的 `SYSTEM_RECONCILIATION`（系统平账调整）分类。
+     * **备注**：自动填充为 `"系统自动平账 - 关联对账单 #" + discrepancyId`。
+   * 该流水在同一个数据库事务中保存，并将差错单状态更新为 `RESOLVED`，同时关联新生成的流水 ID，实现账务的无缝自愈。
 
 ---
 

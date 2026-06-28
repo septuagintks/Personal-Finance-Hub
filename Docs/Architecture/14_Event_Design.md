@@ -213,9 +213,32 @@ public:
 
 ```
 
-### 4.2 事务完成后的自动派发
+### 4.2 事务完成后的自动派发与异步解耦
 
 在基础设施层（Drogon UoW 实现）拦截 Commit 状态。必须确保事件派发逻辑紧跟在**数据库连接真正 Commit 成功**的物理动作之后，而不是仅仅在 `action()` 返回 `has_value()` 时。
+
+同时，为了防止事件处理器（Event Handlers）执行缓慢（如发送邮件、调用外部 Webhook）或抛出异常拖慢主业务线程，系统引入了**异步解耦派发**与**本地消息表（Outbox Pattern）**设计：
+
+1. **线程池异步派发**：
+   * `IEventBus` 内部集成 Drogon 的线程池或自定义的轻量级工作线程池。
+   * 区分**同步订阅者**（如 `BalanceCacheInvalidator`，需要强一致性更新缓存）和**异步订阅者**（如 `AuditLogHandler`、`SecurityNotificationHandler`）。
+   * 异步订阅者的执行被封装为任务投递到线程池中，实现主业务线程的即时释放。
+2. **本地消息表（Outbox Pattern）预留**：
+   * 为了保证在进程崩溃或网络抖动时事件“至少一次投递（At-Least-Once Delivery）”，系统设计了本地消息表：
+     ```sql
+     CREATE TABLE outbox_events (
+         id BIGSERIAL PRIMARY KEY,
+         event_id UUID NOT NULL UNIQUE,
+         event_name VARCHAR(128) NOT NULL,
+         payload JSONB NOT NULL,
+         status VARCHAR(32) NOT NULL DEFAULT 'PENDING', -- PENDING, PROCESSED, FAILED
+         retry_count INT NOT NULL DEFAULT 0,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+     );
+     ```
+   * 在 `DrogonUnitOfWork` 事务闭包中，将事件序列化为 JSON 并与业务数据在**同一个数据库事务**中写入 `outbox_events` 表。
+   * 事务 Commit 成功后，立即触发一次异步扫描；同时，调度器中的 `OutboxPublisherJob` 每隔 10 秒扫描一次 `PENDING` 状态的事件进行重试派发，确保事件的绝对可靠性。
 
 ```cpp
 // infrastructure/persistence/DrogonUnitOfWork.cpp (改造片段)
@@ -251,6 +274,7 @@ public:
                 trans->commit(); 
                 
                 for (const auto& ev : pendingEvents_) {
+                    // 内部根据订阅者类型，决定是同步调用还是投递到线程池异步调用
                     eventBus_->publish(ev);
                 }
                 pendingEvents_.clear();
