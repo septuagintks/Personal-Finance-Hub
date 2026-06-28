@@ -446,5 +446,5 @@ GROUP BY TO_CHAR(transaction_time, 'YYYY-MM'), currency_code;
 但为了架构的可扩展性，我们预留了以下性能优化空间：
 
 1. **报表缓存**：如果历史月份的流水不再变动，计算出的 `CashFlowTrendDTO` 可以序列化为 JSON 并存入预留的 Redis 中，Key 为 `report:cashflow:user_1:2025`。
-2. **审计与触发器失效**：如果用户发生了“危险删除”或“新增了历史日期的流水”，业务层的 Use Case 应该发出一个进程内事件（后续 `11_Event_Design.md` 会讲到），将关联的报表缓存标记为失效（Invalidate）。
+2. **审计与触发器失效**：如果用户发生了“ 危险删除”或“新增了历史日期的流水”，业务层的 Use Case 应该发出一个进程内事件（后 续 `14_Event_Design.md` 会讲到），将关联的报表缓存标记为失效（Invalidate）。
 3. **物化视图预留**：当流水达到百万级时，可以在 PostgreSQL 中建立物化视图（Materialized Views），每天夜间由 Scheduler 刷新昨日以前的分类汇总统计。

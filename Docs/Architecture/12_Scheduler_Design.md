@@ -109,7 +109,7 @@ public:
 
 ### 3.1 每日汇率刷新任务 (Exchange Rate Sync)
 
-承接《07_Exchange_Rate_System_Design.md》，每天执行一次汇率拉取。
+承接《08_Exchange_Rate_System_Design.md》，每天执行一次汇率拉取。
 
 ```cpp
 // scheduler/jobs/ExchangeRateSyncJob.cpp
