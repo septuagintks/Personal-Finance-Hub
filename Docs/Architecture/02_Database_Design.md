@@ -62,12 +62,14 @@ id BIGSERIAL PRIMARY KEY,
 username VARCHAR(64) NOT NULL UNIQUE,
 password_hash VARCHAR(255) NOT NULL,
 base_currency_code CHAR(3) NOT NULL REFERENCES currencies(code),
+categories_initialized BOOLEAN NOT NULL DEFAULT FALSE,
 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 ```
 
 `base_currency_code` 用于保存用户全局报表和净值统计的默认基准货币。
+`categories_initialized` 用于标记用户注册后是否已成功初始化默认分类，作为防止重复初始化的第一道防线。
 当前阶段保留该字段作为强依赖默认值；扩展偏好落在 `user_preferences` 表。
 该字段表示用户偏好，不等同于 `exchange_rates.base_currency_code` 的汇率方向基准货币。
 
