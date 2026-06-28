@@ -15,24 +15,35 @@ Architecture: Clean Architecture (Lightweight CQRS)
 - **写操作（Command）**：需要强一致性、业务规则校验、保护聚合根不被破坏（通过 Repository 加载 Entity）。
 - **读操作（Query）**：需要极致的性能、多表联合、直接输出给前端展示（无需经过 Entity 转换）。
 
-### 1.1 报表查询的流转路径
+### 1.1 报表查询的流转路径与多租户安全隔离
 
 在报表与分析模块中，我们**绕过 Domain 实体**，允许 Application 层的查询服务直接从 Infrastructure 层读取组装好的 DTO。
+
+由于绕过了 Domain 实体，系统无法通过领域聚合根天然的边界来保护数据。为了防止**越权数据泄露（Horizontal Privilege Escalation）**，系统在设计上强制实施以下多租户安全隔离规约：
+
+1. **API 接口强制绑定 UserId**：
+   * `IReportQueryService` 的所有查询接口，其首个参数必须强制为 `UserId userId`。
+   * 表现层 `ReportController` 必须从 JWT 校验通过的请求上下文中提取 `UserId` 并传入，严禁由前端参数传入 `userId`。
+2. **SQL 模板参数化绑定**：
+   * 基础设施层的所有 SQL 语句必须显式且强制绑定 `user_id = $1` 过滤条件，绝不允许拼接 SQL 字符串。
+3. **数据库行级安全（Row-Level Security, RLS）**：
+   * 在 PostgreSQL 数据库层面，针对 `transactions`、`accounts`、`categories` 等表开启 RLS。
+   * 强制限制当前数据库连接只能读取属于当前 `user_id` 的行，作为底层数据安全的终极防线。
 
 ```text
 [Frontend / Vue3 ECharts]
           │
-[Presentation Layer] (ReportController)
+[Presentation Layer] (ReportController) - 从 JWT 提取 UserId
           │
-[Application Layer] (IReportQueryService) ─── 返回 ──▶ ReportDTOs
+[Application Layer] (IReportQueryService) ─── 强制传递 UserId ──▶ ReportDTOs
           │
-[Infrastructure Layer] (ReportQueryServiceImpl)
+[Infrastructure Layer] (ReportQueryServiceImpl) - SQL 强制绑定 user_id = $1
   - 直接执行带聚合函数的 SQL (GROUP BY, SUM)
   - 提取原始币种统计数据
   - 调用 CurrencyConversionService 进行内存级汇率换算
   - 组装 DTO 返回
           │
-[PostgreSQL Database]
+[PostgreSQL Database] - 开启 Row-Level Security (RLS) 终极防御
 
 ```
 
