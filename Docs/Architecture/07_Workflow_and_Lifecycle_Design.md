@@ -334,11 +334,13 @@ INSERT INTO system_category_templates (name, locale, group_name, default_board, 
 
      b. 如果查询结果为空（不支持该语言），回退到 'zh-CN' 或 'en-US'
 
-     c. 复制为用户自己的分类：
+     c. 复制为用户自己的分类（利用 ON CONFLICT DO UPDATE 保证幂等性）：
         INSERT INTO categories (user_id, name, board, source, template_id)
         SELECT $userId, name, default_board, 'system', id
         FROM system_category_templates
-        WHERE locale = $locale AND default_board IN ('income', 'expense');
+        WHERE locale = $locale AND default_board IN ('income', 'expense')
+        ON CONFLICT (user_id, name, COALESCE(parent_id, -1)) 
+        DO UPDATE SET updated_at = NOW();
 
 7.   [AuditLogRepository]
      - 写入 Action=Create, Resource=UserDefaults
@@ -348,7 +350,20 @@ INSERT INTO system_category_templates (name, locale, group_name, default_board, 
 9. [Use Case] 注册 UserRegistered 事件（可选，用于异步欢迎邮件等）
 ```
 
-### 7.3 语言回退机制
+### 7.3 注册初始化幂等性与并发冲突防御
+
+如果用户在注册过程中，由于网络抖动导致前端重复提交，或者初始化分类事务执行缓慢，可能会导致产生重复的分类数据或唯一约束冲突。为此，系统采用三层防御机制：
+
+1. **第一层（应用层）**：在 `users` 表或 `user_preferences` 表中引入 `categories_initialized` 状态标志。这是防止重复初始化的主要手段。
+2. **第二层（数据库层）**：在 `categories` 表上建立唯一索引，并使用 `ON CONFLICT DO UPDATE`（非 `DO NOTHING`，以便触发 `updated_at` 刷新，保留可观测性）作为兜底。
+   * **注意**：由于根分类的 `parent_id` 为 `NULL`，而 SQL 中 `NULL != NULL`，因此唯一索引必须使用 `COALESCE` 或部分索引（Partial Index）来处理：
+     ```sql
+     CREATE UNIQUE INDEX uq_categories_user_name_parent
+     ON categories (user_id, name, COALESCE(parent_id, -1));
+     ```
+3. **第三层（监控层）**：对数据库的 `ON CONFLICT` 触发次数进行监控告警，以便及时发现前端防抖失效或恶意重放攻击。
+
+### 7.4 语言回退机制
 
 当用户选择的语言在系统中没有对应模板时，按以下优先级回退：
 
@@ -381,26 +396,20 @@ std::string determineInitializationLocale(const std::string& preferredLocale) {
 }
 ```
 
-### 7.4 约束与规约
+### 7.5 约束与规约
 
 1. **系统模板只读**：用户不能直接修改 `system_category_templates`
 2. **用户可删除预设分类**：复制后的分类可以被用户删除或重命名
 3. **默认账户 subtype 只是选项**：不自动创建账户
-4. **初始化三层防御与幂等性**：
-   * **第一层（应用层）**：在 `User` 实体或 `user_preferences` 表中维护 `categories_initialized` 状态标志。在执行初始化前，优先校验该标志，若为 `true` 则直接跳过，这是防止重复初始化的主要手段。
-   * **第二层（数据库层）**：
-     * 针对 `categories` 表建立唯一索引，解决 `parent_id = NULL` 的唯一约束语义问题（使用 `COALESCE` 方案）：
-       ```sql
-       CREATE UNIQUE INDEX uq_categories_user_name_parent
-       ON categories (user_id, name, COALESCE(parent_id, -1));
-       ```
-     * 在复制分类的 SQL 中，使用 `ON CONFLICT (user_id, name, COALESCE(parent_id, -1)) DO UPDATE SET updated_at = NOW()`（非 `DO NOTHING`），在兜底去重的同时保留可观测性。
-   * **第三层（监控层）**：对数据库触发的 `conflict` 冲突进行计数与告警监控，及时发现前端并发异常。
+4. **初始化幂等性**：
+   - 检查 `user_preferences` 是否已存在
+   - 检查该用户是否已有分类
+   - 重复调用不能产生重复分类
 5. **初始化失败处理**：
    - 注册事务必须回滚
    - 或标记用户为"待完成初始化"状态，后台补偿
 
-### 7.5 前端国际化配合
+### 7.6 前端国际化配合
 
 前端应在注册表单中：
 
@@ -408,7 +417,7 @@ std::string determineInitializationLocale(const std::string& preferredLocale) {
 2. **提供语言选择器**：让用户手动选择首选语言
 3. **显示回退提示**：如果用户语言不支持，提示"将使用英语作为默认分类语言"
 
-### 7.6 支持的语言与扩展
+### 7.7 支持的语言与扩展
 
 **Phase 1（MVP）**
 

@@ -87,21 +87,19 @@ domain/
 
 ---
 
-## 3.5 强类型 ID 基础模板设计 (Strongly-Typed IDs)
+## 4. Entities and Value Objects
 
-为了防止在分层调用中将不同的 ID（如 `UserId`、`AccountId`、`TransactionId`）混淆，系统在领域层引入强类型 ID 基础模板。
+### 4.1 强类型 ID (Strongly-Typed IDs)
 
-### 3.5.1 统一的 StrongId 模板
-
-定义一个 `StrongId<Tag, Underlying>` 基础模板，所有转换、比较和序列化逻辑只写一次：
+为了防止在函数调用时传错 ID（例如将 `AccountId` 传给 `UserId`），系统全面采用强类型 ID。为了解决 Drogon 路由解析和 JSON 序列化的冗余代码问题，我们在基础设施层（或领域层基础库）提供统一的 `StrongId` 模板：
 
 ```cpp
 // domain/value_objects/StrongId.hpp
 #pragma once
+#include <cstdint>
 #include <string>
 #include <optional>
-#include <string_view>
-#include <json/json.h> // Drogon 默认使用的 jsoncpp
+#include <json/json.h> // 假设使用 jsoncpp
 
 template <typename Tag, typename Underlying = int64_t>
 struct StrongId {
@@ -114,7 +112,7 @@ struct StrongId {
     bool operator!=(const StrongId& o) const { return value != o.value; }
     bool operator<(const StrongId& o)  const { return value < o.value;  }
     
-    // 统一的字符串转换（供路由层解析使用）
+    // 统一的字符串转换（供路由层使用）
     static std::optional<StrongId> from_string(std::string_view s) {
         try {
             return StrongId{static_cast<Underlying>(std::stoll(std::string(s)))};
@@ -125,7 +123,7 @@ struct StrongId {
     
     std::string to_string() const { return std::to_string(value); }
     
-    // JSON 互转（供 DTO 层序列化使用）
+    // JSON 互转（供 DTO 层使用）
     Json::Value to_json() const  { return Json::Value(static_cast<Json::Int64>(value)); }
     
     static std::optional<StrongId> from_json(const Json::Value& j) {
@@ -140,18 +138,16 @@ struct UserIdTag {};
 struct AccountIdTag {};
 struct TransactionIdTag {};
 struct CategoryIdTag {};
+struct TagIdTag {};
 
 using UserId        = StrongId<UserIdTag>;
 using AccountId     = StrongId<AccountIdTag>;
 using TransactionId = StrongId<TransactionIdTag>;
 using CategoryId    = StrongId<CategoryIdTag>;
+using TagId         = StrongId<TagIdTag>;
 ```
 
----
-
-## 4. Entities and Value Objects
-
-### Entities
+### 4.2 Entities
 
 Have unique identity.
 
