@@ -381,18 +381,33 @@ std::string determineInitializationLocale(const std::string& preferredLocale) {
 }
 ```
 
-### 7.4 约束与规约
+### 7.4 约束与规约（三层防御幂等初始化）
 
-1. **系统模板只读**：用户不能直接修改 `system_category_templates`
-2. **用户可删除预设分类**：复制后的分类可以被用户删除或重命名
-3. **默认账户 subtype 只是选项**：不自动创建账户
-4. **初始化幂等性**：
-   - 检查 `user_preferences` 是否已存在
-   - 检查该用户是否已有分类
-   - 重复调用不能产生重复分类
-5. **初始化失败处理**：
-   - 注册事务必须回滚
-   - 或标记用户为"待完成初始化"状态，后台补偿
+为了防止用户在注册或初始化默认分类时，由于网络抖动、前端重复提交或并发请求导致分类重复创建或数据库死锁，系统在架构上实施**三层防御幂等初始化机制**：
+
+1. **第一层（应用层状态标志）**：
+   * 在 `users` 表或 `user_preferences` 表中引入 `categories_initialized` 布尔型状态标志（默认 `false`）。
+   * 在 `RegisterUserUseCase` 执行初始化前，首先校验该标志。若为 `true`，则直接跳过初始化，这是防止重复初始化的主要且最高效的手段。
+2. **第二层（数据库层唯一索引与 ON CONFLICT）**：
+   * 针对 `categories` 表，建立联合唯一索引，特别处理 `parent_id = NULL` 的语义问题（在 PostgreSQL 中，多个 `NULL` 值默认不触发唯一约束）。
+   * **唯一索引设计方案**：使用部分索引（Partial Index）或 `COALESCE` 表达式：
+     ```sql
+     CREATE UNIQUE INDEX uq_categories_user_name_parent
+     ON categories (user_id, name, COALESCE(parent_id, -1));
+     ```
+     *注：这里将 `parent_id` 为 `NULL` 的情况在索引中虚拟映射为 `-1`，从而完美解决了 `NULL` 无法触发唯一约束的问题。*
+   * **SQL 写入规约**：在复制系统模板时，使用 `ON CONFLICT DO UPDATE`（而非 `DO NOTHING`），更新其 `updated_at` 时间戳。这不仅能兜底并发冲突，还能保持操作的可观测性：
+     ```sql
+     INSERT INTO categories (user_id, name, board, source, template_id, parent_id)
+     SELECT $userId, name, default_board, 'system', id, parent_id
+     FROM system_category_templates
+     WHERE locale = $locale
+     ON CONFLICT (user_id, name, COALESCE(parent_id, -1)) 
+     DO UPDATE SET updated_at = NOW();
+     ```
+3. **第三层（监控与告警）**：
+   * 在应用层捕获数据库返回的冲突更新计数。若单次注册流程中触发了 `ON CONFLICT` 逻辑，系统将记录一条 `Info` 级别审计日志。
+   * 若短时间内（如 1 分钟内）某用户触发冲突计数超过阈值，自动触发监控告警，防范恶意刷接口或严重的客户端 Bug。
 
 ### 7.5 前端国际化配合
 

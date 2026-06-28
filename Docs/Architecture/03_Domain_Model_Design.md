@@ -105,6 +105,63 @@ Transaction
 AuditLog
 ```
 
+#### 4.1 强类型 ID 统一模板 (Strongly-Typed IDs)
+
+为了在编译期杜绝不同实体 ID 之间的混用（例如将 `AccountId` 错误地传给需要 `UserId` 的参数），系统不使用原生 `int64_t`，而是统一采用 `StrongId` 模板。
+
+```cpp
+// domain/value_objects/StrongId.hpp
+#pragma once
+#include <cstdint>
+#include <string>
+#include <string_view>
+#include <optional>
+#include <json/json.h> // Drogon 依赖的 jsoncpp
+
+template <typename Tag, typename Underlying = int64_t>
+struct StrongId {
+    Underlying value;
+    
+    explicit StrongId(Underlying v) : value(v) {}
+    StrongId() : value(0) {}
+    
+    bool operator==(const StrongId& o) const { return value == o.value; }
+    bool operator!=(const StrongId& o) const { return value != o.value; }
+    bool operator<(const StrongId& o)  const { return value < o.value;  }
+    
+    // 统一的字符串转换（供路由层与控制器解析使用）
+    static std::optional<StrongId> from_string(std::string_view s) {
+        try {
+            return StrongId{static_cast<Underlying>(std::stoll(std::string(s)))};
+        } catch (...) {
+            return std::nullopt;
+        }
+    }
+    
+    std::string to_string() const { return std::to_string(value); }
+    
+    // JSON 互转（供 DTO 层序列化使用）
+    Json::Value to_json() const  { return Json::Value(static_cast<Json::Int64>(value)); }
+    
+    static std::optional<StrongId> from_json(const Json::Value& j) {
+        if (j.isInt64()) return StrongId{j.asInt64()};
+        if (j.isString()) return from_string(j.asString());
+        return std::nullopt;
+    }
+};
+
+// 具体 ID 类型的声明
+struct UserIdTag {};
+struct AccountIdTag {};
+struct TransactionIdTag {};
+struct CategoryIdTag {};
+
+using UserId        = StrongId<UserIdTag>;
+using AccountId     = StrongId<AccountIdTag>;
+using TransactionId = StrongId<TransactionIdTag>;
+using CategoryId    = StrongId<CategoryIdTag>;
+```
+
 ### Value Objects
 
 No identity.
