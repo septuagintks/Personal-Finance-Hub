@@ -150,16 +150,18 @@ struct StrongId {
     }
 };
 
-// 具体 ID 类型的声明
+// 具体 ID 类型只需一行声明
 struct UserIdTag {};
 struct AccountIdTag {};
 struct TransactionIdTag {};
 struct CategoryIdTag {};
+struct TagIdTag {};
 
 using UserId        = StrongId<UserIdTag>;
 using AccountId     = StrongId<AccountIdTag>;
 using TransactionId = StrongId<TransactionIdTag>;
 using CategoryId    = StrongId<CategoryIdTag>;
+using TagId         = StrongId<TagIdTag>;
 ```
 
 ### Value Objects
