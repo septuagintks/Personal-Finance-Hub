@@ -74,15 +74,15 @@ struct IDomainEvent {
 #pragma once
 #include "domain/events/IDomainEvent.hpp"
 #include "domain/entities/Account.hpp" // 仅需 AccountId
-#include "domain/entities/Transaction.hpp" // 仅需 TransactionId
+#include "domain/value_objects/StrongId.hpp" // 需 TransferGroupId
 
 struct TransferCompletedEvent : public IDomainEvent {
     AccountId sourceAccountId;
     AccountId targetAccountId;
-    TransactionId transferGroupId;
+    TransferGroupId transferGroupId;
     std::chrono::system_clock::time_point occurredAt;
 
-    TransferCompletedEvent(AccountId src, AccountId tgt, TransactionId groupId)
+    TransferCompletedEvent(AccountId src, AccountId tgt, TransferGroupId groupId)
         : sourceAccountId(src), targetAccountId(tgt), transferGroupId(groupId),
           occurredAt(std::chrono::system_clock::now()) {}
 

@@ -139,12 +139,64 @@ struct AccountIdTag {};
 struct TransactionIdTag {};
 struct CategoryIdTag {};
 struct TagIdTag {};
+struct TransferGroupIdTag {};
 
-using UserId        = StrongId<UserIdTag>;
-using AccountId     = StrongId<AccountIdTag>;
-using TransactionId = StrongId<TransactionIdTag>;
-using CategoryId    = StrongId<CategoryIdTag>;
-using TagId         = StrongId<TagIdTag>;
+// 专门的 Uuid 值类型，用于支持 UUID 类型的强类型 ID
+struct Uuid {
+    std::array<uint8_t, 16> bytes{};
+
+    bool operator==(const Uuid& o) const { return bytes == o.bytes; }
+    bool operator!=(const Uuid& o) const { return bytes != o.bytes; }
+    bool operator<(const Uuid& o)  const { return bytes < o.bytes;  }
+
+    static std::optional<Uuid> from_string(std::string_view s) {
+        // 简易 UUID 解析逻辑（实际实现中可使用 boost::uuid 或 pg 的 uuid）
+        if (s.length() != 36) return std::nullopt;
+        // 解析逻辑...
+        return Uuid{};
+    }
+
+    std::string to_string() const {
+        // 转换为标准 UUID 字符串格式
+        return "00000000-0000-0000-0000-000000000000";
+    }
+};
+
+// 针对 Uuid 类型的 StrongId 特化或重载支持
+template <typename Tag>
+struct StrongId<Tag, Uuid> {
+    Uuid value;
+
+    explicit StrongId(Uuid v) : value(v) {}
+    StrongId() = default;
+
+    bool operator==(const StrongId& o) const { return value == o.value; }
+    bool operator!=(const StrongId& o) const { return value != o.value; }
+    bool operator<(const StrongId& o)  const { return value < o.value;  }
+
+    static std::optional<StrongId> from_string(std::string_view s) {
+        if (auto u = Uuid::from_string(s)) {
+            return StrongId{*u};
+        }
+        return std::nullopt;
+    }
+
+    std::string to_string() const { return value.to_string(); }
+
+    Json::Value to_json() const { return Json::Value(to_string()); }
+
+    static std::optional<StrongId> from_json(const Json::Value& j) {
+        if (j.isString()) return from_string(j.asString());
+        return std::nullopt;
+    }
+};
+
+using UserId          = StrongId<UserIdTag>;
+using AccountId       = StrongId<AccountIdTag>;
+using TransactionId   = StrongId<TransactionIdTag>;
+using CategoryId      = StrongId<CategoryIdTag>;
+using TagId           = StrongId<TagIdTag>;
+using TransferGroupId = StrongId<TransferGroupIdTag, Uuid>;
 ```
 
 ### 4.2 Entities
