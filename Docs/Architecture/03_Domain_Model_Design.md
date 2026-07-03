@@ -770,10 +770,12 @@ class Transaction
 {
 private:
     TransactionId id;
+    UserId userId;
     AccountId accountId;
     CategoryId categoryId;
     Money amount;
     TransactionType type;
+    std::optional<TransferGroupId> transferGroupId;
     Timestamp occurredAt;
     std::string description;
 };
