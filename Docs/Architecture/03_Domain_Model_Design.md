@@ -473,6 +473,11 @@ private:
     std::string subtype;
     AccountCategory category;
     Currency currency;
+    std::string description;
+    bool isArchived;
+    std::optional<Timestamp> archivedAt;
+    Timestamp createdAt;
+    Timestamp updatedAt;
 };
 ```
 
@@ -599,6 +604,10 @@ private:
     CategoryBoard board;
     CategorySource source;
     std::optional<SystemCategoryTemplateId> templateId;
+    int32_t sortOrder;
+    std::optional<Timestamp> deletedAt;
+    Timestamp createdAt;
+    Timestamp updatedAt;
 };
 ```
 
