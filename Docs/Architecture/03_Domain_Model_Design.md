@@ -10,6 +10,27 @@ Architecture: Clean Architecture + Lightweight DDD
 
 This document defines the core domain models.
 
+
+---
+
+## 30. 实体-表对应表
+
+| Domain Entity | Database Table | 对齐状态 | 说明 |
+| ------------- | -------------- | -------- | ---- |
+| User | users | 基本对齐 | 领域层未展开 password_hash、base_currency_code 等持久化字段 |
+| UserPreference | user_preferences | 基本对齐 | 偏好字段按应用层 DTO / Repository 承载 |
+| Account | accounts | 已对齐 | 已补齐 description、is_archived、archivedAt、createdAt、updatedAt |
+| Category | categories | 已对齐 | 已补齐 sortOrder、deletedAt、createdAt、updatedAt |
+| Transaction | transactions | 已对齐 | 已补齐 userId、transferGroupId |
+| Tag | tags | 待补充 | 当前文档仅定义值对象语义，尚未展开持久化字段 |
+| AuditLog | audit_logs | 基本对齐 | 资源 ID 允许字符串以兼容 UUID / 复合 ID |
+| SystemCategoryTemplate | system_category_templates | 基本对齐 | 主要由分类模板与初始化流程使用 |
+
+### Remaining Notes
+
+1. 领域实体与数据库表不要求 1:1 完整暴露所有列，但凡 Repository 写入或查询需要的字段，必须在实体或 DTO 中有明确承载。
+2. 归档、软删除、创建时间、更新时间这类生命周期字段应优先在实体中显式表达，避免仓储层凭空补值。
+3. 若后续新增表列，必须同步检查对应实体、Repository、DTO 和事件 payload 是否需要联动调整。
 Goals:
 
 - Multi-currency support
