@@ -15,7 +15,7 @@ Architecture: Clean Architecture + Lightweight DDD
 1. **接口与实现彻底分离**：仓储接口（Interfaces）属于 `Domain` 层（纯 C++23，不包含任何 SQL、Drogon 或网络依赖）；仓储实现（Implementations）属于 `Infrastructure` 层。
 2. **面向聚合根（Aggregate Root）**：原则上只有聚合根才拥有独立的仓储。在本项目中，`User`（含偏好）、`Account`、`TransferAggregate` 拥有独立仓储。由于 `Transaction` 和 `Adjustment` 的生命周期与 `Account` / `Transfer` 强绑定，它们可以通过专门的仓储加速查询，但写入必须符合聚合的约束。
 3. **隐式缓存策略**：业务层（Domain/Application）不感知缓存的存在。Repository 内部负责维护 `account_balance_cache` 的命中断接和重建，对外只返回标准的领域对象。
-4. **强类型与错误处理**：使用 C++23 的强类型 ID（如 `AccountId`）防止参数传错。对于仓储查找失败或数据库异常，使用 `std::expected` 传递错误，不滥用异常（Exceptions），保持控制流清晰。
+4. **强类型与错误处理**：使用 C++23 的强类型 ID（如 `AccountId`）防止参数传错。对于仓储查找失败或数据库异常，使用 `std::expected` 传递中性错误，不滥用异常（Exceptions），保持控制流清晰。Repository Error 只表达“数据访问结果”，不携带 Drogon、SQL 或连接池等实现细节。
 5. **Use Case 与 Domain Service 分层**：Application 层只使用 `application/use_cases/` 下的具体 Use Case 进行事务和仓储编排；Domain 层只使用 `domain/services/` 下的纯业务规则服务。不要定义跨层同名的 `AccountingService`、`RefreshExchangeRatesUseCase` 或 `ReportService`。
 6. **领域概念不强制等同表结构**：`UserPreference` 是 Domain Concept，拥有独立的 `user_preferences` 表，由 `IUserRepository` 联合查询或通过独立的 `IUserPreferenceRepository` 进行读写。`TransferGroup` 则相反，只是 `transfer_groups` 持久化元数据载体，不是 Domain Entity。
 7. **Read Model 边界**：`BalanceSnapshot` 是 Value Object，也是账户余额查询的 Read Model。它没有独立身份或生命周期，Repository 可以从 `account_balance_cache` 或流水聚合映射得到。
@@ -36,9 +36,9 @@ Architecture: Clean Architecture + Lightweight DDD
 
 enum class RepositoryStatus {
     NotFound,
-    DatabaseError,
-    ConcurrentModification,
-    ValidationError
+    ValidationError,
+    Conflict,
+    DatabaseError
 };
 
 struct RepositoryError {
@@ -451,7 +451,7 @@ public:
             dbClient_->execSqlSync("SELECT id FROM accounts WHERE id = $2 FOR UPDATE", second);
             return {};
         } catch (const std::exception& e) {
-            return std::unexpected(RepositoryError{RepositoryStatus::DatabaseError, e.what()});
+            return std::unexpected(RepositoryError{RepositoryStatus::Conflict, e.what()});
         }
     }
 

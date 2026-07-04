@@ -119,6 +119,41 @@ Application 层负责把 DomainError、RepositoryError、ProviderError 映射为
 std::expected<OutputDTO, UseCaseError> execute(InputDTO dto);
 ```
 
+推荐使用显式转换函数，避免在每个 Use Case 里手写重复的错误分支：
+
+```cpp
+UseCaseError mapRepositoryErrorToUseCaseError(const RepositoryError& error) {
+    switch (error.status) {
+        case RepositoryStatus::NotFound:
+            return UseCaseError::AccountNotFound;
+        case RepositoryStatus::ValidationError:
+            return UseCaseError::ValidationFailed;
+        case RepositoryStatus::Conflict:
+            return UseCaseError::ConflictDetected;
+        case RepositoryStatus::DatabaseError:
+        default:
+            return UseCaseError::InternalFailure;
+    }
+}
+
+UseCaseError mapDomainErrorToUseCaseError(const DomainError& error) {
+    switch (error) {
+        case DomainError::CurrencyMismatch:
+            return UseCaseError::CurrencyMismatch;
+        case DomainError::InvalidExchangeRate:
+            return UseCaseError::InvalidExchangeRate;
+        case DomainError::TransferImbalance:
+            return UseCaseError::TransferImbalance;
+        case DomainError::ArchivedAccount:
+            return UseCaseError::ArchivedAccount;
+        case DomainError::InvalidCategoryBoard:
+            return UseCaseError::InvalidCategoryBoard;
+        case DomainError::NegativeAmountNotAllowedForThisOperation:
+            return UseCaseError::NegativeAmountNotAllowedForThisOperation;
+    }
+}
+```
+
 Application 可以：
 
 - 校验权限
@@ -349,7 +384,7 @@ std::expected<void, UseCaseError> CreateTransferUseCase::execute(const TransferI
     // 所有错误都通过 std::unexpected 返回
     auto sourceAccount = accountRepo_->findById(dto.sourceAccountId);
     if (!sourceAccount) {
-        return std::unexpected(UseCaseError::AccountNotFound);
+        return std::unexpected(mapRepositoryErrorToUseCaseError(sourceAccount.error()));
     }
 
     // ... 业务逻辑
