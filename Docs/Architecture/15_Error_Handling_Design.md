@@ -127,32 +127,34 @@ UseCaseError mapRepositoryErrorToUseCaseError(const RepositoryError& error) {
         case RepositoryStatus::NotFound:
             return UseCaseError::AccountNotFound;
         case RepositoryStatus::ValidationError:
-            return UseCaseError::ValidationFailed;
+            return UseCaseError::DomainRuleViolation;
         case RepositoryStatus::Conflict:
-            return UseCaseError::ConflictDetected;
+            return UseCaseError::DomainRuleViolation;
         case RepositoryStatus::DatabaseError:
         default:
-            return UseCaseError::InternalFailure;
+            return UseCaseError::InfrastructureFailure;
     }
 }
 
 UseCaseError mapDomainErrorToUseCaseError(const DomainError& error) {
     switch (error) {
         case DomainError::CurrencyMismatch:
-            return UseCaseError::CurrencyMismatch;
+            return UseCaseError::DomainRuleViolation;
         case DomainError::InvalidExchangeRate:
-            return UseCaseError::InvalidExchangeRate;
+            return UseCaseError::DomainRuleViolation;
         case DomainError::TransferImbalance:
-            return UseCaseError::TransferImbalance;
+            return UseCaseError::DomainRuleViolation;
         case DomainError::ArchivedAccount:
-            return UseCaseError::ArchivedAccount;
+            return UseCaseError::DomainRuleViolation;
         case DomainError::InvalidCategoryBoard:
-            return UseCaseError::InvalidCategoryBoard;
+            return UseCaseError::DomainRuleViolation;
         case DomainError::NegativeAmountNotAllowedForThisOperation:
-            return UseCaseError::NegativeAmountNotAllowedForThisOperation;
+            return UseCaseError::DomainRuleViolation;
     }
 }
 ```
+
+说明：`UseCaseError` 这里是应用层边界上的粗粒度结果，不要求和 DomainError 或 RepositoryStatus 一一对应；更细的错误原因应保留在日志和调试上下文中。
 
 Application 可以：
 
