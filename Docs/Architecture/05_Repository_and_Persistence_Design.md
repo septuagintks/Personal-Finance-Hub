@@ -69,6 +69,9 @@ public:
     // 获取用户下的所有未归档账户
     virtual std::expected<std::vector<Account>, RepositoryError> findActiveByUser(UserId userId) = 0;
 
+    // 获取系统中所有未归档账户正在使用的币种（用于汇率刷新任务）
+    virtual std::expected<std::vector<Currency>, RepositoryError> findActiveCurrencies() = 0;
+
     // 核心：获取账户的实时余额快照（Repository 内部处理流水聚合或缓存读取）
     virtual std::expected<BalanceSnapshot, RepositoryError> balanceOf(AccountId id) = 0;
 

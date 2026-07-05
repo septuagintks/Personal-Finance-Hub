@@ -110,6 +110,7 @@ public:
 ### 3.1 每日汇率刷新任务 (Exchange Rate Sync)
 
 承接《08_Exchange_Rate_System_Design.md》，每天执行一次汇率拉取。
+这个 Job 不携带任何用户上下文；`RefreshExchangeRatesUseCase` 会自行通过账户仓储收集所有未归档账户正在使用的币种，再把币种集合传给汇率 Provider。
 
 ```cpp
 // scheduler/jobs/ExchangeRateSyncJob.cpp

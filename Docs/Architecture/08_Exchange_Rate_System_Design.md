@@ -108,8 +108,9 @@ public:
     virtual ~IExchangeRateProvider() = default;
     virtual std::string getProviderName() const = 0;
 
-    // 抓取相对于枢纽货币（如 USD）的所有支持币种的最新汇率
-    virtual std::expected<std::vector<ExchangeRate>, ProviderError> fetchLatestRates() = 0;
+    // 抓取相对于枢纽货币（如 USD）的指定活跃币种最新汇率
+    virtual std::expected<std::vector<ExchangeRate>, ProviderError> fetchLatestRates(
+        const std::vector<Currency>& targetCurrencies) = 0;
 };
 
 ```
@@ -314,20 +315,36 @@ class RefreshExchangeRatesUseCase {
 private:
     std::shared_ptr<IExchangeRateProvider> provider_;
     std::shared_ptr<IExchangeRateRepository> repository_;
+    std::shared_ptr<IAccountRepository> accountRepository_;
     std::shared_ptr<IAuditLogRepository> auditRepo_;
 
 public:
     RefreshExchangeRatesUseCase(
         std::shared_ptr<IExchangeRateProvider> provider,
         std::shared_ptr<IExchangeRateRepository> repository,
+        std::shared_ptr<IAccountRepository> accountRepository,
         std::shared_ptr<IAuditLogRepository> auditRepo)
-        : provider_(provider), repository_(repository), auditRepo_(auditRepo) {}
+        : provider_(provider), repository_(repository), accountRepository_(accountRepository), auditRepo_(auditRepo) {}
 
     std::expected<void, std::string> execute() {
         LOG_INFO << "Starting exchange rate refresh from " << provider_->getProviderName();
 
+        // 0. 先收集系统中所有未归档账户正在使用的币种，调度器本身不携带 UserId
+        auto activeCurrenciesResult = accountRepository_->findActiveCurrencies();
+        if (!activeCurrenciesResult) {
+            std::string errorMsg = "Failed to collect active currencies";
+            LOG_ERROR << errorMsg;
+            return std::unexpected(errorMsg);
+        }
+
+        const auto& activeCurrencies = activeCurrenciesResult.value();
+        if (activeCurrencies.empty()) {
+            LOG_WARN << "No active currencies found, skipping exchange rate refresh";
+            return {};
+        }
+
         // 1. 调用基础设施层请求外部 API
-        auto fetchedRatesResult = provider_->fetchLatestRates();
+        auto fetchedRatesResult = provider_->fetchLatestRates(activeCurrencies);
         if (!fetchedRatesResult) {
             std::string errorMsg = "Failed to fetch rates from " + provider_->getProviderName();
             LOG_ERROR << errorMsg;
@@ -335,7 +352,7 @@ public:
             // 写入审计日志记录失败
             auditRepo_->log(AuditAction::RefreshExchangeRate, "ExchangeRate", "bulk",
                            std::nullopt, std::nullopt,
-                           {{"status", "failed"}, {"provider", provider_->getProviderName()}});
+                           {{"status", "failed"}, {"provider", provider_->getProviderName()}, {"currency_count", activeCurrencies.size()}});
 
             return std::unexpected(errorMsg);
         }
@@ -364,7 +381,8 @@ public:
                        std::nullopt, std::nullopt,
                        {{"status", "success"},
                         {"count", rates.size()},
-                        {"provider", provider_->getProviderName()}});
+                        {"provider", provider_->getProviderName()},
+                        {"currency_count", activeCurrencies.size()}});
 
         LOG_INFO << "Successfully refreshed " << rates.size() << " exchange rates";
         return {};
@@ -531,24 +549,17 @@ public:
 
     std::string getProviderName() const override { return "OpenExchangeRates"; }
 
-    std::expected<std::vector<ExchangeRate>, ProviderError> fetchLatestRates() override {
-        // 1. 查询系统支持的货币列表
-        auto supportedCurrenciesResult = currencyRepo_->findAllEnabled();
-        if (!supportedCurrenciesResult) {
-            return std::unexpected(ProviderError::ConfigurationError);
-        }
-
-        auto supportedCurrencies = *supportedCurrenciesResult;
-
-        // 2. 构建货币白名单（排除 USD 本身）
-        std::unordered_set<std::string> targetCurrencies;
-        for (const auto& currency : supportedCurrencies) {
+    std::expected<std::vector<ExchangeRate>, ProviderError> fetchLatestRates(
+        const std::vector<Currency>& targetCurrencies) override {
+        // 1. 构建货币白名单（排除 USD 本身）
+        std::unordered_set<std::string> filteredTargets;
+        for (const auto& currency : targetCurrencies) {
             if (currency.getCode() != "USD") {
-                targetCurrencies.insert(currency.getCode());
+                filteredTargets.insert(currency.getCode());
             }
         }
 
-        if (targetCurrencies.empty()) {
+        if (filteredTargets.empty()) {
             return {}; // 系统只支持 USD，无需拉取汇率
         }
 
@@ -558,7 +569,7 @@ public:
 
         // OpenExchangeRates 默认返回所有货币，也可以通过 symbols 参数过滤
         // 例如：latest.json?app_id=xxx&symbols=CNY,EUR,JPY
-        std::string symbols = joinCurrencies(targetCurrencies);
+        std::string symbols = joinCurrencies(filteredTargets);
         req->setPath("latest.json?app_id=" + apiKey_ + "&symbols=" + symbols);
         req->setMethod(drogon::Get);
 

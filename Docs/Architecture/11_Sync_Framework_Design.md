@@ -294,6 +294,7 @@ std::expected<SyncJobResultDTO, UseCaseError> RunSyncJobUseCase::execute(
          user_id BIGINT NOT NULL REFERENCES users(id),
          account_id BIGINT NOT NULL REFERENCES accounts(id),
          sync_job_id BIGINT NOT NULL,
+        statement_cutoff_at TIMESTAMPTZ NOT NULL,
          external_balance NUMERIC(20,8) NOT NULL,
          internal_balance NUMERIC(20,8) NOT NULL,
          difference NUMERIC(20,8) NOT NULL,
@@ -305,9 +306,9 @@ std::expected<SyncJobResultDTO, UseCaseError> RunSyncJobUseCase::execute(
      ```
    * 差错单状态标记为 `PENDING_MANUAL_REVIEW`（待人工审核），并通过 `EventBus` 发布 `SyncDiscrepancyDetectedEvent`，在前端 Dashboard 弹出醒目的对账差异警告。
 2. **人工平账机制（One-Click Reconciliation）**：
-   * 系统在应用层提供 `ResolveDiscrepancyUseCase`。当用户在前端点击“一键平账”时，系统将自动生成一条类型为 `TransactionType::Adjustment` 的特殊流水：
+     * 系统在应用层提供 `ResolveDiscrepancyUseCase`。当用户在前端点击“一键平账”时，系统将自动生成一条类型为 `TransactionType::Adjustment` 的特殊流水，并把交易时间固定为该差错单的 `statement_cutoff_at`：
      * **金额**：等于差错单中的 `difference`（可正可负）。
-     * **分类**：归入系统预设的 `SYSTEM_RECONCILIATION`（系统平账调整）分类。
+         * **分类**：归入支出板块下的系统预设 `SYSTEM_RECONCILIATION`（系统平账调整）分类，保持分类语义固定。
      * **备注**：自动填充为 `"系统自动平账 - 关联对账单 #" + discrepancyId`。
    * 该流水在同一个数据库事务中保存，并将差错单状态更新为 `RESOLVED`，同时关联新生成的流水 ID，实现账务的无缝自愈。
 
@@ -380,7 +381,9 @@ public:
 **痛点**：当用户用一张银行卡还另一张信用卡的钱时，银行 A 会同步一条 `Expense`，信用卡 B 会同步一条 `Income`。如果不处理，报表中的总支出和总收入都会虚高。
 
 - **策略（对冲融合）**：在跑完所有 SyncJob 后，调度器触发 `TransferDetectorJob`。
-- **逻辑**：在过去 48 小时内，寻找金额绝对值完全相同的一笔 Income 和一笔 Expense。如果发现，系统将这两笔独立的单据“融合（Merge）”，升级为一个 `TransferAggregate`（生成 `transfer_groups` 记录，并修改 `type = 'transfer'`）。
+- **逻辑**：先让 Provider 继续按原始方向输出 `Income` / `Expense`，再在过去 48 小时内寻找满足以下条件的一对记录：金额绝对值相同、币种相同、方向相反、对方账户互相匹配，且外部流水时间足够接近。若发现匹配，系统将这两笔独立的单据“融合（Merge）”，升级为一个 `TransferAggregate`（生成 `transfer_groups` 记录，并把原始流水标记为已并入转账）。
+
+- **边界**：若无法可靠匹配，则保持原始 `Income` / `Expense` 记录不变，交由用户后续手工修正，避免误合并。
 
 ### 6.3 软性对账预警 (Soft Reconciliation)
 
