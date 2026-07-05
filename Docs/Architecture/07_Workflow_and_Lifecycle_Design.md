@@ -93,9 +93,11 @@ Architecture: Clean Architecture + Lightweight DDD
      c. INSERT INTO transactions (..., type='transfer', amount=-1000, transfer_group_id=uuid).
      d. INSERT INTO transactions (..., type='transfer', amount=7180, transfer_group_id=uuid).
      e. INSERT INTO transactions (..., type='adjustment', amount=-10, category='FEE').
-     f. 异步触发/同步更新 account_balance_cache (USD 扣 1010，CNY 增 7180)。
+   f. 将 TransferCompletedEvent 写入 `domain_events_outbox`（同一事务）。
+   g. 更新 account_balance_cache (USD 扣 1010，CNY 增 7180) 或登记缓存失效事件。
 
 8. [Use Case] 事务成功提交，返回 Void 或 Success DTO。
+9. [Scheduler/OutboxPublisherJob] 后台扫描 outbox，发布 TransferCompletedEvent 给缓存、报表和审计处理器。
 
 ```
 
@@ -129,10 +131,11 @@ Architecture: Clean Architecture + Lightweight DDD
 7.   [Repository - Step C] accountRepo->physicalDelete(5)
      - 基础设施层执行: DELETE FROM accounts WHERE id = 5;
 
-8.   [Repository - Step D] auditRepo->log(Action="DANGEROUS_DELETE", Target="Account: 5")
-     - 写入一条审计日志，留作防范和追溯。
+8.   [Repository - Step D] uow_->registerEvent(std::make_shared<AccountDangerouslyDeletedEvent>(accountId, userId))
+   - 将危险删除事件写入 outbox，由后台处理器生成审计日志和安全通知。
 
 9. [Use Case] 事务提交。由于没有级联删除，顺序 A -> B -> C 保证了不会触发外键约束报错。
+10. [Scheduler/OutboxPublisherJob] 后台消费危险删除事件，写入 AuditLog 并发送预警通知。
 
 ```
 
@@ -219,7 +222,7 @@ Architecture: Clean Architecture + Lightweight DDD
 - Drogon 的 `execSqlSync` 抛出异常或返回空。
 - Repository 捕获异常，包装为 `std::unexpected(RepositoryError::DatabaseError)` 返回给 Use Case。
 - Use Case 所在的 `IUnitOfWork` 闭包检测到内部返回了 unexpected。
-- **UoW 自动触发 DB Rollback**，确保部分写入的流水（例如转账只写了出账没写入账）被撤销。
+- **UoW 自动触发 DB Rollback**，确保部分写入的流水和 outbox 记录（例如转账只写了出账没写入账）被撤销。
 
 ---
 

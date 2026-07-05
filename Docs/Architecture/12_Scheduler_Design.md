@@ -169,6 +169,56 @@ public:
 
 ```
 
+### 3.3 Outbox 投递任务 (OutboxPublisherJob)
+
+负责从 `domain_events_outbox` 读取已提交但尚未投递的事件，并通过 `IEventBus` 分发给本地处理器。
+
+```cpp
+// scheduler/jobs/OutboxPublisherJob.cpp
+#include "scheduler/IJob.hpp"
+#include "application/events/IEventBus.hpp"
+
+class OutboxPublisherJob : public IJob {
+private:
+    std::shared_ptr<IEventBus> eventBus_;
+    drogon::TimerId timerId_;
+    double intervalSeconds_ = 10.0;
+
+public:
+    OutboxPublisherJob(std::shared_ptr<IEventBus> eventBus)
+        : eventBus_(eventBus), timerId_(drogon::kInvalidTimerId) {}
+
+    std::string getJobName() const override { return "OutboxPublisherJob"; }
+
+    void start() override {
+        timerId_ = drogon::app().getLoop()->runEvery(intervalSeconds_, [this]() {
+            this->triggerNow();
+        });
+    }
+
+    void stop() override {
+        if (timerId_ != drogon::kInvalidTimerId) {
+            drogon::app().getLoop()->invalidateTimer(timerId_);
+            timerId_ = drogon::kInvalidTimerId;
+        }
+    }
+
+    void triggerNow() override {
+        // 1. 使用 FOR UPDATE SKIP LOCKED / advisory lock claim 待处理 outbox 记录
+        // 2. 反序列化 payload -> IDomainEvent
+        // 3. 调用 eventBus_->publish(event)
+        // 4. 成功后标记 published，失败后递增 retry_count 并记录 last_error
+    }
+};
+```
+
+**并发规则：**
+
+1. 多实例部署时，必须使用 `pg_try_advisory_lock` 或 `FOR UPDATE SKIP LOCKED` 避免重复投递
+2. 处理成功后再标记 `published`
+3. 处理失败后更新 `retry_count`、`next_retry_at` 和 `last_error`
+4. 超过最大重试次数后进入 `dead_letter`
+
 ---
 
 ## 4. 异常捕获与容错机制 (Resilience)
@@ -256,10 +306,13 @@ int main() {
     auto rateProvider = std::make_shared<OpenExchangeRatesProvider>("API_KEY");
     auto rateRepo = std::make_shared<ExchangeRateRepositoryImpl>(drogon::app().getDbClient("default"));
     auto rateUseCase = std::make_shared<RefreshExchangeRatesUseCase>(rateProvider, rateRepo);
+    auto eventBus = std::make_shared<LocalEventBus>();
+    auto outboxJob = std::make_shared<OutboxPublisherJob>(eventBus);
 
     // 2. 初始化调度器并注册 Jobs
     JobManager jobManager;
     jobManager.registerJob(std::make_shared<ExchangeRateSyncJob>(rateUseCase));
+    jobManager.registerJob(outboxJob);
 
     // 3. 在 Drogon 启动前或启动回调中启动任务
     drogon::app().registerBeginningAdvice([&jobManager]() {

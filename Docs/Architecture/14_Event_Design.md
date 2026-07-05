@@ -15,8 +15,8 @@ Architecture: Clean Architecture (Event-Driven)
 **核心设计原则：**
 
 1. **解耦副作用（Decoupling Side Effects）**：核心 Use Case 只负责主业务（如扣款），后续的附属操作（如刷新统计缓存、写日志）由事件处理器（Event Handlers）异步或同步接管。
-2. **纯内存总线（In-Process Bus）**：目前阶段不引入 Kafka 或 RabbitMQ 等沉重的外部消息中间件，直接利用 C++23 在进程内实现一个轻量级的 Pub/Sub 机制。
-3. **事务后触发（Post-Commit Dispatch）**：**极其重要！** 只有当数据库事务（Unit of Work）真正 `Commit` 成功后，才能对外发送事件。否则一旦数据库回滚，副作用（如邮件已经发出去）将无法撤回。
+2. **事务外发箱（Transactional Outbox）**：业务事务内只写业务事实和 outbox 记录，绝不在提交前直接对外派发事件。只有当同一数据库事务中的 outbox 记录与业务数据一起成功提交后，事件才具备可投递资格。
+3. **进程内总线（In-Process Bus）**：目前阶段不引入 Kafka 或 RabbitMQ 等沉重的外部消息中间件，仍然使用 C++23 在进程内实现轻量级 Pub/Sub；但它只负责消费 outbox 已提交事件，不参与业务事务提交路径。
 
 ---
 
@@ -93,13 +93,38 @@ struct TransferCompletedEvent : public IDomainEvent {
 ```
 
 ```cpp
+// domain/events/TransactionCreatedEvent.hpp
+#pragma once
+#include "domain/events/IDomainEvent.hpp"
+#include "domain/entities/Account.hpp" // 仅需 AccountId
+#include "domain/entities/Transaction.hpp" // 仅需 TransactionId
+#include "domain/value_objects/StrongId.hpp" // 仅需 UserId
+
+struct TransactionCreatedEvent : public IDomainEvent {
+    UserId userId;
+    TransactionId transactionId;
+    AccountId accountId;
+    std::chrono::system_clock::time_point occurredAt;
+
+    TransactionCreatedEvent(UserId uid, TransactionId txId, AccountId accId)
+        : userId(uid), transactionId(txId), accountId(accId),
+          occurredAt(std::chrono::system_clock::now()) {}
+
+    std::string getEventName() const override { return "TransactionCreated"; }
+    std::chrono::system_clock::time_point getOccurredAt() const override { return occurredAt; }
+};
+
+```
+
+```cpp
 // domain/events/AccountDangerouslyDeletedEvent.hpp
 #pragma once
 #include "domain/events/IDomainEvent.hpp"
+#include "domain/value_objects/StrongId.hpp" // 仅需 AccountId / UserId
 
 struct AccountDangerouslyDeletedEvent : public IDomainEvent {
-    int64_t accountId;
-    int64_t userId;
+    AccountId accountId;
+    UserId userId;
     std::chrono::system_clock::time_point occurredAt;
 
     // 构造函数和接口实现...
@@ -111,7 +136,7 @@ struct AccountDangerouslyDeletedEvent : public IDomainEvent {
 
 ## 3. 基础设施层：轻量级事件总线 (Event Bus)
 
-在 `infrastructure/events/` 目录下，利用现代 C++ 的 `std::type_index` 和 `std::function` 实现一个强类型的本地事件总线。
+在 `infrastructure/events/` 目录下，利用现代 C++ 的 `std::type_index` 和 `std::function` 实现一个强类型的本地事件总线。它是 outbox 消费侧的最终分发器，而不是业务写路径的一部分。
 
 ### 3.1 事件总线接口与实现
 
@@ -157,7 +182,7 @@ public:
         });
     }
 
-    // 异步派发事件
+    // 派发已经从 outbox 取出的事件
     void publish(const std::shared_ptr<IDomainEvent>& event) override {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = handlers_.find(typeid(*event));
@@ -180,13 +205,13 @@ public:
 
 ---
 
-## 4. 事务整合：保证一致性 (Post-Commit Dispatch)
+## 4. 事务整合：保证一致性 (Transactional Outbox)
 
-正如之前强调的，事件不能在 Use Case 执行一半的时候发出去。我们需要稍微改造我们在《05_Repository_and_Persistence_Design.md》中设计的 `IUnitOfWork`。
+正如之前强调的，事件不能在 Use Case 执行一半的时候发出去。我们需要改造《05_Repository_and_Persistence_Design.md》中设计的 `IUnitOfWork`，让它在同一个数据库事务里同时写业务表和 outbox 表。
 
 ### 4.1 工作单元聚合事件
 
-我们在 `IUnitOfWork` 中增加事件收集的功能。在实体/聚合根处理时，把产生的事件“暂存”在 UoW 中。
+我们在 `IUnitOfWork` 中增加事件收集的功能。在实体/聚合根处理时，把产生的事件“暂存”在 UoW 中。这个 UoW 必须是 request-scoped / 单次事务作用域，不能跨请求共享。
 
 ```cpp
 // application/persistence/IUnitOfWork.hpp (改造后)
@@ -202,10 +227,10 @@ class IUnitOfWork {
 public:
     virtual ~IUnitOfWork() = default;
 
-    // 暂存要在事务成功后派发的事件
+    // 暂存要写入 outbox 的事件
     virtual void registerEvent(std::shared_ptr<IDomainEvent> event) = 0;
 
-    // 执行事务
+    // 执行事务；实现层会在提交业务写入前，把已暂存事件写入 outbox
     virtual std::expected<void, RepositoryError> executeInTransaction(
         std::function<std::expected<void, RepositoryError>()> action
     ) = 0;
@@ -215,44 +240,31 @@ public:
 
 ### 4.2 事务完成后的自动派发与异步解耦
 
-在基础设施层（Drogon UoW 实现）拦截 Commit 状态。必须确保事件派发逻辑紧跟在**数据库连接真正 Commit 成功**的物理动作之后，而不是仅仅在 `action()` 返回 `has_value()` 时。
+在基础设施层（Drogon UoW 实现）拦截 Commit 状态。必须确保业务写入和 outbox 写入共处一个数据库事务，而不是仅仅在 `action()` 返回 `has_value()` 时就对外发布。
 
-同时，为了防止事件处理器（Event Handlers）执行缓慢（如发送邮件、调用外部 Webhook）或抛出异常拖慢主业务线程，系统引入了**异步解耦派发**与**本地消息表（Outbox Pattern）**设计：
+提交成功后的事件投递由后台 `OutboxPublisherJob` 负责，它从 outbox 扫描待投递事件，再通过 `IEventBus` 分发给本地处理器。这样既避免了主业务线程阻塞，也保证了事务一致性。
 
-1. **线程池异步派发**：
-   * `IEventBus` 内部集成 Drogon 的线程池或自定义的轻量级工作线程池。
-   * 区分**同步订阅者**（如 `BalanceCacheInvalidator`，需要强一致性更新缓存）和**异步订阅者**（如 `AuditLogHandler`、`SecurityNotificationHandler`）。
-   * 异步订阅者的执行被封装为任务投递到线程池中，实现主业务线程的即时释放。
-2. **本地消息表（Outbox Pattern）预留**：
-   * 为了保证在进程崩溃或网络抖动时事件“至少一次投递（At-Least-Once Delivery）”，系统设计了本地消息表：
-     ```sql
-     CREATE TABLE outbox_events (
-         id BIGSERIAL PRIMARY KEY,
-         event_id UUID NOT NULL UNIQUE,
-         event_name VARCHAR(128) NOT NULL,
-         payload JSONB NOT NULL,
-         status VARCHAR(32) NOT NULL DEFAULT 'PENDING', -- PENDING, PROCESSED, FAILED
-         retry_count INT NOT NULL DEFAULT 0,
-         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-     );
-     ```
-   * 在 `DrogonUnitOfWork` 事务闭包中，将事件序列化为 JSON 并与业务数据在**同一个数据库事务**中写入 `outbox_events` 表。
-   * 事务 Commit 成功后，立即触发一次异步扫描；同时，调度器中的 `OutboxPublisherJob` 每隔 10 秒扫描一次 `PENDING` 状态的事件进行重试派发，确保事件的绝对可靠性。
+1. **本地消息表（Outbox Pattern）**：
+   * 为了保证在进程崩溃、网络抖动或发布器重启时事件“至少一次投递（At-Least-Once Delivery）”，系统使用本地消息表 `domain_events_outbox` 作为事实来源。
+   * 在 `DrogonUnitOfWork` 事务闭包中，将事件序列化为 JSON，并与业务数据在**同一个数据库事务**中写入 `domain_events_outbox` 表。
+   * 业务事务 Commit 成功后，不直接调用 handler；由 Scheduler 中的 `OutboxPublisherJob` 扫描 `pending/failed` 事件并投递到 `IEventBus`。
+2. **处理器分层**：
+   * `IEventBus` 内部仍可使用 Drogon 的线程池或自定义工作线程池，以避免单个 handler 阻塞 outbox publisher。
+   * 区分**同步订阅者**（如 `BalanceCacheInvalidator`，需要尽快更新缓存）和**异步订阅者**（如 `AuditLogHandler`、`SecurityNotificationHandler`）。
+   * 无论同步还是异步，handler 都必须幂等，因为 outbox 允许重试。
 
 ```cpp
 // infrastructure/persistence/DrogonUnitOfWork.cpp (改造片段)
-#include "application/events/IEventBus.hpp"
+#include "domain/events/IDomainEvent.hpp"
 
 class DrogonUnitOfWork : public IUnitOfWork {
 private:
     drogon::orm::DbClientPtr dbClient_;
-    std::shared_ptr<IEventBus> eventBus_;
     std::vector<std::shared_ptr<IDomainEvent>> pendingEvents_;
 
 public:
-    DrogonUnitOfWork(drogon::orm::DbClientPtr dbClient, std::shared_ptr<IEventBus> eventBus)
-        : dbClient_(dbClient), eventBus_(eventBus) {}
+    DrogonUnitOfWork(drogon::orm::DbClientPtr dbClient)
+        : dbClient_(dbClient) {}
 
     void registerEvent(std::shared_ptr<IDomainEvent> event) override {
         pendingEvents_.push_back(std::move(event));
@@ -267,22 +279,25 @@ public:
         auto result = action();
 
         if (result.has_value()) {
-            // 显式提交事务，并捕获物理提交结果
             try {
-                // 假设 Drogon 事务对象支持显式 commit()
-                // 只有在底层连接真正 Commit 成功后，才派发事件
-                trans->commit(); 
-                
+                // 先在同一事务中写入 outbox，再提交业务事实
                 for (const auto& ev : pendingEvents_) {
-                    // 内部根据订阅者类型，决定是同步调用还是投递到线程池异步调用
-                    eventBus_->publish(ev);
+                    auto payload = serializeDomainEvent(*ev);
+                    trans->execSqlSync(
+                        "INSERT INTO domain_events_outbox (id, event_name, aggregate_type, aggregate_id, payload, status, retry_count, max_retry_count, next_retry_at, created_at) "
+                        "VALUES ($1, $2, $3, $4, $5, 'pending', 0, 5, NOW(), NOW())",
+                        generateOutboxId(), ev->getEventName(), getAggregateType(*ev), getAggregateId(*ev), payload
+                    );
                 }
+
+                trans->commit(); 
                 pendingEvents_.clear();
                 return {};
             } catch (const std::exception& e) {
-                LOG_ERROR << "Transaction commit failed physically: " << e.what();
+                LOG_ERROR << "Transaction commit or outbox write failed physically: " << e.what();
+                trans->rollback();
                 pendingEvents_.clear();
-                return std::unexpected(RepositoryError{RepositoryStatus::DatabaseError, "Physical commit failed"});
+                return std::unexpected(RepositoryError{RepositoryStatus::DatabaseError, "Outbox write or commit failed"});
             }
         } else {
             // 显式回滚，直接丢弃暂存的事件
@@ -294,6 +309,8 @@ public:
 };
 ```
 
+
+说明：`serializeDomainEvent`、`generateOutboxId`、`getAggregateType`、`getAggregateId` 由基础设施层实现。它们只负责把领域事件转换为 outbox 行，不负责真正的 handler 执行。
 ---
 
 ## 5. 业务用例中的应用：危险删除
@@ -315,7 +332,7 @@ return uow_->executeInTransaction([&]() -> std::expected<void, RepositoryError> 
     // 原来的审计日志写入和缓存清理去掉了！
     // 替换为：向 UoW 注册一个事件
     uow_->registerEvent(std::make_shared<AccountDangerouslyDeletedEvent>(
-        accountId.value(), userId.value()
+        accountId, userId
     ));
 
     return {};
@@ -325,12 +342,12 @@ return uow_->executeInTransaction([&]() -> std::expected<void, RepositoryError> 
 
 ### 5.2 独立的事件处理器 (Event Handlers)
 
-在系统启动时（例如在 `main.cpp` 中），我们将处理器注册到总线上。这种设计完全符合开闭原则（Open/Closed Principle）。
+在系统启动时（例如在 `main.cpp` 中），我们将处理器注册到总线上。这些处理器由 `OutboxPublisherJob` 在成功 claim outbox 事件后触发。
 
 ```cpp
 // 处理器 1：负责写高危审计日志
 eventBus->subscribe<AccountDangerouslyDeletedEvent>([auditRepo](const auto& ev) {
-    auditRepo->log("DANGEROUS_DELETE", "Account", ev->accountId, "User: " + std::to_string(ev->userId));
+    auditRepo->record(/* 由 AccountDangerouslyDeletedEvent 生成的 AuditLog */);
 });
 
 // 处理器 2：负责发预警邮件给用户
@@ -342,16 +359,16 @@ eventBus->subscribe<AccountDangerouslyDeletedEvent>([emailService](const auto& e
 
 ---
 
-## 6. 未来扩容预留：发件箱模式 (Outbox Pattern)
+## 6. Outbox 投递工作流
 
-当前的 `LocalEventBus` 是基于内存的。如果 C++ 进程在 `Commit` 成功但还没来得及 `publish` 事件时崩溃，事件就会丢失。
-在单机环境下这勉强可以接受（因为我们的核心记账数据已经安全落盘了），但如果未来要保证“邮件必达”或者接入微服务，可以预留**发件箱模式 (Outbox Pattern)**：
+当前的标准实现就是 Outbox Pattern。`LocalEventBus` 只是最终的本地分发器；真正的可靠性由 `domain_events_outbox` 和 `OutboxPublisherJob` 保证。
 
 1. 在 `transactions` 等核心表所在同一个 PostgreSQL 库里建一张表 `domain_events_outbox`。
-2. 在 `executeInTransaction` 的同一个事务里，把要把派发的事件作为 JSON 插入到 `outbox` 表中。
-3. 让我们在《12_Scheduler_Design.md》中设计的 Scheduler  定时轮询这张表，把还没发送的事件真正发到外部队列或执行。
+2. 在 `executeInTransaction` 的同一个事务里，把要派发的事件作为 JSON 插入到 `domain_events_outbox`。
+3. 在《12_Scheduler_Design.md》中定义的 `OutboxPublisherJob` 定时轮询这张表，逐条 claim、投递、更新状态。
+4. `OutboxPublisherJob` 成功投递后，再由 `IEventBus` 将事件分发给本地 handler。
 
-由于这会引入不小的复杂度，当前版本可以先依靠 C++ 内存派发，但在系统架构层面必须预留切换到发件箱模式的底座。
+由于 outbox 允许重试，同一事件可能被投递多次，因此所有 handler 必须幂等。
 
 ### 6.1 Outbox 表结构
 
@@ -388,7 +405,7 @@ WHERE status IN ('pending', 'failed');
 
 1. Use Case 在同一个业务事务内写入业务表和 `domain_events_outbox`
 2. 事务回滚时，业务数据和事件都回滚
-3. 事务提交后，由 Scheduler 或专用 Worker 派发事件
+3. 事务提交后，由 `OutboxPublisherJob` 派发事件
 4. Event payload 必须只包含 ID、时间和最小摘要
 5. Event handler 必须幂等，允许同一事件被重试处理
 

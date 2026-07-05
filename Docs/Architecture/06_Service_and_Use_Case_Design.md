@@ -225,8 +225,20 @@ public:
 
         // 3. 编排持久化阶段：通过 Unit Of Work 开启强 ACID 事务
         auto txResult = uow_->executeInTransaction([&]() -> std::expected<void, RepositoryError> {
-            // 保存转账聚合（基础设施内部自动插入一条 transfer_groups 并解离为两条 type='transfer' 的流水）
-            return txRepo_->saveTransfer(*aggregateResult);
+            // 保存转账聚合，返回持久化后的 transfer_group_id
+            auto transferGroupIdResult = txRepo_->saveTransfer(*aggregateResult);
+            if (!transferGroupIdResult) {
+                return std::unexpected(transferGroupIdResult.error());
+            }
+
+            // 将领域事件登记到当前 UoW，随后由 outbox 写入同一事务
+            uow_->registerEvent(std::make_shared<TransferCompletedEvent>(
+                sourceOpt->getId(),
+                targetOpt->getId(),
+                *transferGroupIdResult
+            ));
+
+            return {};
         });
 
         if (!txResult) {
@@ -246,6 +258,7 @@ public:
 ```cpp
 // application/use_cases/CreateTransactionUseCase.hpp
 #pragma once
+#include <chrono>
 #include <memory>
 #include "domain/repositories/IAccountRepository.hpp"
 #include "domain/repositories/ITransactionRepository.hpp"
@@ -286,7 +299,19 @@ public:
 
         // 利用事务持久化
         auto saveResult = uow_->executeInTransaction([&]() -> std::expected<void, RepositoryError> {
-            return txRepo_->saveSingle(transaction);
+            auto transactionIdResult = txRepo_->saveSingle(transaction);
+            if (!transactionIdResult) {
+                return std::unexpected(transactionIdResult.error());
+            }
+
+            uow_->registerEvent(std::make_shared<TransactionCreatedEvent>(
+                accountOpt->getOwner(),
+                *transactionIdResult,
+                accountOpt->getId(),
+                std::chrono::system_clock::now()
+            ));
+
+            return {};
         });
 
         if (!saveResult) return std::unexpected(UseCaseError::InfrastructureFailure);

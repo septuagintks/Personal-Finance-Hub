@@ -15,7 +15,7 @@ Architecture: Clean Architecture + Lightweight DDD
 1. **接口与实现彻底分离**：仓储接口（Interfaces）属于 `Domain` 层（纯 C++23，不包含任何 SQL、Drogon 或网络依赖）；仓储实现（Implementations）属于 `Infrastructure` 层。
 2. **面向聚合根（Aggregate Root）**：原则上只有聚合根才拥有独立的仓储。在本项目中，`User`（含偏好）、`Account`、`TransferAggregate` 拥有独立仓储。由于 `Transaction` 和 `Adjustment` 的生命周期与 `Account` / `Transfer` 强绑定，它们可以通过专门的仓储加速查询，但写入必须符合聚合的约束。
 3. **隐式缓存策略**：业务层（Domain/Application）不感知缓存的存在。Repository 内部负责维护 `account_balance_cache` 的命中断接和重建，对外只返回标准的领域对象。
-4. **强类型与错误处理**：使用 C++23 的强类型 ID（如 `AccountId`）防止参数传错。对于仓储查找失败或数据库异常，使用 `std::expected` 传递中性错误，不滥用异常（Exceptions），保持控制流清晰。Repository Error 只表达“数据访问结果”，不携带 Drogon、SQL 或连接池等实现细节。
+4. **强类型、事件与错误处理**：使用 C++23 的强类型 ID（如 `AccountId`）防止参数传错。对于仓储查找失败或数据库异常，使用 `std::expected` 传递中性错误，不滥用异常（Exceptions），保持控制流清晰。Repository Error 只表达“数据访问结果”，不携带 Drogon、SQL 或连接池等实现细节；同一个 UnitOfWork 事务还负责把领域事件写入 `domain_events_outbox`，不在提交前直接对外派发。
 5. **Use Case 与 Domain Service 分层**：Application 层只使用 `application/use_cases/` 下的具体 Use Case 进行事务和仓储编排；Domain 层只使用 `domain/services/` 下的纯业务规则服务。不要定义跨层同名的 `AccountingService`、`RefreshExchangeRatesUseCase` 或 `ReportService`。
 6. **领域概念不强制等同表结构**：`UserPreference` 是 Domain Concept，拥有独立的 `user_preferences` 表，由 `IUserRepository` 联合查询或通过独立的 `IUserPreferenceRepository` 进行读写。`TransferGroup` 则相反，只是 `transfer_groups` 持久化元数据载体，不是 Domain Entity。
 7. **Read Model 边界**：`BalanceSnapshot` 是 Value Object，也是账户余额查询的 Read Model。它没有独立身份或生命周期，Repository 可以从 `account_balance_cache` 或流水聚合映射得到。
@@ -90,17 +90,18 @@ public:
 #include <expected>
 #include "domain/aggregates/TransferAggregate.hpp"
 #include "domain/entities/Transaction.hpp"
+#include "domain/value_objects/StrongId.hpp"
 #include "domain/value_objects/DateRange.hpp"
 
 class ITransactionRepository {
 public:
     virtual ~ITransactionRepository() = default;
 
-    // 保存单笔常规收支流水（Income/Expense/Adjustment）
-    virtual std::expected<void, RepositoryError> saveSingle(const Transaction& transaction) = 0;
+    // 保存单笔常规收支流水（Income/Expense/Adjustment），返回持久化后的 TransactionId
+    virtual std::expected<TransactionId, RepositoryError> saveSingle(const Transaction& transaction) = 0;
 
-    // 保存转账聚合（自动拆分为多笔底层流水和一条 transfer_groups 记录）
-    virtual std::expected<void, RepositoryError> saveTransfer(const TransferAggregate& transfer) = 0;
+    // 保存转账聚合（自动拆分为多笔底层流水和一条 transfer_groups 记录），返回持久化后的 TransferGroupId
+    virtual std::expected<TransferGroupId, RepositoryError> saveTransfer(const TransferAggregate& transfer) = 0;
 
     // 按条件查询流水，支持分页。内部自动过滤/包含软删除状态
     virtual std::expected<std::vector<Transaction>, RepositoryError> findByAccount(
@@ -409,15 +410,21 @@ public:
 ```cpp
 // application/persistence/IUnitOfWork.hpp
 #pragma once
+#include <memory>
 #include <functional>
 #include <expected>
+#include <vector>
+#include "domain/events/IDomainEvent.hpp"
 #include "domain/repositories/RepositoryError.hpp"
 
 class IUnitOfWork {
 public:
     virtual ~IUnitOfWork() = default;
 
-    // 在一个独立的闭包中执行事务，闭包返回 false 或抛出异常时自动回滚
+    // 暂存要写入 outbox 的领域事件；实现必须是 request-scoped，不得跨请求共享
+    virtual void registerEvent(std::shared_ptr<IDomainEvent> event) = 0;
+
+    // 在一个独立的闭包中执行事务，闭包返回失败时自动回滚
     virtual std::expected<void, RepositoryError> executeInTransaction(
         std::function<std::expected<void, RepositoryError>()> action
     ) = 0;
@@ -427,7 +434,7 @@ public:
 
 ### 4.3 基础设施层事务实现
 
-利用 Drogon 的 `Transaction` 对象保持范围原子性。在现代 C++23 中，通过将 Repository 实例绑定到当前的事务上下文中来实现。
+利用 Drogon 的 `Transaction` 对象保持范围原子性。实现层必须是 request-scoped / 单次用例作用域，`pendingEvents_` 只允许存在于单个 `DrogonUnitOfWork` 实例内，不能被并发请求共享。
 
 ```cpp
 // infrastructure/persistence/DrogonUnitOfWork.cpp
@@ -437,46 +444,57 @@ public:
 class DrogonUnitOfWork : public IUnitOfWork {
 private:
     drogon::orm::DbClientPtr dbClient_;
+    std::vector<std::shared_ptr<IDomainEvent>> pendingEvents_;
 
 public:
     DrogonUnitOfWork(drogon::orm::DbClientPtr dbClient) : dbClient_(dbClient) {}
 
-    // 跨账户转账加锁示例，严格按升序执行行级锁，防止死锁
-    std::expected<void, RepositoryError> lockAccounts(AccountId fromId, AccountId toId) {
-        int64_t first = std::min(fromId.value(), toId.value());
-        int64_t second = std::max(fromId.value(), toId.value());
-
-        try {
-            dbClient_->execSqlSync("SELECT id FROM accounts WHERE id = $1 FOR UPDATE", first);
-            dbClient_->execSqlSync("SELECT id FROM accounts WHERE id = $2 FOR UPDATE", second);
-            return {};
-        } catch (const std::exception& e) {
-            return std::unexpected(RepositoryError{RepositoryStatus::Conflict, e.what()});
-        }
+    void registerEvent(std::shared_ptr<IDomainEvent> event) override {
+        pendingEvents_.push_back(std::move(event));
     }
 
     std::expected<void, RepositoryError> executeInTransaction(
         std::function<std::expected<void, RepositoryError>()> action
     ) override {
+        pendingEvents_.clear();
         // 创建 Drogon 底层的 Transaction 智能指针
         auto trans = dbClient_->newTransaction();
-
-        // 注意：在实际工程中，你需要通过某种 Context 机制（例如 ThreadLocal
-        // 或传递自定义的 TransRepository）让 action 内部的 SQL 全都走这个 trans 对象。
 
         auto result = action();
 
         if (result.has_value()) {
-            // 执行成功，提交事务
-            return {}; // trans 析构时若未手动修改状态或提交，Drogon 默认会根据策略处理，显式 commit 更好
+            try {
+                // 同一数据库事务内先写 outbox，再提交业务事实
+                for (const auto& event : pendingEvents_) {
+                    auto payload = serializeDomainEvent(*event); // 序列化为 JSON
+                    trans->execSqlSync(
+                        "INSERT INTO domain_events_outbox (id, event_name, aggregate_type, aggregate_id, payload, status, retry_count, max_retry_count, next_retry_at, created_at) "
+                        "VALUES ($1, $2, $3, $4, $5, 'pending', 0, 5, NOW(), NOW())",
+                        generateOutboxId(), event->getEventName(), getAggregateType(*event), getAggregateId(*event), payload
+                    );
+                }
+
+                trans->commit();
+                pendingEvents_.clear();
+                return {};
+            } catch (const std::exception& e) {
+                LOG_ERROR << "Transaction commit or outbox write failed: " << e.what();
+                trans->rollback();
+                pendingEvents_.clear();
+                return std::unexpected(RepositoryError{RepositoryStatus::DatabaseError, "Outbox write or commit failed"});
+            }
         } else {
-            // 执行失败，返回错误，Drogon Transaction 在析构时会自动 Rollback
+            // 执行失败，回滚事务并丢弃暂存事件
+            trans->rollback();
+            pendingEvents_.clear();
             return std::unexpected(result.error());
         }
     }
 };
 
 ```
+
+说明：`serializeDomainEvent`、`getAggregateType`、`getAggregateId`、`generateOutboxId` 由基础设施层实现。它们的职责是把领域事件转换为 outbox 行，而不是把事件直接发布到订阅者。
 
 ---
 
