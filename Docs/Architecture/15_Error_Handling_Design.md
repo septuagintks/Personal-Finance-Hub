@@ -92,7 +92,7 @@ Presentation 层统一映射：
 
 ## 4. Layer Rules
 
-### Domain Layer
+### 4.1 Domain Layer
 
 Domain 层不用异常表达业务控制流。
 
@@ -111,7 +111,7 @@ DomainError 只描述纯业务错误：
 
 Domain 不记录日志、不访问数据库、不知道 HTTP。
 
-### Application Layer
+### 4.2 Application Layer
 
 Application 层负责把 DomainError、RepositoryError、ProviderError 映射为 UseCaseError。
 
@@ -165,7 +165,7 @@ Application 可以：
 - 注册 Domain Event
 - 写 AuditLog
 
-### Infrastructure Layer
+### 4.3 Infrastructure Layer
 
 Infrastructure 层可以遇到底层异常，但必须捕获并转换。
 

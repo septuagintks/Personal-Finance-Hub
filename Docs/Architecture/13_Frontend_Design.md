@@ -94,11 +94,11 @@ http.interceptors.response.use(
 
 我们将高频使用且不易变动的数据放入全局状态，减少重复的 HTTP 请求。
 
-### 3.0 前端静态元数据缓存策略 (Frontend Static Metadata Caching)
+### 3.1 前端静态元数据缓存策略 (Frontend Static Metadata Caching)
 
 诸如支持的货币元数据列表 (`/api/v1/currencies`)、用户的偏好设置、分类树等数据，属于**低频修改、高频查询**的数据。为了极大减少对 Drogon 后端 API 的并发压力，前端设计中采用**客户端缓存 + 协商缓存**策略。
 
-#### 3.0.1 Pinia + LocalStorage 协同设计
+#### 3.1.1 Pinia + LocalStorage 协同设计
 
 在 Pinia Store 初始化时优先从客户端本地缓存（`localStorage` 或 `sessionStorage`）读取，并规定在何时触发强制刷新。
 
@@ -153,7 +153,7 @@ export const useMetadataStore = defineStore("metadata", () => {
 });
 ```
 
-#### 3.0.2 主动失效与刷新时机
+#### 3.1.2 主动失效与刷新时机
 
 前端必须在以下**关键生命周期节点**主动清除缓存并重新拉取：
 
@@ -164,7 +164,7 @@ export const useMetadataStore = defineStore("metadata", () => {
 3. **后端 ETag 机制**：
    Drogon 后端对静态元数据接口开启 `ETag` 支持。前端 Axios 默认支持浏览器缓存，当后端返回 `304 Not Modified` 时，前端直接使用浏览器本地缓存，不占用 Drogon 的业务处理线程。
 
-### 3.1 认证与偏好 Store (`useAuthStore`)
+### 3.2 认证与偏好 Store (`useAuthStore`)
 
 存储 JWT Token 和用户偏好。基准货币决定所有报表的显示单位，其他偏好决定首页、主题、日期和数字展示。
 
@@ -213,7 +213,7 @@ export const useAuthStore = defineStore("auth", () => {
 });
 ```
 
-### 3.2 账户缓存 Store (`useAccountStore`)
+### 3.3 账户缓存 Store (`useAccountStore`)
 
 由于记账表单、转账表单、过滤栏都需要选择账户，账户列表是最需要被全局缓存的实体。
 
@@ -236,7 +236,7 @@ export const useAccountStore = defineStore("account", () => {
 });
 ```
 
-### 3.3 分类 Store (`useCategoryStore`)
+### 3.4 分类 Store (`useCategoryStore`)
 
 分类树是记账表单、筛选器和分类管理页的共享数据。
 
@@ -276,7 +276,7 @@ export const useCategoryStore = defineStore("category", () => {
 2. 用户删除预设分类时，只删除自己的分类副本
 3. 分类树支持拖拽排序时，只提交同一 board 内的排序结果
 
-### 3.4 标签 Store (`useTagStore`)
+### 3.5 标签 Store (`useTagStore`)
 
 ```typescript
 export const useTagStore = defineStore("tag", () => {
@@ -301,7 +301,7 @@ export const useTagStore = defineStore("tag", () => {
 
 Tag 作为筛选和标记维度，不参与金额计算。
 
-### 3.5 偏好设置 Store 数据流
+### 3.6 偏好设置 Store 数据流
 
 `useAuthStore` 在登录后调用：
 
@@ -331,7 +331,7 @@ async function updatePreferences(payload: UserPreferenceDTO) {
 - 金额和日期格式化组件
 - 主题状态
 
-### 3.6 货币元数据 Store
+### 3.7 货币元数据 Store
 
 ```typescript
 export const useCurrencyStore = defineStore("currency", () => {

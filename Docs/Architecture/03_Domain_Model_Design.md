@@ -10,8 +10,9 @@ Architecture: Clean Architecture + Lightweight DDD
 
 This document defines the core domain models.
 
-
 ---
+
+## 2. Goals And Dependency Direction
 
 Goals:
 
@@ -19,15 +20,6 @@ Goals:
 - Account system
 - Transaction system
 - Transfer system
-│
-├── infrastructure/
-│
-├── presentation/
-│
-├── scheduler/
-│
-└── tests/
-```
 
 Dependency direction:
 
@@ -192,7 +184,7 @@ Transaction
 AuditLog
 ```
 
-### Value Objects
+### 4.3 Value Objects
 
 No identity.
 
@@ -258,7 +250,7 @@ Requirements:
 - Immutable
 - ISO-4217 valid
 
-### CurrencyMetadata
+### 6.1 CurrencyMetadata
 
 `Currency` 只表达稳定代码，`CurrencyMetadata` 表达显示和格式化信息。
 
@@ -350,7 +342,7 @@ Responsible for identity only.
 
 ---
 
-## 9.5 UserPreference Domain Concept
+### 9.1 UserPreference Domain Concept
 
 ```cpp
 class UserPreference
@@ -368,8 +360,7 @@ private:
 };
 ```
 
-`UserPreference` 是领域概念，不要求对应独立数据表。
-第一阶段可以由 Repository 从 `users.base_currency_code` 和 `user_preferences` 映射得到。
+`UserPreference` 是领域概念，由 Repository 从 `users.base_currency_code` 默认值与 `user_preferences` 扩展偏好组合映射得到。
 未来即使调整偏好表结构，也不影响 Domain 模型。
 
 `UserPreference` 可作为独立领域对象，也可作为 `User` 聚合的一部分。
@@ -504,7 +495,7 @@ enum class AccountCategory
 
 Two approaches supported.
 
-### Archive
+### 12.1 Archive
 
 Recommended.
 
@@ -515,7 +506,7 @@ Preserve statistics
 Preserve reports
 ```
 
-### Dangerous Delete
+### 12.2 Dangerous Delete
 
 Completely remove:
 
@@ -672,7 +663,7 @@ Uncategorized
 
 ---
 
-## 14.5 Tag Entity
+### 14.1 Tag Entity
 
 ```cpp
 class Tag
@@ -706,7 +697,7 @@ tax
 
 ---
 
-## 14.6 AuditLog Entity
+### 14.2 AuditLog Entity
 
 ```cpp
 class AuditLog
@@ -852,7 +843,7 @@ public:
 };
 ```
 
-### Aggregate Consistency Rules
+### 19.1 Aggregate Consistency Rules
 
 TransferAggregate 必须满足：
 
@@ -867,7 +858,7 @@ TransferAggregate 必须满足：
 
 4. Adjustment 不允许隐藏在金额字段中
 
-### Adjustment Rules
+### 19.2 Adjustment Rules
 
 Adjustments may contain: 0..N transactions.
 
@@ -942,7 +933,7 @@ ExchangeRate
 
 支持三种模式。
 
-### 模式 1
+### 22.1 模式 1
 
 已知：
 
@@ -959,7 +950,7 @@ Incoming Amount
 
 ---
 
-### 模式 2
+### 22.2 模式 2
 
 已知：
 
@@ -976,7 +967,7 @@ Rate
 
 ---
 
-### 模式 3
+### 22.3 模式 3
 
 已知：
 
@@ -993,7 +984,7 @@ Outgoing Amount
 
 ---
 
-## 22.5 Transfer Metadata
+### 22.4 Transfer Metadata
 
 TransferAggregate 是领域层的转账聚合，TransferGroup 是持久化/元数据承载体，用来存模式、汇率、快照时间等。
 
@@ -1071,7 +1062,7 @@ Repository 属于 Domain。
 
 ---
 
-### IUserRepository
+### 25.1 IUserRepository
 
 ```cpp
 class IUserRepository
@@ -1086,7 +1077,7 @@ public:
 
 ---
 
-### IAccountRepository
+### 25.2 IAccountRepository
 
 ```cpp
 class IAccountRepository
@@ -1111,7 +1102,7 @@ public:
 
 ---
 
-### ITransactionRepository
+### 25.3 ITransactionRepository
 
 ```cpp
 class ITransactionRepository
@@ -1126,7 +1117,7 @@ public:
 
 ---
 
-### IExchangeRateRepository
+### 25.4 IExchangeRateRepository
 
 ```cpp
 class IExchangeRateRepository
@@ -1154,7 +1145,7 @@ Domain Service 不允许：
 
 这些职责属于 Application Use Case。
 
-### TransferDomainService
+### 26.1 TransferDomainService
 
 负责：
 
@@ -1168,7 +1159,7 @@ Domain Service 不允许：
 
 ---
 
-### CurrencyConversionService
+### 26.2 CurrencyConversionService
 
 负责：
 
@@ -1181,7 +1172,7 @@ Domain Service 不允许：
 
 ---
 
-### BalanceCalculationService
+### 26.3 BalanceCalculationService
 
 负责：
 
@@ -1194,7 +1185,7 @@ Domain Service 不允许：
 
 ---
 
-## 26.5 Application Use Case 边界
+### 26.4 Application Use Case 边界
 
 Application Layer 使用 `application/use_cases/` 下的具体 Use Case：
 
@@ -1203,7 +1194,7 @@ CreateTransactionUseCase
 CreateTransferUseCase
 DeleteTransactionUseCase
 GenerateMonthlyReportUseCase
-RefreshExchangeRateUseCase
+RefreshExchangeRatesUseCase
 ```
 
 Application Use Case 负责：
@@ -1328,7 +1319,7 @@ struct AccountId
 | AuditLog | audit_logs | 基本对齐 | 资源 ID 允许字符串以兼容 UUID / 复合 ID |
 | SystemCategoryTemplate | system_category_templates | 基本对齐 | 主要由分类模板与初始化流程使用 |
 
-### Remaining Notes
+### 31.1 Remaining Notes
 
 1. 领域实体与数据库表不要求 1:1 完整暴露所有列，但凡 Repository 写入或查询需要的字段，必须在实体或 DTO 中有明确承载。
 2. 归档、软删除、创建时间、更新时间这类生命周期字段应优先在实体中显式表达，避免仓储层凭空补值。

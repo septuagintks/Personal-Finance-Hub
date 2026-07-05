@@ -8,11 +8,11 @@ Architecture: Clean Architecture
 
 ## 1. Project Overview
 
-### Goal
+### 1.1 Goal
 
 Build a personal finance aggregation platform focused on learning modern C++ backend development.
 
-### System Requirements:
+### 1.2 System Requirements:
 
 - Multi-account asset management
 - Transaction records
@@ -23,7 +23,7 @@ Build a personal finance aggregation platform focused on learning modern C++ bac
 - Future external platform sync
 - Future automated data collection
 
-### Architecture Priorities:
+### 1.3 Architecture Priorities:
 
 - Maintainability
 - Extensibility
@@ -57,7 +57,7 @@ Build a personal finance aggregation platform focused on learning modern C++ bac
 │  CreateTransferUseCase      │
 │  DeleteTransactionUseCase   │
 │  GenerateMonthlyReportUseCase │
-│  RefreshExchangeRateUseCase │
+│  RefreshExchangeRatesUseCase │
 └─────────────┬───────────────┘
               │
 ┌─────────────▼───────────────┐
@@ -86,7 +86,7 @@ Build a personal finance aggregation platform focused on learning modern C++ bac
 
 ## 3. Tech Stack
 
-### Backend
+### 3.1 Backend
 
 | Component     | Technology       |
 | ------------- | ---------------- |
@@ -100,7 +100,7 @@ Build a personal finance aggregation platform focused on learning modern C++ bac
 | Logging       | spdlog           |
 | Testing       | GoogleTest       |
 
-### Frontend
+### 3.2 Frontend
 
 | Component    | Technology   |
 | ------------ | ------------ |
@@ -114,7 +114,7 @@ Build a personal finance aggregation platform focused on learning modern C++ bac
 
 ## 4. Layered Design
 
-### Presentation Layer
+### 4.1 Presentation Layer
 
 **Responsibilities:**
 
@@ -124,7 +124,7 @@ Build a personal finance aggregation platform focused on learning modern C++ bac
 - DTO conversion
 - Response formatting
 
-### Application Layer
+### 4.2 Application Layer
 
 **Responsibilities:**
 
@@ -142,12 +142,12 @@ application/use_cases/
 ├── CreateTransferUseCase
 ├── DeleteTransactionUseCase
 ├── GenerateMonthlyReportUseCase
-└── RefreshExchangeRateUseCase
+└── RefreshExchangeRatesUseCase
 ```
 
 Application Layer must not define generic services named `AccountingService`, `ExchangeRateService`, or `ReportService`.
 
-### Domain Layer
+### 4.3 Domain Layer
 
 **Responsibilities:**
 
@@ -167,7 +167,7 @@ domain/services/
 
 Domain Services do not call Repository, open database transactions, or publish events.
 
-### Infrastructure Layer
+### 4.4 Infrastructure Layer
 
 **Responsibilities:**
 
@@ -175,7 +175,7 @@ Domain Services do not call Repository, open database transactions, or publish e
 - Persistence operations
 - Query abstraction
 
-### Database Layer
+### 4.5 Database Layer
 
 **Responsibilities:**
 
@@ -186,7 +186,7 @@ Domain Services do not call Repository, open database transactions, or publish e
 
 ---
 
-## 4.5 Dependency Direction
+### 4.6 Dependency Direction
 
 ```text
 Presentation
@@ -210,7 +210,7 @@ Domain
 
 ## 5. Core Domain Models
 
-### Account
+### 5.1 Account
 
 Represents an asset container.
 
@@ -243,7 +243,7 @@ UpdatedAt
 
 ---
 
-### Transaction
+### 5.2 Transaction
 
 Represents a financial event.
 
@@ -272,7 +272,7 @@ Adjustment
 
 ---
 
-### TransferAggregate
+### 5.3 TransferAggregate
 
 **Structure:**
 
@@ -287,7 +287,7 @@ TransferAggregate
 
 ---
 
-## Transfer Architecture
+### 5.4 Transfer Architecture
 
 Transfer is implemented as a dedicated aggregate.
 
@@ -309,7 +309,7 @@ Transactions remain the single source of truth.
 
 ---
 
-### Category
+### 5.5 Category
 
 用于交易分类。系统提供预设分类池，用户实际使用的是自己的收入/支出分类树。
 预设分类加入用户分类树后可编辑、可删除；删除不影响系统模板。
@@ -323,7 +323,7 @@ Transactions remain the single source of truth.
 
 分类支持无限层级，并通过 `CategoryBoard` 区分收入板块和支出板块。
 
-### Tag
+### 5.6 Tag
 
 用于给交易添加跨分类辅助标记。
 
@@ -338,7 +338,7 @@ Tag 不参与余额计算，只用于检索、过滤和报表扩展。
 
 ---
 
-### Currency
+### 5.7 Currency
 
 表示支持的货币。
 **示例：**
@@ -353,7 +353,7 @@ Tag 不参与余额计算，只用于检索、过滤和报表扩展。
 
 ---
 
-### Exchange Rate
+### 5.8 Exchange Rate
 
 表示历史汇率。
 **字段：**
@@ -374,7 +374,7 @@ Application Layer 只放具体 Use Case，负责调用 Repository、开启事务
 
 不要在 Application 和 Domain 同时存在 `AccountingService`、`ExchangeRateService`、`ReportService` 这类同名服务。
 
-### CreateTransactionUseCase
+### 6.1 CreateTransactionUseCase
 
 **职责：**
 
@@ -383,7 +383,7 @@ Application Layer 只放具体 Use Case，负责调用 Repository、开启事务
 - 调用 TransactionRepository 保存
 - 发布 TransactionCreated 事件
 
-### CreateTransferUseCase
+### 6.2 CreateTransferUseCase
 
 **职责：**
 
@@ -393,7 +393,7 @@ Application Layer 只放具体 Use Case，负责调用 Repository、开启事务
 - 更新或失效余额缓存
 - 发布 TransferCompleted 事件
 
-### DeleteTransactionUseCase
+### 6.3 DeleteTransactionUseCase
 
 **职责：**
 
@@ -403,7 +403,7 @@ Application Layer 只放具体 Use Case，负责调用 Repository、开启事务
 - 写入 AuditLog
 - 发布 TransactionDeleted 事件
 
-### GenerateMonthlyReportUseCase
+### 6.4 GenerateMonthlyReportUseCase
 
 **职责：**
 
@@ -415,7 +415,7 @@ Application Layer 只放具体 Use Case，负责调用 Repository、开启事务
 统计月度总收入或月度总支出时，查询条件必须显式排除 `TransactionType::Transfer`。
 转账只表示资产在账户之间移动，不参与收入/支出聚合。
 
-### RefreshExchangeRateUseCase
+### 6.5 RefreshExchangeRatesUseCase
 
 **职责：**
 
@@ -425,11 +425,11 @@ Application Layer 只放具体 Use Case，负责调用 Repository、开启事务
 
 ---
 
-## 6.5 Domain Service 设计
+### 6.6 Domain Service 设计
 
 Domain Service 只负责纯业务规则，不调用 Repository，不管理事务。
 
-### TransferDomainService
+### 6.7 TransferDomainService
 
 **职责：**
 
@@ -438,7 +438,7 @@ Domain Service 只负责纯业务规则，不调用 Repository，不管理事务
 - 校验跨币种转账与汇率匹配
 - 校验手续费、汇兑损耗必须作为 Adjustment
 
-### CurrencyConversionService
+### 6.8 CurrencyConversionService
 
 **职责：**
 
@@ -446,7 +446,7 @@ Domain Service 只负责纯业务规则，不调用 Repository，不管理事务
 - 处理舍入策略
 - 计算转换损耗
 
-### BalanceCalculationService
+### 6.9 BalanceCalculationService
 
 **职责：**
 
@@ -456,7 +456,7 @@ Domain Service 只负责纯业务规则，不调用 Repository，不管理事务
 
 ---
 
-### Sync Use Cases (预留)
+### 6.10 Sync Use Cases (预留)
 
 未来的扩展点。
 
@@ -469,7 +469,7 @@ Domain Service 只负责纯业务规则，不调用 Repository，不管理事务
 
 ## 7. 数据库设计
 
-### accounts
+### 7.1 accounts
 
 ```sql
 id
@@ -481,7 +481,7 @@ updated\\\_at
 
 ```
 
-### categories
+### 7.2 categories
 
 ```sql
 id
@@ -490,7 +490,7 @@ parent\\\_id
 
 ```
 
-### transactions
+### 7.3 transactions
 
 ```sql
 id
@@ -505,7 +505,7 @@ created\\\_at
 
 ```
 
-### account_balance_cache
+### 7.4 account_balance_cache
 
 ```sql
 account\\\_id
@@ -525,7 +525,7 @@ updated\\\_at
 4. 命中且有效则映射为 `BalanceSnapshot` 返回
 5. 未命中或失效则执行 `SELECT SUM(...)` 聚合流水，更新缓存表，再返回
 
-### currencies
+### 7.5 currencies
 
 ```sql
 code
@@ -534,7 +534,7 @@ symbol
 
 ```
 
-### exchange_rates
+### 7.6 exchange_rates
 
 ```sql
 id
@@ -629,12 +629,12 @@ backend/
 
 ## 11. 未来的扩展点
 
-### Redis
+### 11.1 Redis
 
 当前阶段不引入 Redis 强依赖，技术栈保持为 C++23 + PostgreSQL。
 Redis 仅作为未来基础设施级扩展，用于 Dashboard Summary、Monthly Report 或 Latest Exchange Rates 等可重建数据。
 
-### 数据提供方 (Data Providers)
+### 11.2 数据提供方 (Data Providers)
 
 **预留给：**
 
@@ -647,7 +647,7 @@ Open Banking API (开放银行 API)
 
 ```
 
-### 同步框架 (Synchronization Framework)
+### 11.3 同步框架 (Synchronization Framework)
 
 **接口：**
 
@@ -674,25 +674,25 @@ ManualImportProvider
 
 ## 12. 非功能性需求
 
-### 可靠性 (Reliability)
+### 12.1 可靠性 (Reliability)
 
 - 事务安全
 - 支持回滚
 - 数据完整性
 
-### 性能 (Performance)
+### 12.2 性能 (Performance)
 
 - 余额缓存
 - 索引查询
 - 高效聚合
 
-### 可维护性 (Maintainability)
+### 12.3 可维护性 (Maintainability)
 
 - 分层隔离
 - 依赖隔离
 - 测试覆盖率
 
-### 可扩展性 (Extensibility)
+### 12.4 可扩展性 (Extensibility)
 
 - 类插件式的提供方模型
 - 模块化服务

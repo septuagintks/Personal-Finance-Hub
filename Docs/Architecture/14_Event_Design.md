@@ -45,7 +45,7 @@ struct IDomainEvent {
 
 事件中只携带必要的 ID 和最小化上下文，不要把整个 Entity 塞进去。
 
-### 2.2.1 必备事件清单
+### 2.3 必备事件清单
 
 | Event                     | 必备字段                                                              | 触发来源                                                   | 典型订阅者                                                 |
 | ------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------- |
@@ -56,7 +56,7 @@ struct IDomainEvent {
 | AccountDangerouslyDeleted | userId, accountId, occurredAt                                         | DangerousDeleteAccountUseCase                              | AuditLogHandler, SecurityNotificationHandler               |
 | CategoryCreated           | userId, categoryId, board, occurredAt                                 | CreateCategoryUseCase / InitializeDefaultCategoriesUseCase | CategoryTreeCacheInvalidator                               |
 | CategoryDeleted           | userId, categoryId, board, occurredAt                                 | DeleteCategoryUseCase                                      | CategoryTreeCacheInvalidator, ReportCacheInvalidator       |
-| ExchangeRateRefreshed     | provider, baseCurrency, targetCurrency, fetchedAt                     | RefreshExchangeRateUseCase                                 | LatestRateCacheInvalidator, AuditLogHandler                |
+| ExchangeRateRefreshed     | provider, baseCurrency, targetCurrency, fetchedAt                     | RefreshExchangeRatesUseCase                                 | LatestRateCacheInvalidator, AuditLogHandler                |
 | SyncCompleted             | userId, provider, syncJobId, importedCount, skippedCount, occurredAt  | RunSyncJobUseCase                                          | ReconciliationJob, AuditLogHandler                         |
 | UserPreferenceUpdated     | userId, occurredAt                                                    | UpdateUserPreferenceUseCase                                | FrontendPreferenceCacheInvalidator, ReportCacheInvalidator |
 | AuditLogRecorded          | auditLogId, operatorUserId, action, resourceType, occurredAt          | AuditLogHandler                                            | SecurityNotificationHandler                                |
@@ -170,8 +170,12 @@ private:
     // 映射表：Event 类型 -> 处理器回调函数列表
     std::unordered_map<std::type_index, std::vector<std::function<void(const std::shared_ptr<IDomainEvent>&)>>> handlers_;
     std::mutex mutex_;
+    std::shared_ptr<IBackgroundExecutor> backgroundExecutor_;
 
 public:
+    explicit LocalEventBus(std::shared_ptr<IBackgroundExecutor> backgroundExecutor)
+        : backgroundExecutor_(std::move(backgroundExecutor)) {}
+
     // 注册订阅者
     template<typename EventType, typename HandlerFunc>
     void subscribe(HandlerFunc&& handler) {
@@ -188,8 +192,8 @@ public:
         auto it = handlers_.find(typeid(*event));
         if (it != handlers_.end()) {
             for (const auto& handler : it->second) {
-                // 将处理器扔进 Drogon 的线程池执行，避免阻塞当前主业务
-                drogon::app().getLoop()->queueInLoop([handler, event]() {
+                // 将处理器扔进后台执行器，避免阻塞 outbox publisher 或 Event Loop
+                backgroundExecutor_->submit([handler, event]() {
                     try {
                         handler(event);
                     } catch (const std::exception& e) {
@@ -223,6 +227,11 @@ public:
 #include "domain/repositories/RepositoryError.hpp"
 #include "domain/events/IDomainEvent.hpp"
 
+class ITransactionContext {
+public:
+    virtual ~ITransactionContext() = default;
+};
+
 class IUnitOfWork {
 public:
     virtual ~IUnitOfWork() = default;
@@ -230,9 +239,9 @@ public:
     // 暂存要写入 outbox 的事件
     virtual void registerEvent(std::shared_ptr<IDomainEvent> event) = 0;
 
-    // 执行事务；实现层会在提交业务写入前，把已暂存事件写入 outbox
+    // 执行事务；闭包内 Repository 必须使用同一个事务上下文
     virtual std::expected<void, RepositoryError> executeInTransaction(
-        std::function<std::expected<void, RepositoryError>()> action
+        std::function<std::expected<void, RepositoryError>(ITransactionContext& tx)> action
     ) = 0;
 };
 
@@ -271,12 +280,13 @@ public:
     }
 
     std::expected<void, RepositoryError> executeInTransaction(
-        std::function<std::expected<void, RepositoryError>()> action) override
+        std::function<std::expected<void, RepositoryError>(ITransactionContext& tx)> action) override
     {
         pendingEvents_.clear(); // 清理旧事件
         auto trans = dbClient_->newTransaction();
+        DrogonTransactionContext txContext(trans);
 
-        auto result = action();
+        auto result = action(txContext);
 
         if (result.has_value()) {
             try {
@@ -321,12 +331,15 @@ public:
 // application/use_cases/DangerousDeleteAccountUseCase.cpp
 // ... 之前的权限与校验逻辑 ...
 
-return uow_->executeInTransaction([&]() -> std::expected<void, RepositoryError> {
+return uow_->executeInTransaction([&](ITransactionContext& tx) -> std::expected<void, RepositoryError> {
 
-    auto delTxRes = txRepo_->physicalDeleteByAccount(accountId);
+    auto delTxRes = txRepo_->physicalDeleteByAccount(tx, accountId);
     if (!delTxRes) return delTxRes;
 
-    auto delAccRes = accountRepo_->physicalDelete(accountId);
+    auto delCacheRes = accountRepo_->deleteBalanceCache(tx, accountId);
+    if (!delCacheRes) return delCacheRes;
+
+    auto delAccRes = accountRepo_->physicalDelete(tx, accountId);
     if (!delAccRes) return delAccRes;
 
     // 原来的审计日志写入和缓存清理去掉了！
@@ -340,7 +353,7 @@ return uow_->executeInTransaction([&]() -> std::expected<void, RepositoryError> 
 
 ```
 
-### 5.2 独立的事件处理器 (Event Handlers)
+### 5.1 独立的事件处理器 (Event Handlers)
 
 在系统启动时（例如在 `main.cpp` 中），我们将处理器注册到总线上。这些处理器由 `OutboxPublisherJob` 在成功 claim outbox 事件后触发。
 

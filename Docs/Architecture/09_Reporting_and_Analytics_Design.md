@@ -404,8 +404,11 @@ public:
                     totalAssets = totalAssets + (rawAssets * rate);
                     totalLiabilities = totalLiabilities + (rawLiabilities * rate);
                 } else {
-                    // 容错处理：记录日志，暂时按 0 或 1 计算
                     LOG_ERROR << "Missing exchange rate: " << rowCurrency.getCode() << " to " << baseCurrency.getCode();
+                    return std::unexpected(RepositoryError{
+                        RepositoryStatus::ValidationError,
+                        "Exchange rate not available for report currency conversion"
+                    });
                 }
             }
         }

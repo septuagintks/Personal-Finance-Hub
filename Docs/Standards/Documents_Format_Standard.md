@@ -56,15 +56,23 @@
 ## 3. 目录与文件命名规范
 
 ### 3.1 核心设计文档命名
-* **规则**：核心设计文档存放在 `Docs/Architecture/` 目录下，使用两位数字编号加下划线和英文大写单词（PascalCase 风格，单词间用下划线连接）命名。
-* **示例**：`01_Technical_Architecture.md`、`09_Reporting_and_Analytics_Design.md`。
+
+- **规则**：核心设计文档存放在 `Docs/Architecture/` 目录下，使用两位数字编号加下划线和英文大写单词（PascalCase 风格，单词间用下划线连接）命名。
+- **示例**：`01_Technical_Architecture.md`、`09_Reporting_and_Analytics_Design.md`。
 
 ### 3.2 优化与修改记录文档命名
-* **规则**：已完成的优化与修改记录文档存放在 `Docs/Completed_Modifications/` 目录下。
-* **命名格式**：
-  * 正在更改/设计中的文档：必须以 `_Plan` 作为文件名后缀（如 `Documents_Optimize_Plan.md`），并且存放在 `Docs/Development/` 目录下。
-  * 更改/设计完成并经评审通过的文档：**必须删掉 `_Plan` 后缀**，并归档入 `Docs/Completed_Modifications/` 目录。
-  * 历史已归档的修改记录：使用数字递增命名（如 `Documents_Optimize_1.md`）。
+
+- **规则**：已完成的优化与修改记录文档存放在 `Docs/Completed_Modifications/` 目录下。
+- **命名格式**：
+  - 正在更改/设计中的文档：必须以 `_Plan` 作为文件名后缀（如 `Documents_Optimize_Plan.md`），并且存放在 `Docs/Development/` 目录下。
+  - 更改/设计完成并经评审通过的文档：**必须删掉 `_Plan` 后缀**，并归档入 `Docs/Completed_Modifications/` 目录。
+  - 历史已归档的修改记录：使用数字递增命名（如 `Documents_Optimize_1.md`）。
+
+### 3.3 实际目录与规划目录
+
+- **规则**：目录结构文档必须区分“当前仓库已提交内容”和“规划中、按需创建内容”。
+- **规则**：README 中的目录树只列出当前已提交的文件和目录；规划中的目录或文件必须用正文说明，不得写入当前目录树。
+- **规则**：历史归档文档中的相对链接必须从归档文件所在目录出发，指向真实存在的文档路径。
 
 ---
 
@@ -103,7 +111,6 @@ graph TD
     B --> C[Domain]
     D[Infrastructure] --> C
 ```
-````
 
 ---
 
@@ -146,7 +153,40 @@ graph TD
 ### 5.2 核心测试用例
 
 - **用例一**：输入 -> 期望输出。
+````
 
-```
+---
 
-```
+## 5. 架构描述统一规则
+
+### 5.1 事务与事件
+
+- **规则**：`IUnitOfWork` 文档必须明确业务写入、outbox 写入和事务提交使用同一个数据库事务上下文；不得出现创建事务对象但 Repository 仍使用普通 `DbClient` 写库的示例。
+- **规则**：领域事件不得在业务事务提交前直接派发。当前标准实现为 Transactional Outbox：事务内只写 `domain_events_outbox`，提交后由 `OutboxPublisherJob` 投递。
+
+### 5.2 汇率与金额
+
+- **规则**：当前汇率存储统一为 USD 枢纽方向，即数据库保存 `USD -> target` 汇率；交叉汇率 `base -> target` 通过 `pivotToTarget / pivotToBase` 推导。
+- **规则**：金额、汇率和 JSON 中的十进制数不得经由 `float`、`double` 或 JSON number 转换；必须使用十进制字符串进入 `Decimal`。
+- **规则**：数据库缺少汇率时必须返回明确错误或展示“不可用”，不得用 `0`、`1` 或其他默认值参与财务计算。
+- **规则**：默认舍入策略为银行家舍入（Half-Even）。其他舍入策略只有在业务场景显式记录时才可使用。
+
+### 5.3 调度与后台任务
+
+- **规则**：Drogon Event Loop 只负责触发定时器和分发轻量回调；包含网络 I/O、数据库 I/O 或 CPU 密集计算的后台任务必须进入工作线程、协程异步链路或专用执行器，避免阻塞 HTTP 请求处理线程。
+- **规则**：当前阶段不引入 Redis、RabbitMQ、Kafka 等强依赖；分布式锁、任务幂等和可恢复状态优先使用 PostgreSQL 实现。Redis 仅作为未来可选加速层。
+
+### 5.4 多租户与幂等键
+
+- **规则**：所有跨用户数据表和唯一约束必须显式包含 `user_id` 或通过关联表强约束用户边界。
+- **规则**：外部同步幂等键不得只使用 `(provider, external_transaction_id)`；必须至少包含 `user_id`，必要时同时包含 `external_account_id` 或内部 `account_id`。
+
+### 5.5 可选方案记录
+
+- **规则**：当出现多个优良程度接近的架构选择时，不在正文中直接选边；应在本文件新增“待决策选项”小节，列出选项、影响和建议选择依据，等待维护者确认。
+
+---
+
+## 6. 待决策选项
+
+当前没有必须由维护者二选一的架构项。后续如出现多个相近方案，在本节追加记录。

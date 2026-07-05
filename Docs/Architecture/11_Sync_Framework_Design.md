@@ -182,11 +182,13 @@ public:
 
     // 检查外部 ID 是否已经被导入过
     virtual std::expected<bool, RepositoryError> exists(
+        UserId userId,
         const std::string& provider,
         const std::string& externalTxId) = 0;
 
     // 绑定映射关系 (在内部 Transaction 插入成功后调用)
     virtual std::expected<void, RepositoryError> saveMapping(
+        UserId userId,
         const std::string& provider,
         const std::string& externalTxId,
         TransactionId internalTxId) = 0;
@@ -224,14 +226,16 @@ std::expected<SyncJobResultDTO, UseCaseError> RunSyncJobUseCase::execute(
 
     // 3. 遍历记录进行幂等导入
     for (const auto& record : records) {
+        bool skipped = false;
+
         // 开启数据库事务 (单笔事务，避免某一条失败导致整个文件回滚)
         auto txRes = uow_->executeInTransaction([&]() -> std::expected<void, RepositoryError> {
 
             // 3.1 检查幂等性
-            auto existsRes = syncMappingRepo_->exists(provider->getProviderName(), record.externalTransactionId);
+            auto existsRes = syncMappingRepo_->exists(accountOpt->getOwner(), provider->getProviderName(), record.externalTransactionId);
             if (!existsRes) return std::unexpected(existsRes.error());
             if (existsRes.value() == true) {
-                result.skipped++;
+                skipped = true;
                 return {}; // 已经存在，跳过，但不报错
             }
 
@@ -262,13 +266,16 @@ std::expected<SyncJobResultDTO, UseCaseError> RunSyncJobUseCase::execute(
 
             // 3.4 保存防重映射表 external_transactions
             return syncMappingRepo_->saveMapping(
+                accountOpt->getOwner(),
                 provider->getProviderName(),
                 record.externalTransactionId,
-                newTx.getId()
+                *saveTxRes
             );
         });
 
-        if (txRes.has_value() && !/*was skipped*/) {
+        if (txRes.has_value() && skipped) {
+            result.skipped++;
+        } else if (txRes.has_value()) {
             result.imported++;
         }
     }

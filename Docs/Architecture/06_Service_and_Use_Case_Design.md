@@ -100,6 +100,8 @@ std::expected<TransferAggregate, TransferRuleError> TransferDomainService::build
     std::optional<Money> targetAmount,
     std::optional<Decimal> exchangeRate,
     std::optional<Money> feeAmount,
+    FeeSource feeSource,
+    std::optional<AccountId> feeAccountId,
     const std::string& description)
 {
     // 约束 1：冻结或归档账户禁止发生资金变动
@@ -145,9 +147,17 @@ std::expected<TransferAggregate, TransferRuleError> TransferDomainService::build
 
     // 约束 4：手续费绝不隐藏在转账主金额中，作为独立 Adjustment 流水附属于聚合根
     if (feeAmount && feeAmount->getAmount() > 0) {
+        AccountId feeOwnerAccountId = sourceAccount.getId();
+        if (feeSource == FeeSource::TargetAccount) {
+            feeOwnerAccountId = targetAccount.getId();
+        } else if (feeSource == FeeSource::ThirdParty) {
+            if (!feeAccountId) return std::unexpected(TransferRuleError::TransferImbalance);
+            feeOwnerAccountId = *feeAccountId;
+        }
+
         Transaction feeTx(
             TransactionId(0), // 由基础设施生成
-            sourceAccount.getId(),
+            feeOwnerAccountId,
             TransactionType::Adjustment, // 显式标记为调整项
             *feeAmount,
             CategoryCode("SYSTEM_FEE"),
@@ -216,6 +226,8 @@ public:
             dto.targetAmount,
             dto.exchangeRate,
             dto.feeAmount,
+            dto.feeSource,
+            dto.feeAccountId,
             dto.description
         );
 
@@ -435,6 +447,8 @@ struct TransferInputDTO {
     std::optional<Money> targetAmount;
     std::optional<Decimal> exchangeRate;
     std::optional<Money> feeAmount;
+    FeeSource feeSource = FeeSource::SourceAccount;
+    std::optional<AccountId> feeAccountId;
     std::string description;
 };
 

@@ -1,3 +1,8 @@
+# Personal Finance Hub (PFH) 文档目录结构规范
+
+---
+
+```text
 Docs/
 ├── README.md
 │
@@ -20,10 +25,7 @@ Docs/
 │   └── 16_Testing_Strategy.md
 │
 ├── Development/
-│   ├── tasks.md
-│   └── Documents_Optimize_Plan.md
-│
-├── Develop_Plan/
+│   └── tasks.md
 │
 ├── Standards/
 │   ├── directory.md
@@ -32,3 +34,10 @@ Docs/
 └── Completed_Modifications/
     ├── Documents_Optimize_1.md
     └── Documents_Optimize_2.md
+```
+
+说明：
+
+1. 上述目录树只描述当前仓库中已经提交的文档。
+2. `Docs/Development/Documents_Optimize_Plan.md` 用于正在设计中的文档优化方案，按需创建。
+3. `Docs/Develop_Plan/` 用于阶段性开发计划，按需创建。

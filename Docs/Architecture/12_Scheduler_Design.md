@@ -101,6 +101,22 @@ public:
 
 ```
 
+### 2.3 后台执行器 (IBackgroundExecutor)
+
+定时器回调必须保持轻量。任何网络 I/O、数据库 I/O 或 CPU 密集型任务都通过后台执行器执行。
+
+```cpp
+// scheduler/IBackgroundExecutor.hpp
+#pragma once
+#include <functional>
+
+class IBackgroundExecutor {
+public:
+    virtual ~IBackgroundExecutor() = default;
+    virtual void submit(std::function<void()> task) = 0;
+};
+```
+
 ---
 
 ## 3. 具体后台任务实现案例
@@ -121,12 +137,17 @@ public:
 class ExchangeRateSyncJob : public IJob {
 private:
     std::shared_ptr<RefreshExchangeRatesUseCase> useCase_;
+    std::shared_ptr<IBackgroundExecutor> backgroundExecutor_;
     drogon::TimerId timerId_;
     double intervalSeconds_ = 12.0 * 3600.0; // 12小时
 
 public:
-    ExchangeRateSyncJob(std::shared_ptr<RefreshExchangeRatesUseCase> useCase)
-        : useCase_(useCase), timerId_(drogon::kInvalidTimerId) {}
+    ExchangeRateSyncJob(
+        std::shared_ptr<RefreshExchangeRatesUseCase> useCase,
+        std::shared_ptr<IBackgroundExecutor> backgroundExecutor)
+        : useCase_(useCase),
+          backgroundExecutor_(backgroundExecutor),
+          timerId_(drogon::kInvalidTimerId) {}
 
     std::string getJobName() const override { return "ExchangeRateSyncJob"; }
 
@@ -145,15 +166,17 @@ public:
     }
 
     void triggerNow() override {
-        LOG_INFO << "Executing " << getJobName() << "...";
-        auto result = useCase_->execute();
+        backgroundExecutor_->submit([useCase = useCase_, jobName = getJobName()]() {
+            LOG_INFO << "Executing " << jobName << "...";
+            auto result = useCase->execute();
 
-        if (!result) {
-            LOG_ERROR << getJobName() << " failed: " << result.error();
-            // 在这里可以接入邮件预警系统或告警模块
-        } else {
-            LOG_INFO << getJobName() << " completed successfully.";
-        }
+            if (!result) {
+                LOG_ERROR << jobName << " failed: " << result.error();
+                // 在这里可以接入邮件预警系统或告警模块
+            } else {
+                LOG_INFO << jobName << " completed successfully.";
+            }
+        });
     }
 };
 
@@ -231,16 +254,18 @@ public:
 
 ```cpp
 void triggerNow() override {
-    try {
-        auto result = useCase_->execute();
-        if (!result) {
-            LOG_ERROR << getJobName() << " domain failure: " << result.error();
+    backgroundExecutor_->submit([useCase = useCase_, jobName = getJobName()]() {
+        try {
+            auto result = useCase->execute();
+            if (!result) {
+                LOG_ERROR << jobName << " domain failure: " << result.error();
+            }
+        } catch (const std::exception& e) {
+            LOG_FATAL << jobName << " crashed with standard exception: " << e.what();
+        } catch (...) {
+            LOG_FATAL << jobName << " crashed with unknown exception!";
         }
-    } catch (const std::exception& e) {
-        LOG_FATAL << getJobName() << " crashed with standard exception: " << e.what();
-    } catch (...) {
-        LOG_FATAL << getJobName() << " crashed with unknown exception!";
-    }
+    });
 }
 
 ```
@@ -306,13 +331,14 @@ int main() {
     // 1. 初始化依赖注入 (Repositories, Providers, UseCases)
     auto rateProvider = std::make_shared<OpenExchangeRatesProvider>("API_KEY");
     auto rateRepo = std::make_shared<ExchangeRateRepositoryImpl>(drogon::app().getDbClient("default"));
+    auto backgroundExecutor = std::make_shared<DrogonBackgroundExecutor>();
     auto rateUseCase = std::make_shared<RefreshExchangeRatesUseCase>(rateProvider, rateRepo);
-    auto eventBus = std::make_shared<LocalEventBus>();
+    auto eventBus = std::make_shared<LocalEventBus>(backgroundExecutor);
     auto outboxJob = std::make_shared<OutboxPublisherJob>(eventBus);
 
     // 2. 初始化调度器并注册 Jobs
     JobManager jobManager;
-    jobManager.registerJob(std::make_shared<ExchangeRateSyncJob>(rateUseCase));
+    jobManager.registerJob(std::make_shared<ExchangeRateSyncJob>(rateUseCase, backgroundExecutor));
     jobManager.registerJob(outboxJob);
 
     // 3. 在 Drogon 启动前或启动回调中启动任务

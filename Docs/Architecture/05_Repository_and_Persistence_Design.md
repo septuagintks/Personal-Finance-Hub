@@ -14,7 +14,7 @@ Architecture: Clean Architecture + Lightweight DDD
 
 1. **接口与实现彻底分离**：仓储接口（Interfaces）属于 `Domain` 层（纯 C++23，不包含任何 SQL、Drogon 或网络依赖）；仓储实现（Implementations）属于 `Infrastructure` 层。
 2. **面向聚合根（Aggregate Root）**：原则上只有聚合根才拥有独立的仓储。在本项目中，`User`（含偏好）、`Account`、`TransferAggregate` 拥有独立仓储。由于 `Transaction` 和 `Adjustment` 的生命周期与 `Account` / `Transfer` 强绑定，它们可以通过专门的仓储加速查询，但写入必须符合聚合的约束。
-3. **隐式缓存策略**：业务层（Domain/Application）不感知缓存的存在。Repository 内部负责维护 `account_balance_cache` 的命中断接和重建，对外只返回标准的领域对象。
+3. **隐式缓存策略**：业务层（Domain/Application）不感知缓存的存在。Repository 内部负责维护 `account_balance_cache` 的命中检查和重建，对外只返回标准的领域对象。
 4. **强类型、事件与错误处理**：使用 C++23 的强类型 ID（如 `AccountId`）防止参数传错。对于仓储查找失败或数据库异常，使用 `std::expected` 传递中性错误，不滥用异常（Exceptions），保持控制流清晰。Repository Error 只表达“数据访问结果”，不携带 Drogon、SQL 或连接池等实现细节；同一个 UnitOfWork 事务还负责把领域事件写入 `domain_events_outbox`，不在提交前直接对外派发。
 5. **Use Case 与 Domain Service 分层**：Application 层只使用 `application/use_cases/` 下的具体 Use Case 进行事务和仓储编排；Domain 层只使用 `domain/services/` 下的纯业务规则服务。不要定义跨层同名的 `AccountingService`、`RefreshExchangeRatesUseCase` 或 `ReportService`。
 6. **领域概念不强制等同表结构**：`UserPreference` 是 Domain Concept，拥有独立的 `user_preferences` 表，由 `IUserRepository` 联合查询或通过独立的 `IUserPreferenceRepository` 进行读写。`TransferGroup` 则相反，只是 `transfer_groups` 持久化元数据载体，不是 Domain Entity。
@@ -59,6 +59,8 @@ struct RepositoryError {
 #include "domain/value_objects/BalanceSnapshot.hpp"
 #include "domain/repositories/RepositoryError.hpp"
 
+class ITransactionContext;
+
 class IAccountRepository {
 public:
     virtual ~IAccountRepository() = default;
@@ -78,8 +80,11 @@ public:
     // 保存或更新账户基础状态（如重命名、归档）
     virtual std::expected<void, RepositoryError> save(const Account& account) = 0;
 
+    // 危险删除辅助：显式清理账户余额缓存
+    virtual std::expected<void, RepositoryError> deleteBalanceCache(ITransactionContext& tx, AccountId id) = 0;
+
     // 危险删除：物理删除/彻底清除账户基础记录（流水清理由 UnitOfWork 编排）
-    virtual std::expected<void, RepositoryError> physicalDelete(AccountId id) = 0;
+    virtual std::expected<void, RepositoryError> physicalDelete(ITransactionContext& tx, AccountId id) = 0;
 };
 
 ```
@@ -95,6 +100,8 @@ public:
 #include "domain/entities/Transaction.hpp"
 #include "domain/value_objects/StrongId.hpp"
 #include "domain/value_objects/DateRange.hpp"
+
+class ITransactionContext;
 
 class ITransactionRepository {
 public:
@@ -114,7 +121,10 @@ public:
     ) = 0;
 
     // 危险删除辅助：物理删除某个账户下的所有流水
-    virtual std::expected<void, RepositoryError> physicalDeleteByAccount(AccountId accountId) = 0;
+    virtual std::expected<void, RepositoryError> physicalDeleteByAccount(
+        ITransactionContext& tx,
+        AccountId accountId
+    ) = 0;
 };
 
 ```
@@ -420,6 +430,11 @@ public:
 #include "domain/events/IDomainEvent.hpp"
 #include "domain/repositories/RepositoryError.hpp"
 
+class ITransactionContext {
+public:
+    virtual ~ITransactionContext() = default;
+};
+
 class IUnitOfWork {
 public:
     virtual ~IUnitOfWork() = default;
@@ -427,9 +442,9 @@ public:
     // 暂存要写入 outbox 的领域事件；实现必须是 request-scoped，不得跨请求共享
     virtual void registerEvent(std::shared_ptr<IDomainEvent> event) = 0;
 
-    // 在一个独立的闭包中执行事务，闭包返回失败时自动回滚
+    // 在一个独立的闭包中执行事务，闭包内 Repository 必须使用同一个事务上下文
     virtual std::expected<void, RepositoryError> executeInTransaction(
-        std::function<std::expected<void, RepositoryError>()> action
+        std::function<std::expected<void, RepositoryError>(ITransactionContext& tx)> action
     ) = 0;
 };
 
@@ -438,6 +453,8 @@ public:
 ### 4.3 基础设施层事务实现
 
 利用 Drogon 的 `Transaction` 对象保持范围原子性。实现层必须是 request-scoped / 单次用例作用域，`pendingEvents_` 只允许存在于单个 `DrogonUnitOfWork` 实例内，不能被并发请求共享。
+
+事务闭包必须接收一个事务上下文（例如 `ITransactionContext& tx`），并把它传给参与写入的 Repository。这样业务表写入、缓存更新和 outbox 写入才能共享同一个底层数据库事务；不得在 UoW 中创建 `trans` 后，让 Repository 继续使用普通 `DbClient` 在事务外写库。
 
 ```cpp
 // infrastructure/persistence/DrogonUnitOfWork.cpp
@@ -457,13 +474,14 @@ public:
     }
 
     std::expected<void, RepositoryError> executeInTransaction(
-        std::function<std::expected<void, RepositoryError>()> action
+        std::function<std::expected<void, RepositoryError>(ITransactionContext& tx)> action
     ) override {
         pendingEvents_.clear();
         // 创建 Drogon 底层的 Transaction 智能指针
         auto trans = dbClient_->newTransaction();
+        DrogonTransactionContext txContext(trans);
 
-        auto result = action();
+        auto result = action(txContext);
 
         if (result.has_value()) {
             try {
@@ -537,19 +555,19 @@ public:
         }
 
         // 3. 编排事务，按严格顺序执行硬删除
-        return uow_->executeInTransaction([&]() -> std::expected<void, RepositoryError> {
+        return uow_->executeInTransaction([&](ITransactionContext& tx) -> std::expected<void, RepositoryError> {
 
             // 步骤 A: 删除该账户下的所有关联流水 (物理删除)
-            auto delTxRes = txRepo_->physicalDeleteByAccount(accountId);
+            auto delTxRes = txRepo_->physicalDeleteByAccount(tx, accountId);
             if (!delTxRes) return delTxRes;
 
-            // 步骤 B: 物理删除账户本体（由于没有 ON DELETE CASCADE，必须后删）
-            auto delAccRes = accountRepo_->physicalDelete(accountId);
-            if (!delAccRes) return delAccRes;
+            // 步骤 B: 显式清理余额缓存。数据库层不使用 ON DELETE CASCADE。
+            auto delCacheRes = accountRepo_->deleteBalanceCache(tx, accountId);
+            if (!delCacheRes) return delCacheRes;
 
-            // 提示：account_balance_cache 表是以 account_id 作为外键的
-            // 可以在 DB 设计中对 cache 表设为 ON DELETE CASCADE，
-            // 或者在这里显式调用 db 清理。推荐在底层物理删除 Account 时由 DB 触发器或本事务内一并清除。
+            // 步骤 C: 物理删除账户本体（由于没有 ON DELETE CASCADE，必须后删）
+            auto delAccRes = accountRepo_->physicalDelete(tx, accountId);
+            if (!delAccRes) return delAccRes;
 
             return {};
         });

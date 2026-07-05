@@ -127,25 +127,26 @@ public:
 
 **三角折算公式**
 
-已知：
+已知数据库只保存 USD 枢纽方向：
 
-- `EUR → USD` 汇率为 `r1`（例如 1 EUR = 1.08 USD）
-- `USD → CNY` 汇率为 `r2`（例如 1 USD = 7.18 CNY）
+- `USD → EUR` 汇率为 `r_base`（例如 1 USD = 0.92 EUR）
+- `USD → CNY` 汇率为 `r_target`（例如 1 USD = 7.18 CNY）
 
 推导 `EUR → CNY`：
 
-```
-1 EUR = r1 USD = r1 × r2 CNY
-因此 EUR → CNY 汇率 = r1 × r2
+```text
+1 EUR = (1 / r_base) USD
+1 EUR = (1 / r_base) × r_target CNY
+因此 EUR → CNY 汇率 = r_target / r_base
 ```
 
 推导 `CNY → EUR`（逆向）：
 
-```
-CNY → EUR = 1 / (r1 × r2)
+```text
+CNY → EUR = r_base / r_target
 ```
 
-当数据库中只有 `USD->CNY` 和 `USD->EUR`，而业务需要 `EUR->CNY` 时，由 `CurrencyConversionService` 负责在纯内存中推导。
+当数据库中只有 `USD -> CNY` 和 `USD -> EUR`，而业务需要 `EUR -> CNY` 时，由 `CurrencyConversionService` 负责在纯内存中推导。
 不要定义单独的 `ExchangeRateService`，避免和应用层汇率刷新用例、基础设施 Provider 混在一起。
 
 ```cpp
@@ -165,31 +166,31 @@ private:
     static constexpr const char* PIVOT_CURRENCY = "USD";
 
 public:
-    // 三角折算：已知 Base->Pivot 和 Target->Pivot，推导 Base->Target
-    // 例如：EUR->USD 和 CNY->USD，推导 EUR->CNY
+    // 三角折算：已知 Pivot->Base 和 Pivot->Target，推导 Base->Target
+    // 例如：USD->EUR 和 USD->CNY，推导 EUR->CNY
     static std::expected<ExchangeRate, CurrencyConversionError> calculateCrossRate(
-        const ExchangeRate& baseToPivot,
-        const ExchangeRate& targetToPivot)
+        const ExchangeRate& pivotToBase,
+        const ExchangeRate& pivotToTarget)
     {
-        // 验证两个汇率都以相同的枢纽货币为目标
-        if (baseToPivot.getTarget().getCode() != PIVOT_CURRENCY ||
-            targetToPivot.getTarget().getCode() != PIVOT_CURRENCY) {
+        // 验证两个汇率都以相同的枢纽货币为 base
+        if (pivotToBase.getBase().getCode() != PIVOT_CURRENCY ||
+            pivotToTarget.getBase().getCode() != PIVOT_CURRENCY) {
             return std::unexpected(CurrencyConversionError::MissingPivotRate);
         }
 
-        // EUR->USD = 1.08, CNY->USD = 0.139
-        // EUR->CNY = EUR->USD / CNY->USD = 1.08 / 0.139 ≈ 7.77
-        Decimal crossRate = baseToPivot.getRate() / targetToPivot.getRate();
+        // USD->EUR = 0.92, USD->CNY = 7.18
+        // EUR->CNY = USD->CNY / USD->EUR = 7.18 / 0.92 ≈ 7.80
+        Decimal crossRate = pivotToTarget.getRate() / pivotToBase.getRate();
 
         if (crossRate.isZeroOrNegative()) {
             return std::unexpected(CurrencyConversionError::InfiniteOrZeroRate);
         }
 
         return ExchangeRate(
-            baseToPivot.getBase(),
-            targetToPivot.getBase(),
+            pivotToBase.getTarget(),
+            pivotToTarget.getTarget(),
             crossRate,
-            std::max(baseToPivot.getFetchedAt(), targetToPivot.getFetchedAt()), // 使用较晚的时间戳
+            std::max(pivotToBase.getFetchedAt(), pivotToTarget.getFetchedAt()), // 使用较晚的时间戳
             "TriangularCalculation"
         );
     }
@@ -228,26 +229,26 @@ public:
             return std::unexpected(CurrencyConversionError::MissingPivotRate);
         }
 
-        // 查询 Base -> USD
-        auto baseToPivot = timestamp
-            ? repository.getHistorical(base, pivot, *timestamp)
-            : repository.getLatest(base, pivot);
+        // 查询 USD -> Base
+        auto pivotToBase = timestamp
+            ? repository.getHistorical(pivot, base, *timestamp)
+            : repository.getLatest(pivot, base);
 
-        if (!baseToPivot) {
+        if (!pivotToBase) {
             return std::unexpected(CurrencyConversionError::MissingPivotRate);
         }
 
-        // 查询 Target -> USD
-        auto targetToPivot = timestamp
-            ? repository.getHistorical(target, pivot, *timestamp)
-            : repository.getLatest(target, pivot);
+        // 查询 USD -> Target
+        auto pivotToTarget = timestamp
+            ? repository.getHistorical(pivot, target, *timestamp)
+            : repository.getLatest(pivot, target);
 
-        if (!targetToPivot) {
+        if (!pivotToTarget) {
             return std::unexpected(CurrencyConversionError::MissingPivotRate);
         }
 
         // 执行三角折算
-        return calculateCrossRate(*baseToPivot, *targetToPivot);
+        return calculateCrossRate(*pivotToBase, *pivotToTarget);
     }
 };
 
@@ -275,7 +276,7 @@ ExchangeRate eurToCny = *rateResult;
 
 数据库中只存储与 USD 的直接汇率对：
 
-```
+```text
 exchange_rates 表内容示例：
 | base_currency_code | target_currency_code | rate     | source              | fetched_at          |
 |--------------------|----------------------|----------|---------------------|---------------------|
@@ -506,15 +507,13 @@ public:
    - 前端展示汇率时，必须显示汇率来源和时间戳
    - 使用历史汇率时，前端应提示"使用历史汇率"
 
-````
-
 ---
 
 ## 4. 基础设施层设计 (Infrastructure Layer)
 
 基础设施层负责真正的 HTTP 请求和 PostgreSQL 读写。
 
-### 4.2 外部提供方实现 (Drogon HTTP Client)
+### 4.1 外部提供方实现 (Drogon HTTP Client)
 
 这里以抓取 OpenExchangeRates (JSON 格式) 为例，展示防腐层的落地：隔离 JSON 结构，将其转换为纯净的 `ExchangeRate` 对象。
 
@@ -624,15 +623,13 @@ public:
             std::string targetCode = it.name();
 
             // 只保留系统支持的货币
-            if (targetCurrencies.find(targetCode) == targetCurrencies.end()) {
+            if (!filteredTargets.contains(targetCode)) {
                 continue;
             }
 
-            // 处理汇率值（可能是 number 或 string）
+            // 处理汇率值。Provider 适配层必须转成十进制字符串，禁止经由 double。
             Decimal rateVal;
-            if (it->isNumeric()) {
-                rateVal = Decimal(it->asDouble()); // 从 double 转换时需小心精度
-            } else if (it->isString()) {
+            if (it->isString()) {
                 rateVal = Decimal(it->asString());
             } else {
                 LOG_WARN << "Invalid rate format for " << targetCode << ", skipping";
@@ -756,22 +753,28 @@ public:
 class ExchangeRateJob {
 private:
     std::shared_ptr<RefreshExchangeRatesUseCase> useCase_;
+    std::shared_ptr<IBackgroundExecutor> backgroundExecutor_;
     drogon::TimerId timerId_;
 
 public:
-    ExchangeRateJob(std::shared_ptr<RefreshExchangeRatesUseCase> useCase)
-        : useCase_(useCase) {}
+    ExchangeRateJob(
+        std::shared_ptr<RefreshExchangeRatesUseCase> useCase,
+        std::shared_ptr<IBackgroundExecutor> backgroundExecutor)
+        : useCase_(useCase), backgroundExecutor_(backgroundExecutor) {}
 
     void startScheduling() {
         // 使用 Drogon 的主事件循环创建一个定时器，每 12 小时执行一次 (12 * 3600 秒)
         timerId_ = drogon::app().getLoop()->runEvery(12.0 * 3600.0, [this]() {
-            LOG_INFO << "Starting scheduled exchange rate refresh...";
-            auto result = useCase_->execute();
-            if (!result) {
-                LOG_ERROR << "Exchange rate refresh failed: " << result.error();
-            } else {
-                LOG_INFO << "Exchange rate refresh completed successfully.";
-            }
+            // Event Loop 只负责触发，实际网络 I/O 与数据库 I/O 进入后台执行器。
+            backgroundExecutor_->submit([useCase = useCase_]() {
+                LOG_INFO << "Starting scheduled exchange rate refresh...";
+                auto result = useCase->execute();
+                if (!result) {
+                    LOG_ERROR << "Exchange rate refresh failed: " << result.error();
+                } else {
+                    LOG_INFO << "Exchange rate refresh completed successfully.";
+                }
+            });
         });
     }
 
