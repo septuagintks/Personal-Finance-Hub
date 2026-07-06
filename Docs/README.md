@@ -11,6 +11,7 @@
 ```text
 Docs/
 ├── README.md                           # 本文档（文档中心入口与现状综述）
+├── QUICK_REFERENCE.md                  # 开发者快速参考（构建、测试、命令速查）
 │
 ├── Architecture/                       # 核心技术架构与详细设计规约
 │   ├── 01_Technical_Architecture.md    # 技术架构总览 (Clean Architecture)
@@ -31,12 +32,9 @@ Docs/
 │   └── 16_Testing_Strategy.md          # 测试策略与规范
 │
 ├── Development/                        # 开发过程管理
-│   ├── DEPENDENCY_INSTALLATION.md      # 依赖安装说明
-│   ├── PHASE_1_FOUNDATION_COMPLETE.md  # Phase 1 基础设施完成记录
-│   ├── Phase_1_Progress_Report.md      # Phase 1 进度报告
-│   ├── Phase_1_S01-S03_Delivery_Summary.md # Phase 1 S01-S03 交付摘要
-│   ├── Phase_1_S04_Completion_Report.md # Phase 1 S04 完成报告
-│   ├── QUICK_REFERENCE.md              # 开发者快速参考
+│   ├── Phase_1_S01-S03_Delivery_Summary.md # Phase 1 S01-S03 工程骨架交付记录
+│   ├── Phase_1_S04_Completion_Report.md # Phase 1 S04 基础类型与错误模型完成报告
+│   ├── Phase_1_S05_Progress_Report.md  # Phase 1 S05 金融原语进度报告（Decimal）
 │   └── tasks.md                        # 待办任务跟踪
 │
 ├── Develop_Plan/                       # 阶段性开发计划
@@ -49,7 +47,8 @@ Docs/
 │
 ├── Standards/                          # 团队与文档规范
 │   ├── directory.md                    # 文档目录结构规范
-│   └── Documents_Format_Standard.md    # 文档格式与排版标准
+│   ├── Documents_Format_Standard.md    # 文档格式与排版标准
+│   └── DEPENDENCY_INSTALLATION.md      # 依赖安装说明
 │
 └── Completed_Modifications/            # 已完成的架构优化记录
     ├── Documents_Optimize_1.md         # 优化记录 1 (安全、多币种、I18n、异常、迁移)

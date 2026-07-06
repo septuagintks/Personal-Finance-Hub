@@ -282,7 +282,7 @@ Logger::error_with_context(trace_id, context, fmt, args...);
 - ✅ vcpkg 清单文件，声明项目依赖
 - ✅ 支持自动依赖安装
 
-**文件**: `Docs/Development/DEPENDENCY_INSTALLATION.md` (新增，220+ 行)
+**文件**: `Docs/Standards/DEPENDENCY_INSTALLATION.md` (新增，220+ 行)
 - ✅ 详细的依赖安装指南
 - ✅ vcpkg 使用说明
 - ✅ 常见问题解决
@@ -340,7 +340,7 @@ Logger::error_with_context(trace_id, context, fmt, args...);
 - ✅ `vcpkg.json`
 
 **Documentation**:
-- ✅ `Docs/Development/DEPENDENCY_INSTALLATION.md`
+- ✅ `Docs/Standards/DEPENDENCY_INSTALLATION.md`
 
 ---
 
@@ -468,7 +468,7 @@ cd build; ctest -C Debug --output-on-failure
 
 如需强制使用 FetchContent（可复现 CI）：`cmake -B build -DPFH_FORCE_FETCHCONTENT=ON`
 
-详见: [DEPENDENCY_INSTALLATION.md](DEPENDENCY_INSTALLATION.md)
+详见: [DEPENDENCY_INSTALLATION.md](../Standards/DEPENDENCY_INSTALLATION.md)
 
 ### 配置文件
 
@@ -484,8 +484,8 @@ Copy-Item config/config.example.json config/config.local.json
 
 - [Phase 1 详细开发计划](../Develop_Plan/Phase_1/Phase_1_Detailed_Development_Plan.md) - P1-S04 章节
 - [任务跟踪](tasks.md) - 任务 #8, #9, #9a-9e
-- [依赖安装指南](DEPENDENCY_INSTALLATION.md)
-- [快速参考](QUICK_REFERENCE.md)
+- [依赖安装指南](../Standards/DEPENDENCY_INSTALLATION.md)
+- [快速参考](../QUICK_REFERENCE.md)
 
 ---
 

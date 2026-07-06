@@ -97,7 +97,7 @@ CreateTransfer_WhenValidInput_Returns201
 CreateTransfer_WhenUnauthorized_Returns401
 ```
 
-详见：[tests/TEST_NAMING_CONVENTION.md](../../tests/TEST_NAMING_CONVENTION.md)
+详见：[tests/TEST_NAMING_CONVENTION.md](../tests/TEST_NAMING_CONVENTION.md)
 
 ---
 
@@ -181,7 +181,7 @@ git diff
 - P1-S09: Application Use Case
 - P1-S10: REST API 与认证
 
-详见：[tasks.md](tasks.md)
+详见：[tasks.md](Development/tasks.md)
 
 ---
 
@@ -209,12 +209,12 @@ Presentation → Application → Domain ← Infrastructure
 
 ## 常用文档
 
-- [技术架构](../Architecture/01_Technical_Architecture.md)
-- [数据库设计](../Architecture/02_Database_Design.md)
-- [领域模型设计](../Architecture/03_Domain_Model_Design.md)
-- [测试策略](../Architecture/16_Testing_Strategy.md)
-- [Phase 1 开发计划](../Develop_Plan/Phase_1_Development_Plan.md)
-- [Phase 1 详细计划](../Develop_Plan/Phase_1/Phase_1_Detailed_Development_Plan.md)
+- [技术架构](Architecture/01_Technical_Architecture.md)
+- [数据库设计](Architecture/02_Database_Design.md)
+- [领域模型设计](Architecture/03_Domain_Model_Design.md)
+- [测试策略](Architecture/16_Testing_Strategy.md)
+- [Phase 1 开发计划](Develop_Plan/Phase_1_Development_Plan.md)
+- [Phase 1 详细计划](Develop_Plan/Phase_1/Phase_1_Detailed_Development_Plan.md)
 
 ---
 
@@ -244,4 +244,4 @@ Presentation → Application → Domain ← Infrastructure
 
 - 项目文档：`Docs/`
 - 任务跟踪：`Docs/Development/tasks.md`
-- 进度报告：`Docs/Development/Phase_1_Progress_Report.md`
+- 阶段交付记录：`Docs/Development/Phase_1_S01-S03_Delivery_Summary.md`

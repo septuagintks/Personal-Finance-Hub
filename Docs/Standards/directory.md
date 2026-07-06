@@ -5,6 +5,7 @@
 ```text
 Docs/
 ├── README.md
+├── QUICK_REFERENCE.md
 │
 ├── Architecture/
 │   ├── 01_Technical_Architecture.md
@@ -25,12 +26,9 @@ Docs/
 │   └── 16_Testing_Strategy.md
 │
 ├── Development/
-│   ├── DEPENDENCY_INSTALLATION.md
-│   ├── PHASE_1_FOUNDATION_COMPLETE.md
-│   ├── Phase_1_Progress_Report.md
 │   ├── Phase_1_S01-S03_Delivery_Summary.md
 │   ├── Phase_1_S04_Completion_Report.md
-│   ├── QUICK_REFERENCE.md
+│   ├── Phase_1_S05_Progress_Report.md
 │   └── tasks.md
 │
 ├── Develop_Plan/
@@ -43,7 +41,8 @@ Docs/
 │
 ├── Standards/
 │   ├── directory.md
-│   └── Documents_Format_Standard.md
+│   ├── Documents_Format_Standard.md
+│   └── DEPENDENCY_INSTALLATION.md
 │
 └── Completed_Modifications/
     ├── Documents_Optimize_1.md
