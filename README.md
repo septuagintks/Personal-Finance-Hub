@@ -1,6 +1,10 @@
 # Personal Finance Hub (PFH)
 
-Personal Finance Hub（PFH）是一个面向个人财务管理场景的聚合平台，目标是把账户、流水、转账、预算、报表、汇率和外部账单同步整合到一个高精度、可审计、可扩展的后端系统中。项目当前以架构设计和开发文档为主，详细开发规范见 [Docs/README.md](Docs/README.md)。
+Version: 0.1.0-alpha
+Backend: C++23
+Architecture: Clean Architecture + Lightweight DDD
+
+Personal Finance Hub（PFH）是一个面向个人财务管理场景的聚合平台，目标是把账户、流水、转账、预算、报表、汇率和外部账单同步整合到一个高精度、可审计、可扩展的后端系统中。项目当前处于 **Phase 1 开发阶段**，正在搭建工程骨架和核心领域模型。详细开发规范见 [Docs/README.md](Docs/README.md)。
 
 ## 主要功能
 
@@ -31,6 +35,134 @@ DTO Mapping       Transactions      Services     Scheduler / Outbox
 - **Presentation 层**：通过 Drogon 暴露 REST API，处理 JWT 鉴权、请求校验、DTO 映射、错误码转换和全局异常边界。
 
 金额计算坚持不使用浮点数：金额使用 `NUMERIC(20,8)` 与强类型 `Money`，汇率使用更高精度快照并保留历史记录。写路径通过领域实体、Repository 和 Unit of Work 保证一致性；读路径在报表场景中可绕过领域实体，直接执行 SQL 聚合，再按用户基准货币完成折算。领域事件采用事务提交后的处理边界，并可结合 Outbox 方案保证副作用可重试、可审计。
+
+## 快速开始
+
+### 环境要求
+
+- **C++23 兼容编译器**:
+  - MSVC 2022 (17.6+)
+  - GCC 13+
+  - Clang 16+
+- **CMake** 3.20 或更高版本
+- **PostgreSQL** 16 或更高版本
+- **vcpkg**（推荐用于依赖管理）
+
+### 构建步骤
+
+1. **配置项目**:
+   ```powershell
+   mkdir build
+   cd build
+   cmake .. -DCMAKE_BUILD_TYPE=Debug
+   ```
+
+2. **编译**:
+   ```powershell
+   cmake --build . --config Debug
+   ```
+
+3. **运行** (实现后):
+   ```powershell
+   ./pfh_server
+   ```
+
+### 配置文件
+
+1. 复制示例配置:
+   ```powershell
+   Copy-Item config/config.example.json config/config.local.json
+   ```
+
+2. 编辑 `config/config.local.json` 设置数据库凭据、JWT 密钥等
+
+详见 [config/README.md](config/README.md)
+
+### 质量检查
+
+运行综合质量检查脚本:
+
+```powershell
+./quality_check.ps1
+```
+
+此脚本会执行：
+- Git 空白符检查
+- CMake 配置
+- 完整构建
+- 单元测试（实现后）
+- Markdown 验证
+
+## 项目结构
+
+```
+C++/PFH/
+├── CMakeLists.txt           # 根构建配置
+├── include/pfh/             # 公共头文件
+│   ├── domain/              # 领域实体、值对象、服务
+│   ├── application/         # 用例和 DTO
+│   ├── infrastructure/      # Repository 实现
+│   └── presentation/        # 控制器和中间件
+├── src/                     # 实现文件
+│   ├── domain/
+│   ├── application/
+│   ├── infrastructure/
+│   ├── presentation/
+│   └── bootstrap/           # 应用入口 (main.cpp)
+├── tests/                   # 测试套件
+│   ├── unit/                # 单元测试（无数据库/网络）
+│   ├── integration/         # 集成测试（含数据库）
+│   ├── api/                 # API 测试
+│   └── support/             # 测试工具和夹具
+├── config/                  # 配置文件
+├── migrations/              # 数据库迁移脚本
+├── cmake/                   # CMake 模块
+└── Docs/                    # 架构和设计文档
+```
+
+## 开发阶段
+
+### Phase 1: 核心后端（进行中）
+- ✅ 项目骨架和构建系统
+- ⏳ 金融原语（Decimal、Money、Currency、ExchangeRate）
+- ⏳ 领域模型（Account、Transaction、Transfer）
+- ⏳ Repository 和持久化层
+- ⏳ REST API 和认证
+- ⏳ 基础报表
+
+### Phase 2: 增强功能（计划中）
+- 高级报表和分析
+- 外部平台同步框架
+- 性能优化
+- 增强安全性
+
+### Phase 3: 生产就绪（计划中）
+- 全面监控
+- 生产部署
+- 文档完善
+
+详见 [Docs/Develop_Plan/Phase_1_Development_Plan.md](Docs/Develop_Plan/Phase_1_Development_Plan.md)
+
+## 测试策略
+
+测试遵循命名约定:
+```
+<ClassName>_When<Condition>_<ExpectedBehavior>
+```
+
+示例:
+```cpp
+Money_WhenAddingSameCurrency_ReturnsCorrectSum
+TransferAggregate_WhenOutgoingAndRateProvided_CalculatesIncoming
+```
+
+详见 [tests/TEST_NAMING_CONVENTION.md](tests/TEST_NAMING_CONVENTION.md)
+
+**覆盖率目标:**
+- Domain Layer: ≥ 90%
+- Application Layer: ≥ 80%
+- Infrastructure Layer: ≥ 60%
+- Presentation Layer: ≥ 60%
 
 ## 文档入口
 

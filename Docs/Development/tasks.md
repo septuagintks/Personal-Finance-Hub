@@ -54,20 +54,28 @@ Status: Active
 
 ### 3.2 工程骨架与本地开发 (Project Foundation)
 
-- [ ] 创建 CMake 工程骨架，包含 `src/`、`include/`、`tests/`、`cmake/`、`config/`、`migrations/` 和应用入口 <!-- id: 5 -->
-- [ ] 建立 Clean Architecture 目录边界，区分 `domain`、`application`、`infrastructure`、`presentation` 和 `bootstrap` <!-- id: 6 -->
-- [ ] 配置统一编译选项，启用 C++23、警告级别和 Debug/Release 构建类型 <!-- id: 7 -->
-- [ ] 接入 `spdlog` 日志基础设施，并约定 TraceId、用户 ID、任务 ID 和错误上下文输出格式 <!-- id: 8 -->
-- [ ] 建立配置加载机制，支持数据库连接、JWT 密钥、日志级别和运行环境变量注入 <!-- id: 9 -->
+- [x] 创建 CMake 工程骨架，包含 `src/`、`include/`、`tests/`、`cmake/`、`config/`、`migrations/` 和应用入口 <!-- id: 5 -->
+- [x] 建立 Clean Architecture 目录边界，区分 `domain`、`application`、`infrastructure`、`presentation` 和 `bootstrap` <!-- id: 6 -->
+- [x] 配置统一编译选项，启用 C++23、警告级别和 Debug/Release 构建类型 <!-- id: 7 -->
+- [x] 接入 `spdlog` 日志基础设施，并约定 TraceId、用户 ID、任务 ID 和错误上下文输出格式 <!-- id: 8 -->
+- [x] 建立配置加载机制，支持数据库连接、JWT 密钥、日志级别和运行环境变量注入 <!-- id: 9 -->
+
+### 3.2.1 基础类型与错误模型 (Foundation Types)
+
+- [x] 定义强类型 ID（`UserId`、`AccountId`、`TransactionId` 等）<!-- id: 9a -->
+- [x] 定义 `std::expected` 风格错误返回约定 <!-- id: 9b -->
+- [x] 定义应用层错误类型，覆盖 Validation、Unauthorized、Forbidden、NotFound、Conflict、DomainRuleViolation、InfrastructureFailure <!-- id: 9c -->
+- [x] 定义领域层错误类型，不依赖 HTTP 状态码 <!-- id: 9d -->
+- [x] 编写强类型 ID 和错误处理的单元测试 <!-- id: 9e -->
 
 ### 3.3 测试与质量门禁 (Testing & Quality Gates)
 
-- [ ] 搭建 GoogleTest 单元测试框架，并提供统一测试命令 <!-- id: 10 -->
-- [ ] 建立测试数据目录和测试命名规范，覆盖正常路径、边界路径和错误路径 <!-- id: 11 -->
+- [x] 搭建 GoogleTest 单元测试框架，并提供统一测试命令 <!-- id: 10 -->
+- [x] 建立测试数据目录和测试命名规范，覆盖正常路径、边界路径和错误路径 <!-- id: 11 -->
 - [ ] 编写核心金融原语与领域服务的单元测试 <!-- id: 12 -->
 - [ ] 编写 Repository 集成测试，覆盖 PostgreSQL、事务和 outbox 落库行为 <!-- id: 13 -->
 - [ ] 编写 API 接口集成测试 <!-- id: 14 -->
-- [ ] 增加本地质量检查命令，至少覆盖构建、测试和 Markdown 检查 <!-- id: 15 -->
+- [x] 增加本地质量检查命令，至少覆盖构建、测试和 Markdown 检查 <!-- id: 15 -->
 
 ### 3.4 核心金融原语 (Core Financial Primitives)
 

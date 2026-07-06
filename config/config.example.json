@@ -1,0 +1,34 @@
+{
+  "environment": "development",
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8080,
+    "threads": 4
+  },
+  "database": {
+    "host": "localhost",
+    "port": 5432,
+    "name": "pfh_dev",
+    "user": "pfh_user",
+    "password": "REPLACE_WITH_ACTUAL_PASSWORD",
+    "pool_size": 10,
+    "connection_timeout": 30
+  },
+  "jwt": {
+    "secret": "REPLACE_WITH_ACTUAL_SECRET",
+    "access_token_expiry_seconds": 900,
+    "refresh_token_expiry_seconds": 2592000
+  },
+  "logging": {
+    "level": "debug",
+    "output": "console",
+    "file": "logs/pfh.log"
+  },
+  "scheduler": {
+    "exchange_rate_refresh_interval_minutes": 60
+  },
+  "exchange_rate": {
+    "provider": "mock",
+    "api_key": "REPLACE_WITH_ACTUAL_API_KEY"
+  }
+}

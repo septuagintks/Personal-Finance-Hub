@@ -1,0 +1,12 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "personal-finance-hub",
+  "version": "0.1.0",
+  "description": "Personal Finance Hub - Multi-account finance management platform",
+  "dependencies": [
+    "spdlog",
+    "nlohmann-json",
+    "gtest"
+  ],
+  "builtin-baseline": "2024-01-01"
+}
