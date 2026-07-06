@@ -3,6 +3,9 @@
 // C++23
 
 #include "pfh/domain/exchange_rate.h"
+#include <string>
+#include <string_view>
+#include <utility>
 
 namespace pfh::domain {
 
@@ -33,8 +36,17 @@ DomainResult<ExchangeRate> ExchangeRate::inverse() const {
     if (!inv) {
         return std::unexpected(inv.error());
     }
+    // Toggle the "+inverse" suffix rather than accumulating it, so a double
+    // inverse restores the original source label.
+    static constexpr std::string_view kSuffix = "+inverse";
+    std::string inverted_source;
+    if (source_.ends_with(kSuffix)) {
+        inverted_source = source_.substr(0, source_.size() - kSuffix.size());
+    } else {
+        inverted_source = source_ + std::string(kSuffix);
+    }
     return ExchangeRate::create(target_, base_, *inv, fetched_at_,
-                                source_ + "+inverse");
+                                std::move(inverted_source));
 }
 
 DomainResult<Money> ExchangeRate::convert(const Money& amount) const {

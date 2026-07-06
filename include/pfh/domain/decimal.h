@@ -44,7 +44,7 @@ public:
     [[nodiscard]] static DomainResult<Decimal> parse(std::string_view text);
 
     /// @brief Build a Decimal from a whole integer value.
-    [[nodiscard]] static DomainResult<Decimal> from_integer(std::int64_t value) noexcept;
+    [[nodiscard]] static DomainResult<Decimal> from_integer(std::int64_t value);
 
     /// @brief Build a Decimal directly from a raw scaled 128-bit value.
     [[nodiscard]] static constexpr Decimal from_scaled(StorageType scaled) noexcept {
@@ -55,10 +55,12 @@ public:
     [[nodiscard]] std::string to_string() const;
 
     // Arithmetic - all return DomainResult to surface overflow / divide-by-zero.
-    [[nodiscard]] DomainResult<Decimal> add(const Decimal& other) const noexcept;
-    [[nodiscard]] DomainResult<Decimal> subtract(const Decimal& other) const noexcept;
-    [[nodiscard]] DomainResult<Decimal> multiply(const Decimal& other) const noexcept;
-    [[nodiscard]] DomainResult<Decimal> divide(const Decimal& other) const noexcept;
+    // Not noexcept: the error path constructs a DomainError holding a
+    // std::string message, which may allocate.
+    [[nodiscard]] DomainResult<Decimal> add(const Decimal& other) const;
+    [[nodiscard]] DomainResult<Decimal> subtract(const Decimal& other) const;
+    [[nodiscard]] DomainResult<Decimal> multiply(const Decimal& other) const;
+    [[nodiscard]] DomainResult<Decimal> divide(const Decimal& other) const;
 
     // Unary operations (cannot overflow within valid range).
     [[nodiscard]] Decimal negated() const noexcept { return Decimal(-value_); }

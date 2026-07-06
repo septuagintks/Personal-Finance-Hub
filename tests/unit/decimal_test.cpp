@@ -297,4 +297,42 @@ TEST(Decimal, WhenPositive_PredicatesCorrect) {
     EXPECT_TRUE(d.is_positive());
 }
 
+// ---- from_scaled / raw_value round-trip ----
+
+TEST(Decimal, WhenFromScaled_RawValueRoundTrips) {
+    // 12.34 at scale 10 -> raw 123400000000
+    auto d = make("12.34");
+    auto rebuilt = Decimal::from_scaled(d.raw_value());
+    EXPECT_EQ(rebuilt.to_string(), "12.34");
+    EXPECT_EQ(rebuilt, d);
+}
+
+TEST(Decimal, WhenRawValueOfOne_IsScaleFactor) {
+    auto one = make("1");
+    EXPECT_EQ(one.raw_value(), Decimal::kScaleFactor);
+}
+
+// ---- multiply range ----
+
+TEST(Decimal, WhenMultiplyWithinRange_Succeeds) {
+    // 1e9 * 1e9 = 1e18. Each operand carries the 1e10 scale, so the
+    // intermediate product is (1e9*1e10)^2 = 1e38, near but under __int128 max.
+    auto a = make("1000000000");
+    auto b = make("1000000000");
+    auto r = a.multiply(b);
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->to_string(), "1000000000000000000");
+}
+
+TEST(Decimal, WhenMultiplyIntermediateOverflows_ReturnsError) {
+    // Known limitation: the intermediate product carries scale^2, so two large
+    // operands overflow __int128 even when the true result (1e22) would fit.
+    // 1e11 * 1e11: (1e11*1e10)^2 = 1e42 > __int128 max (~1.7e38) -> overflow.
+    auto a = make("100000000000");
+    auto b = make("100000000000");
+    auto r = a.multiply(b);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, DomainErrorCode::Overflow);
+}
+
 } // namespace pfh::test

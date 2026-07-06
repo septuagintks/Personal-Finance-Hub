@@ -151,6 +151,28 @@ pfh_domain:      独立静态库，不链接 spdlog/框架
 
 ---
 
+## 7.1 S05 复查修复记录
+
+对 S05 全部产物复查后修复 6 项（复查日期 2026-07-07）：
+
+1. **[中] `USDT` 无法创建 — 死白名单条目**：形状检查硬拒绝非 3 字符，但白名单含 4 字母
+   `USDT`，实测不可达。改为加密代码接受 3-5 字母（法币仍严格 3 字母），白名单补 `USDC`/`WBTC`。
+2. **[低] `checked_mul` signed `__int128` 乘法溢出是 UB**：改在无符号域计算并范围检查后再
+   转回有符号，含 INT_MIN 边界处理。
+3. **[低] `add`/`subtract`/`multiply`/`divide`/`from_integer` 误标 `noexcept`**：错误路径构造
+   含 `std::string` 的 `DomainError` 可能分配抛异常，去掉 `noexcept`。
+4. **[低] `inverse()` 源标记累加**：`ECB+inverse+inverse` → 改为切换后缀，二次反向还原为 `ECB`。
+5. **[低] 测试覆盖缺口**：补 `from_scaled`/`raw_value` 往返、multiply 范围与中间积溢出、
+   Money multiply 溢出传播、ExchangeRate convert 溢出传播、双次 inverse 源还原、
+   4/5 字母加密币与超长/未知码。
+6. **[记录] multiply 中间积范围限制**：操作数各带 `10^10` 缩放，中间积 `lhs*rhs` 携带
+   `scale^2`，两个大操作数（等量级约 >1.3e9）会溢出 `__int128`，即便真实结果可表示。
+   Phase 1 金额×汇率的实际量级够用；如需更大范围，后续可引入 256 位中间积或先除后乘。
+
+复查后验证：142 个单元测试全部通过，构建 `-Werror -pedantic` 无警告。
+
+---
+
 ## 8. 参考文档
 
 - [金额与货币系统设计](../Architecture/04_Money_Currency_System_Design.md)

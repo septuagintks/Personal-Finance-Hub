@@ -85,4 +85,23 @@ TEST(ExchangeRate, WhenConvertingWrongCurrency_ReturnsError) {
     EXPECT_EQ(result.error().code, DomainErrorCode::CurrencyMismatch);
 }
 
+TEST(ExchangeRate, WhenConversionOverflows_PropagatesError) {
+    // Huge base amount * a large rate overflows Decimal; convert must surface it.
+    auto er = rate("USD", "CNY", "99999999999999999999");
+    auto usd = Money(dec("99999999999999999999"), ccy("USD"));
+    auto result = er.convert(usd);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, DomainErrorCode::Overflow);
+}
+
+TEST(ExchangeRate, WhenDoubleInverse_RestoresSourceLabel) {
+    auto er = rate("USD", "CNY", "8", 1719302400, "ECB");
+    auto inv = er.inverse();
+    ASSERT_TRUE(inv.has_value());
+    EXPECT_EQ(inv->source(), "ECB+inverse");
+    auto back = inv->inverse();
+    ASSERT_TRUE(back.has_value());
+    EXPECT_EQ(back->source(), "ECB"); // suffix toggled off, not accumulated
+}
+
 } // namespace pfh::test

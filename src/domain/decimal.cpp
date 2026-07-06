@@ -31,17 +31,44 @@ using UStorage = Decimal::UStorageType;
 constexpr Storage kInt128Max = (static_cast<Storage>(1) << 126); // safe headroom bound
 
 /// @brief Multiply two 128-bit values, detecting overflow.
+///
+/// Signed overflow is undefined behaviour, so the product is computed in the
+/// unsigned domain (well-defined wraparound) and range-checked before casting
+/// back. We reject any product whose magnitude exceeds the signed max so the
+/// signed result is always representable.
 [[nodiscard]] bool checked_mul(Storage a, Storage b, Storage& out) noexcept {
     if (a == 0 || b == 0) {
         out = 0;
         return true;
     }
-    Storage result = a * b;
-    // Detect overflow by reversing the multiplication.
-    if (result / b != a) {
+    const bool negative = (a < 0) != (b < 0);
+    const UStorage ua = (a < 0) ? static_cast<UStorage>(-a) : static_cast<UStorage>(a);
+    const UStorage ub = (b < 0) ? static_cast<UStorage>(-b) : static_cast<UStorage>(b);
+
+    const UStorage product = ua * ub;
+    // Overflow of the unsigned product itself.
+    if (product / ub != ua) {
         return false;
     }
-    out = result;
+    // Ensure the magnitude fits in the signed range (|min| == max + 1).
+    const UStorage signed_max = static_cast<UStorage>(std::numeric_limits<Storage>::max());
+    if (negative) {
+        if (product == signed_max + 1) {
+            // Exactly INT_MIN: representable, but negating the cast would
+            // overflow, so produce it directly.
+            out = std::numeric_limits<Storage>::min();
+            return true;
+        }
+        if (product > signed_max) {
+            return false;
+        }
+        out = -static_cast<Storage>(product);
+    } else {
+        if (product > signed_max) {
+            return false;
+        }
+        out = static_cast<Storage>(product);
+    }
     return true;
 }
 
@@ -73,7 +100,7 @@ constexpr Storage kInt128Max = (static_cast<Storage>(1) << 126); // safe headroo
 
 } // namespace
 
-DomainResult<Decimal> Decimal::from_integer(std::int64_t value) noexcept {
+DomainResult<Decimal> Decimal::from_integer(std::int64_t value) {
     Storage scaled = 0;
     if (!checked_mul(static_cast<Storage>(value), kScaleFactor, scaled)) {
         return std::unexpected(DomainError::overflow("from_integer"));
@@ -244,7 +271,7 @@ std::string Decimal::to_string() const {
     return result;
 }
 
-DomainResult<Decimal> Decimal::add(const Decimal& other) const noexcept {
+DomainResult<Decimal> Decimal::add(const Decimal& other) const {
     Storage result = 0;
     if (!checked_add(value_, other.value_, result)) {
         return std::unexpected(DomainError::overflow("add"));
@@ -252,7 +279,7 @@ DomainResult<Decimal> Decimal::add(const Decimal& other) const noexcept {
     return Decimal(result);
 }
 
-DomainResult<Decimal> Decimal::subtract(const Decimal& other) const noexcept {
+DomainResult<Decimal> Decimal::subtract(const Decimal& other) const {
     Storage negated_other = 0;
     // -other cannot overflow for our valid range, but guard the extreme.
     if (other.value_ == std::numeric_limits<Storage>::min()) {
@@ -266,7 +293,7 @@ DomainResult<Decimal> Decimal::subtract(const Decimal& other) const noexcept {
     return Decimal(result);
 }
 
-DomainResult<Decimal> Decimal::multiply(const Decimal& other) const noexcept {
+DomainResult<Decimal> Decimal::multiply(const Decimal& other) const {
     // (a * 10^s) * (b * 10^s) = (a*b) * 10^(2s); divide once by 10^s with Half-Even.
     // Work in the sign-magnitude domain to keep rounding symmetric.
     const bool negative = (value_ < 0) != (other.value_ < 0);
@@ -306,7 +333,7 @@ DomainResult<Decimal> Decimal::multiply(const Decimal& other) const noexcept {
     return Decimal(0);
 }
 
-DomainResult<Decimal> Decimal::divide(const Decimal& other) const noexcept {
+DomainResult<Decimal> Decimal::divide(const Decimal& other) const {
     if (other.value_ == 0) {
         return std::unexpected(DomainError::division_by_zero());
     }

@@ -65,6 +65,14 @@ TEST(Money, WhenMultipliedByFactor_ScalesAmountKeepsCurrency) {
     EXPECT_EQ(r->to_string(), "7180 USD");
 }
 
+TEST(Money, WhenMultiplyOverflows_PropagatesError) {
+    // A huge amount times a huge factor overflows Decimal; Money must surface it.
+    auto huge = money("99999999999999999999", "USD");
+    auto r = huge.multiply(dec("99999999999999999999"));
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, DomainErrorCode::Overflow);
+}
+
 // ---- Predicates & negate ----
 
 TEST(Money, WhenZeroAmount_IsZero) {

@@ -36,6 +36,40 @@ TEST(Currency, WhenCryptoWhitelisted_Creates) {
     EXPECT_TRUE(r->is_crypto());
 }
 
+TEST(Currency, WhenFourLetterCrypto_Creates) {
+    // Regression: USDT is 4 letters; must not be rejected by a 3-letter shape rule.
+    auto r = Currency::create("USDT");
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->code(), "USDT");
+    EXPECT_TRUE(r->is_crypto());
+}
+
+TEST(Currency, WhenFiveLetterCrypto_Creates) {
+    auto r = Currency::create("WBTC");
+    ASSERT_TRUE(r.has_value());
+    EXPECT_TRUE(r->is_crypto());
+}
+
+TEST(Currency, WhenLowercaseFourLetterCrypto_Upcases) {
+    auto r = Currency::create("usdc");
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->code(), "USDC");
+    EXPECT_TRUE(r->is_crypto());
+}
+
+TEST(Currency, WhenSixLetters_ReturnsError) {
+    auto r = Currency::create("TOOLONG");
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, DomainErrorCode::InvalidCurrency);
+}
+
+TEST(Currency, WhenUnknownFourLetter_ReturnsError) {
+    // 4-letter but not in the crypto whitelist -> rejected.
+    auto r = Currency::create("ABCD");
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, DomainErrorCode::InvalidCurrency);
+}
+
 TEST(Currency, WhenFiat_IsNotCrypto) {
     EXPECT_FALSE(ccy("USD").is_crypto());
     EXPECT_FALSE(ccy("JPY").is_crypto());
