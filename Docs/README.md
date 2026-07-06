@@ -75,11 +75,11 @@ Docs/
 
 最近的文档审查已经修正了多处跨文档冲突。当前入口文档按以下状态理解：
 
-* **UserPreference 存储设计**：`02_Database_Design.md`、`03_Domain_Model_Design.md`、`04_Money_Currency_System_Design.md` 与 `05_Repository_and_Persistence_Design.md` 已统一为“领域对象由 `users.base_currency_code` 默认值与 `user_preferences` 扩展偏好组合映射”。
-* **服务命名与职责边界**：应用层统一使用 `RefreshExchangeRatesUseCase` 负责调度和 I/O 编排，领域层统一使用 `CurrencyConversionService` 负责纯内存汇率折算。
-* **手续费扣除灵活性**：`TransferDomainService::buildTransfer` 已引入 `FeeSource`，覆盖源账户、目标账户与第三方账户扣费场景。
-* **事务与事件一致性**：`DrogonUnitOfWork` 的事务闭包必须绑定同一个数据库事务上下文，业务写入和 outbox 写入同事务提交，提交前不直接派发事件。
-* **报表大数据折算优化**：`09_Reporting_and_Analytics_Design.md` 已补充 SQL 端提前折算方案；缺失汇率时返回明确错误，不使用 `0` 或 `1` 等默认值参与财务计算。
+- **UserPreference 存储设计**：`02_Database_Design.md`、`03_Domain_Model_Design.md`、`04_Money_Currency_System_Design.md` 与 `05_Repository_and_Persistence_Design.md` 已统一为“领域对象由 `users.base_currency_code` 默认值与 `user_preferences` 扩展偏好组合映射”。
+- **服务命名与职责边界**：应用层统一使用 `RefreshExchangeRatesUseCase` 负责调度和 I/O 编排，领域层统一使用 `CurrencyConversionService` 负责纯内存汇率折算。
+- **手续费扣除灵活性**：`TransferDomainService::buildTransfer` 已引入 `FeeSource`，覆盖源账户、目标账户与第三方账户扣费场景。
+- **事务与事件一致性**：`DrogonUnitOfWork` 的事务闭包必须绑定同一个数据库事务上下文，业务写入和 outbox 写入同事务提交，提交前不直接派发事件。
+- **报表大数据折算优化**：`09_Reporting_and_Analytics_Design.md` 已补充 SQL 端提前折算方案；缺失汇率时返回明确错误，不使用 `0` 或 `1` 等默认值参与财务计算。
 
 ---
 

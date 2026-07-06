@@ -22,13 +22,13 @@ Architecture: Clean Architecture (Lightweight CQRS)
 由于绕过了 Domain 实体，系统无法通过领域聚合根天然的边界来保护数据。为了防止**越权数据泄露（Horizontal Privilege Escalation）**，系统在设计上强制实施以下多租户安全隔离规约：
 
 1. **API 接口强制绑定 UserId**：
-   * `IReportQueryService` 的所有查询接口，其首个参数必须强制为 `UserId userId`。
-   * 表现层 `ReportController` 必须从 JWT 校验通过的请求上下文中提取 `UserId` 并传入，严禁由前端参数传入 `userId`。
+   - `IReportQueryService` 的所有查询接口，其首个参数必须强制为 `UserId userId`。
+   - 表现层 `ReportController` 必须从 JWT 校验通过的请求上下文中提取 `UserId` 并传入，严禁由前端参数传入 `userId`。
 2. **SQL 模板参数化绑定**：
-   * 基础设施层的所有 SQL 语句必须显式且强制绑定 `user_id = $1` 过滤条件，绝不允许拼接 SQL 字符串。
+   - 基础设施层的所有 SQL 语句必须显式且强制绑定 `user_id = $1` 过滤条件，绝不允许拼接 SQL 字符串。
 3. **数据库行级安全（Row-Level Security, RLS）**：
-   * 在 PostgreSQL 数据库层面，针对 `transactions`、`accounts`、`categories` 等表开启 RLS。
-   * 强制限制当前数据库连接只能读取属于当前 `user_id` 的行，作为底层数据安全的终极防线。
+   - 在 PostgreSQL 数据库层面，针对 `transactions`、`accounts`、`categories` 等表开启 RLS。
+   - 强制限制当前数据库连接只能读取属于当前 `user_id` 的行，作为底层数据安全的终极防线。
 
 ```text
 [Frontend / Vue3 ECharts]
@@ -337,11 +337,11 @@ public:
 **最佳实践策略（分离计算与大数量级优化）**：
 
 1. **小数量级（单用户几万条流水以内）**：
-   * **DB 层只做同币种聚合**：使用 SQL 的 `GROUP BY currency_code` 查出各个币种的原始总和。
-   * **C++ 层做汇率转换**：将结果拉到 C++ 内存中，按需查询汇率并在 C++ 中用 `Decimal` 进行高精度转换和统一相加。
+   - **DB 层只做同币种聚合**：使用 SQL 的 `GROUP BY currency_code` 查出各个币种的原始总和。
+   - **C++ 层做汇率转换**：将结果拉到 C++ 内存中，按需查询汇率并在 C++ 中用 `Decimal` 进行高精度转换和统一相加。
 2. **大数量级（流水达到百万级或高维报表）**：
-   * **SQL 端提前折算**：对于日/月度聚合报表，直接在 SQL 中通过 `GROUP BY` 和 `JOIN exchange_rates` 在数据库端完成折算，避免在内存中对每条流水进行三角折算导致 CPU 密集型计算，阻塞 Drogon 的 Event Loop。
-   * **单笔流水明细报表**：采用延迟加载（Lazy Translation）或前端实时折算。
+   - **SQL 端提前折算**：对于日/月度聚合报表，直接在 SQL 中通过 `GROUP BY` 和 `JOIN exchange_rates` 在数据库端完成折算，避免在内存中对每条流水进行三角折算导致 CPU 密集型计算，阻塞 Drogon 的 Event Loop。
+   - **单笔流水明细报表**：采用延迟加载（Lazy Translation）或前端实时折算。
 
 ### 4.1 基础设施层代码示例：净资产计算
 

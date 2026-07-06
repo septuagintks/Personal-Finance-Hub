@@ -26,6 +26,7 @@
 **文件**: `include/pfh/domain/typed_id.h` (124 行)
 
 **核心特性**:
+
 - ✅ 泛型模板实现，使用 Tag 类型区分不同 ID
 - ✅ 类型安全：不同类型的 ID 无法互相比较
 - ✅ 空间船操作符（C++20）支持三路比较
@@ -34,6 +35,7 @@
 - ✅ 字符串转换支持
 
 **定义的 ID 类型**:
+
 ```cpp
 UserId
 AccountId
@@ -46,6 +48,7 @@ AuditLogId
 ```
 
 **测试**: `tests/unit/typed_id_test.cpp` (157 行)
+
 - ✅ 构造和基本操作测试
 - ✅ 类型安全验证
 - ✅ 比较操作符测试
@@ -57,42 +60,44 @@ AuditLogId
 **文件**: `include/pfh/application/error.h` (176 行)
 
 **应用层错误类型**:
+
 ```cpp
 enum class ErrorCode {
     // Validation (400)
     ValidationError, InvalidInput, MissingRequiredField, InvalidFormat,
-    
+
     // Authentication (401)
     Unauthorized, InvalidToken, ExpiredToken,
-    
+
     // Authorization (403)
     Forbidden, InsufficientPermissions,
-    
+
     // Resource (404)
     NotFound, UserNotFound, AccountNotFound, TransactionNotFound,
-    
+
     // Conflict (409)
     Conflict, DuplicateResource, VersionMismatch, OptimisticLockFailure,
-    
+
     // Business Rule (422)
     DomainRuleViolation, InvalidCurrencyOperation, InsufficientBalance,
     TransferAmountMismatch, InvalidExchangeRate, CrossCurrencyWithoutRate,
-    
+
     // Infrastructure (500)
     InfrastructureFailure, DatabaseError, ExternalServiceError,
-    
+
     // Internal (500)
     InternalError, UnexpectedError
 };
 ```
 
 **Error 结构**:
+
 ```cpp
 struct Error {
     ErrorCode code;
     std::string message;
     std::string details;  // Additional context for debugging
-    
+
     // Factory methods
     static Error validation(...);
     static Error unauthorized(...);
@@ -103,6 +108,7 @@ struct Error {
 ```
 
 **Result 类型**:
+
 ```cpp
 template <typename T>
 using Result = std::expected<T, Error>;
@@ -117,6 +123,7 @@ VoidResult err_void(Error error);
 ```
 
 **领域层错误类型**:
+
 ```cpp
 enum class DomainErrorCode {
     InvalidAmount, InvalidCurrency, CurrencyMismatch,
@@ -131,7 +138,7 @@ enum class DomainErrorCode {
 struct DomainError {
     DomainErrorCode code;
     std::string message;
-    
+
     // Factory methods
     static DomainError invalid_amount(...);
     static DomainError currency_mismatch(...);
@@ -143,6 +150,7 @@ using DomainResult = std::expected<T, DomainError>;
 ```
 
 **测试**: `tests/unit/error_test.cpp` (171 行)
+
 - ✅ Error 构造测试
 - ✅ Result 成功和失败场景
 - ✅ Result 链式调用
@@ -153,6 +161,7 @@ using DomainResult = std::expected<T, DomainError>;
 **文件**: `include/pfh/infrastructure/config.h` (78 行)
 
 **配置结构**:
+
 ```cpp
 struct ServerConfig {
     std::string host;
@@ -200,6 +209,7 @@ struct AppConfig {
 ```
 
 **配置加载接口**:
+
 ```cpp
 class IConfigLoader {
 public:
@@ -209,6 +219,7 @@ public:
 ```
 
 **JSON 配置加载器**: `include/pfh/infrastructure/json_config_loader.h` (131 行)
+
 - ✅ 从 JSON 文件加载配置
 - ✅ 类型安全的配置解析
 - ✅ 默认值支持
@@ -220,6 +231,7 @@ public:
 **文件**: `include/pfh/infrastructure/logger.h` (115 行)
 
 **核心特性**:
+
 - ✅ 基于 spdlog 的日志封装
 - ✅ TraceId 上下文支持
 - ✅ UserId 上下文支持
@@ -229,6 +241,7 @@ public:
 - ✅ 彩色控制台输出
 
 **日志方法**:
+
 ```cpp
 // 基本日志（带 TraceId）
 Logger::trace(trace_id, fmt, args...);
@@ -247,6 +260,7 @@ Logger::error_with_context(trace_id, context, fmt, args...);
 ```
 
 **日志格式**:
+
 ```
 [2026-07-06 14:30:45.123] [info] [thread_id] [TraceId:abc123] Message
 [2026-07-06 14:30:45.124] [error] [thread_id] [TraceId:abc123] [UserId:456] Error message
@@ -257,6 +271,7 @@ Logger::error_with_context(trace_id, context, fmt, args...);
 **文件**: `src/bootstrap/main.cpp` (更新后 52 行)
 
 **新增功能**:
+
 - ✅ 配置文件加载（config.local.json 或 config.example.json）
 - ✅ 配置错误处理
 - ✅ 日志初始化
@@ -265,6 +280,7 @@ Logger::error_with_context(trace_id, context, fmt, args...);
 ### 6. 构建系统更新
 
 **CMakeLists.txt 更新**:
+
 - ✅ 添加 spdlog 依赖
 - ✅ 添加 nlohmann_json 依赖
 - ✅ 添加 GTest 依赖
@@ -272,6 +288,7 @@ Logger::error_with_context(trace_id, context, fmt, args...);
 - ✅ 链接主程序依赖
 
 **tests/unit/CMakeLists.txt 更新**:
+
 - ✅ 添加测试源文件
 - ✅ 配置测试链接
 - ✅ 启用 GTest 自动发现
@@ -279,10 +296,12 @@ Logger::error_with_context(trace_id, context, fmt, args...);
 ### 7. 依赖管理
 
 **文件**: `vcpkg.json` (新增)
+
 - ✅ vcpkg 清单文件，声明项目依赖
 - ✅ 支持自动依赖安装
 
 **文件**: `Docs/Standards/DEPENDENCY_INSTALLATION.md` (新增，220+ 行)
+
 - ✅ 详细的依赖安装指南
 - ✅ vcpkg 使用说明
 - ✅ 常见问题解决
@@ -312,34 +331,40 @@ Logger::error_with_context(trace_id, context, fmt, args...);
 ### 新增文件
 
 | 文件类型 | 文件数 | 代码行数（估算） |
-|---------|-------|----------------|
-| 头文件 | 5 | ~650 行 |
-| 测试文件 | 2 | ~330 行 |
-| 配置文件 | 1 | ~10 行 |
-| 文档文件 | 1 | ~220 行 |
-| **总计** | **9** | **~1210 行** |
+| -------- | ------ | ---------------- |
+| 头文件   | 5      | ~650 行          |
+| 测试文件 | 2      | ~330 行          |
+| 配置文件 | 1      | ~10 行           |
+| 文档文件 | 1      | ~220 行          |
+| **总计** | **9**  | **~1210 行**     |
 
 ### 文件清单
 
 **Domain Layer**:
+
 - ✅ `include/pfh/domain/typed_id.h`
 
 **Application Layer**:
+
 - ✅ `include/pfh/application/error.h`
 
 **Infrastructure Layer**:
+
 - ✅ `include/pfh/infrastructure/config.h`
 - ✅ `include/pfh/infrastructure/json_config_loader.h`
 - ✅ `include/pfh/infrastructure/logger.h`
 
 **Tests**:
+
 - ✅ `tests/unit/typed_id_test.cpp`
 - ✅ `tests/unit/error_test.cpp`
 
 **Configuration**:
+
 - ✅ `vcpkg.json`
 
 **Documentation**:
+
 - ✅ `Docs/Standards/DEPENDENCY_INSTALLATION.md`
 
 ---
@@ -349,6 +374,7 @@ Logger::error_with_context(trace_id, context, fmt, args...);
 ### 1. 类型安全
 
 **强类型 ID** 防止 ID 类型混淆：
+
 ```cpp
 UserId user_id(1);
 AccountId account_id(1);
@@ -384,12 +410,14 @@ AccountId account_id(1);
 ### 1. 为什么使用 std::expected？
 
 **优点**:
+
 - 类型安全的错误处理
 - 强制错误检查
 - 零开销异常替代
 - 现代 C++ 标准（C++23）
 
 **对比异常**:
+
 - 性能更可预测
 - 错误路径显式
 - 适合金融系统的确定性需求
@@ -397,11 +425,13 @@ AccountId account_id(1);
 ### 2. 为什么 Domain 和 Application 分离错误类型？
 
 **Domain 错误**:
+
 - 纯业务规则错误
 - 不依赖任何框架
 - 可在任何环境复用
 
 **Application 错误**:
+
 - 包含 HTTP 状态码语义
 - 为 REST API 设计
 - 可映射到具体响应格式
@@ -443,6 +473,7 @@ AccountId account_id(1);
    - 统一的错误处理
 
 **依赖关系验证**:
+
 - ✅ 强类型 ID 已就绪
 - ✅ 错误处理模型已就绪
 - ✅ 日志基础设施已就绪
@@ -473,6 +504,7 @@ cd build; ctest -C Debug --output-on-failure
 ### 配置文件
 
 **需要创建**:
+
 ```powershell
 Copy-Item config/config.example.json config/config.local.json
 # 编辑 config.local.json，设置真实的 JWT secret 等

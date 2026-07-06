@@ -22,14 +22,14 @@
 
 ## 2. 交付物
 
-| 组件 | 头文件 | 实现 | 测试 |
-|------|--------|------|------|
-| Decimal | `include/pfh/domain/decimal.h` | `src/domain/decimal.cpp` | `tests/unit/decimal_test.cpp` |
-| Currency | `include/pfh/domain/currency.h` | `src/domain/currency.cpp` | `tests/unit/currency_test.cpp` |
-| Money | `include/pfh/domain/money.h` | `src/domain/money.cpp` | `tests/unit/money_test.cpp` |
-| ExchangeRate | `include/pfh/domain/exchange_rate.h` | `src/domain/exchange_rate.cpp` | `tests/unit/exchange_rate_test.cpp` |
+| 组件                      | 头文件                                             | 实现                                         | 测试                                              |
+| ------------------------- | -------------------------------------------------- | -------------------------------------------- | ------------------------------------------------- |
+| Decimal                   | `include/pfh/domain/decimal.h`                     | `src/domain/decimal.cpp`                     | `tests/unit/decimal_test.cpp`                     |
+| Currency                  | `include/pfh/domain/currency.h`                    | `src/domain/currency.cpp`                    | `tests/unit/currency_test.cpp`                    |
+| Money                     | `include/pfh/domain/money.h`                       | `src/domain/money.cpp`                       | `tests/unit/money_test.cpp`                       |
+| ExchangeRate              | `include/pfh/domain/exchange_rate.h`               | `src/domain/exchange_rate.cpp`               | `tests/unit/exchange_rate_test.cpp`               |
 | CurrencyConversionService | `include/pfh/domain/currency_conversion_service.h` | `src/domain/currency_conversion_service.cpp` | `tests/unit/currency_conversion_service_test.cpp` |
-| 领域错误 | `include/pfh/domain/domain_error.h` | (header-only) | 覆盖于各测试 |
+| 领域错误                  | `include/pfh/domain/domain_error.h`                | (header-only)                                | 覆盖于各测试                                      |
 
 均编入 `pfh_domain` 静态库，无框架依赖。
 

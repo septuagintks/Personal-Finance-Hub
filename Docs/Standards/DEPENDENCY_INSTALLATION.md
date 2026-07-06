@@ -9,18 +9,18 @@ Updated: 2026-07-06
 
 ### Phase 1 S04 依赖
 
-| 依赖 | 用途 | 状态 |
-|------|------|------|
-| **spdlog** | 日志库 | ✅ 必需 |
-| **nlohmann-json** | JSON 解析 | ✅ 必需 |
-| **GTest** | 单元测试框架 | ✅ 必需 |
+| 依赖              | 用途         | 状态    |
+| ----------------- | ------------ | ------- |
+| **spdlog**        | 日志库       | ✅ 必需 |
+| **nlohmann-json** | JSON 解析    | ✅ 必需 |
+| **GTest**         | 单元测试框架 | ✅ 必需 |
 
 ### 后续阶段依赖（预留）
 
-| 依赖 | 用途 | 状态 |
-|------|------|------|
-| **Drogon** | Web 框架 | ⏳ P1-S10 需要 |
-| **libpq** | PostgreSQL 客户端 | ⏳ P1-S07 需要 |
+| 依赖       | 用途              | 状态           |
+| ---------- | ----------------- | -------------- |
+| **Drogon** | Web 框架          | ⏳ P1-S10 需要 |
+| **libpq**  | PostgreSQL 客户端 | ⏳ P1-S07 需要 |
 
 ---
 
@@ -65,6 +65,7 @@ vcpkg install gtest
 ```
 
 **Windows 平台指定**:
+
 ```powershell
 vcpkg install spdlog:x64-windows
 vcpkg install nlohmann-json:x64-windows
@@ -107,6 +108,7 @@ brew install googletest
 如果无法使用包管理器，可以手动下载和编译各个库。
 
 参考各个库的官方文档：
+
 - spdlog: https://github.com/gabime/spdlog
 - nlohmann-json: https://github.com/nlohmann/json
 - GoogleTest: https://github.com/google/googletest

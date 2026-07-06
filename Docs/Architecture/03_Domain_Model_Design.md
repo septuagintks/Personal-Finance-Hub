@@ -73,14 +73,14 @@ domain/
 template <typename Tag, typename Underlying = int64_t>
 struct StrongId {
     Underlying value;
-    
+
     explicit StrongId(Underlying v) : value(v) {}
     StrongId() : value(0) {}
-    
+
     bool operator==(const StrongId& o) const { return value == o.value; }
     bool operator!=(const StrongId& o) const { return value != o.value; }
     bool operator<(const StrongId& o)  const { return value < o.value;  }
-    
+
     // 统一的字符串转换（供路由层使用）
     static std::optional<StrongId> from_string(std::string_view s) {
         try {
@@ -89,12 +89,12 @@ struct StrongId {
             return std::nullopt;
         }
     }
-    
+
     std::string to_string() const { return std::to_string(value); }
-    
+
     // JSON 互转（供 DTO 层使用）
     Json::Value to_json() const  { return Json::Value(static_cast<Json::Int64>(value)); }
-    
+
     static std::optional<StrongId> from_json(const Json::Value& j) {
         if (j.isInt64()) return StrongId{j.asInt64()};
         if (j.isString()) return from_string(j.asString());
@@ -1308,16 +1308,16 @@ struct AccountId
 
 ## 31. 实体-表对应表
 
-| Domain Entity | Database Table | 对齐状态 | 说明 |
-| ------------- | -------------- | -------- | ---- |
-| User | users | 基本对齐 | 领域层未展开 password_hash、base_currency_code 等持久化字段 |
-| UserPreference | user_preferences | 基本对齐 | 偏好字段按应用层 DTO / Repository 承载 |
-| Account | accounts | 已对齐 | 已补齐 description、isArchived、archivedAt、createdAt、updatedAt |
-| Category | categories | 已对齐 | 已补齐 sortOrder、deletedAt、createdAt、updatedAt |
-| Transaction | transactions | 已对齐 | 已补齐 userId、transferGroupId |
-| Tag | tags | 待补充 | 当前文档仅定义值对象语义，尚未展开持久化字段 |
-| AuditLog | audit_logs | 基本对齐 | 资源 ID 允许字符串以兼容 UUID / 复合 ID |
-| SystemCategoryTemplate | system_category_templates | 基本对齐 | 主要由分类模板与初始化流程使用 |
+| Domain Entity          | Database Table            | 对齐状态 | 说明                                                             |
+| ---------------------- | ------------------------- | -------- | ---------------------------------------------------------------- |
+| User                   | users                     | 基本对齐 | 领域层未展开 password_hash、base_currency_code 等持久化字段      |
+| UserPreference         | user_preferences          | 基本对齐 | 偏好字段按应用层 DTO / Repository 承载                           |
+| Account                | accounts                  | 已对齐   | 已补齐 description、isArchived、archivedAt、createdAt、updatedAt |
+| Category               | categories                | 已对齐   | 已补齐 sortOrder、deletedAt、createdAt、updatedAt                |
+| Transaction            | transactions              | 已对齐   | 已补齐 userId、transferGroupId                                   |
+| Tag                    | tags                      | 待补充   | 当前文档仅定义值对象语义，尚未展开持久化字段                     |
+| AuditLog               | audit_logs                | 基本对齐 | 资源 ID 允许字符串以兼容 UUID / 复合 ID                          |
+| SystemCategoryTemplate | system_category_templates | 基本对齐 | 主要由分类模板与初始化流程使用                                   |
 
 ### 31.1 Remaining Notes
 

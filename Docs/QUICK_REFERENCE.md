@@ -30,6 +30,7 @@ cmake --build . --config Debug
 ```
 
 此脚本会自动执行：
+
 - Git 空白符检查
 - CMake 配置验证
 - 完整构建
@@ -163,6 +164,7 @@ git diff
 ## 当前开发状态
 
 ### ✅ 已完成
+
 - 项目骨架和目录结构
 - CMake 构建系统
 - C++23 编译配置
@@ -171,9 +173,11 @@ git diff
 - 配置管理机制
 
 ### ⏳ 进行中
+
 - P1-S04: 基础类型与错误模型
 
 ### 📋 待办
+
 - P1-S05: 金融原语（Decimal, Money, Currency, ExchangeRate）
 - P1-S06: 领域模型（Account, Transaction, Transfer）
 - P1-S07: 数据库迁移
@@ -194,6 +198,7 @@ Presentation → Application → Domain ← Infrastructure
 ```
 
 **关键规则**：
+
 - Domain 层不依赖任何框架
 - 所有依赖指向内层（Domain）
 - Infrastructure 实现 Domain 定义的接口

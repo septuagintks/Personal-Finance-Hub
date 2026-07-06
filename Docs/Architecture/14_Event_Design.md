@@ -56,7 +56,7 @@ struct IDomainEvent {
 | AccountDangerouslyDeleted | userId, accountId, occurredAt                                         | DangerousDeleteAccountUseCase                              | AuditLogHandler, SecurityNotificationHandler               |
 | CategoryCreated           | userId, categoryId, board, occurredAt                                 | CreateCategoryUseCase / InitializeDefaultCategoriesUseCase | CategoryTreeCacheInvalidator                               |
 | CategoryDeleted           | userId, categoryId, board, occurredAt                                 | DeleteCategoryUseCase                                      | CategoryTreeCacheInvalidator, ReportCacheInvalidator       |
-| ExchangeRateRefreshed     | provider, baseCurrency, targetCurrency, fetchedAt                     | RefreshExchangeRatesUseCase                                 | LatestRateCacheInvalidator, AuditLogHandler                |
+| ExchangeRateRefreshed     | provider, baseCurrency, targetCurrency, fetchedAt                     | RefreshExchangeRatesUseCase                                | LatestRateCacheInvalidator, AuditLogHandler                |
 | SyncCompleted             | userId, provider, syncJobId, importedCount, skippedCount, occurredAt  | RunSyncJobUseCase                                          | ReconciliationJob, AuditLogHandler                         |
 | UserPreferenceUpdated     | userId, occurredAt                                                    | UpdateUserPreferenceUseCase                                | FrontendPreferenceCacheInvalidator, ReportCacheInvalidator |
 | AuditLogRecorded          | auditLogId, operatorUserId, action, resourceType, occurredAt          | AuditLogHandler                                            | SecurityNotificationHandler                                |
@@ -254,13 +254,13 @@ public:
 提交成功后的事件投递由后台 `OutboxPublisherJob` 负责，它从 outbox 扫描待投递事件，再通过 `IEventBus` 分发给本地处理器。这样既避免了主业务线程阻塞，也保证了事务一致性。
 
 1. **本地消息表（Outbox Pattern）**：
-   * 为了保证在进程崩溃、网络抖动或发布器重启时事件“至少一次投递（At-Least-Once Delivery）”，系统使用本地消息表 `domain_events_outbox` 作为事实来源。
-   * 在 `DrogonUnitOfWork` 事务闭包中，将事件序列化为 JSON，并与业务数据在**同一个数据库事务**中写入 `domain_events_outbox` 表。
-   * 业务事务 Commit 成功后，不直接调用 handler；由 Scheduler 中的 `OutboxPublisherJob` 扫描 `pending/failed` 事件并投递到 `IEventBus`。
+   - 为了保证在进程崩溃、网络抖动或发布器重启时事件“至少一次投递（At-Least-Once Delivery）”，系统使用本地消息表 `domain_events_outbox` 作为事实来源。
+   - 在 `DrogonUnitOfWork` 事务闭包中，将事件序列化为 JSON，并与业务数据在**同一个数据库事务**中写入 `domain_events_outbox` 表。
+   - 业务事务 Commit 成功后，不直接调用 handler；由 Scheduler 中的 `OutboxPublisherJob` 扫描 `pending/failed` 事件并投递到 `IEventBus`。
 2. **处理器分层**：
-   * `IEventBus` 内部仍可使用 Drogon 的线程池或自定义工作线程池，以避免单个 handler 阻塞 outbox publisher。
-   * 区分**同步订阅者**（如 `BalanceCacheInvalidator`，需要尽快更新缓存）和**异步订阅者**（如 `AuditLogHandler`、`SecurityNotificationHandler`）。
-   * 无论同步还是异步，handler 都必须幂等，因为 outbox 允许重试。
+   - `IEventBus` 内部仍可使用 Drogon 的线程池或自定义工作线程池，以避免单个 handler 阻塞 outbox publisher。
+   - 区分**同步订阅者**（如 `BalanceCacheInvalidator`，需要尽快更新缓存）和**异步订阅者**（如 `AuditLogHandler`、`SecurityNotificationHandler`）。
+   - 无论同步还是异步，handler 都必须幂等，因为 outbox 允许重试。
 
 ```cpp
 // infrastructure/persistence/DrogonUnitOfWork.cpp (改造片段)
@@ -300,7 +300,7 @@ public:
                     );
                 }
 
-                trans->commit(); 
+                trans->commit();
                 pendingEvents_.clear();
                 return {};
             } catch (const std::exception& e) {
@@ -319,9 +319,7 @@ public:
 };
 ```
 
-
-说明：`serializeDomainEvent`、`generateOutboxId`、`getAggregateType`、`getAggregateId` 由基础设施层实现。它们只负责把领域事件转换为 outbox 行，不负责真正的 handler 执行。
----
+## 说明：`serializeDomainEvent`、`generateOutboxId`、`getAggregateType`、`getAggregateId` 由基础设施层实现。它们只负责把领域事件转换为 outbox 行，不负责真正的 handler 执行。
 
 ## 5. 业务用例中的应用：危险删除
 

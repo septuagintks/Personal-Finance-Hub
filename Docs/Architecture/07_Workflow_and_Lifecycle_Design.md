@@ -186,24 +186,24 @@ Architecture: Clean Architecture + Lightweight DDD
 在高并发写入（如批量同步导入或多线程记账）时，多个线程同时更新同一个账户的余额缓存，可能会导致**死锁（Deadlock）**或**脏写（Dirty Write）**。为此，系统引入以下并发控制与自愈机制：
 
 1. **行级锁（SELECT FOR UPDATE）**：
-   * 在应用层 Use Case 开启事务后，凡是涉及资金变动的操作，必须显式对 `accounts` 表对应行加锁：
+   - 在应用层 Use Case 开启事务后，凡是涉及资金变动的操作，必须显式对 `accounts` 表对应行加锁：
      ```sql
      SELECT * FROM accounts WHERE id = 1 FOR UPDATE;
      ```
-   * 这确保了同一账户的资金变动和缓存更新在数据库层面被强制串行化，彻底杜绝并发死锁。
+   - 这确保了同一账户的资金变动和缓存更新在数据库层面被强制串行化，彻底杜绝并发死锁。
 2. **乐观锁与版本号（Optimistic Locking）**：
-   * 在 `account_balance_cache` 表中引入 `version INT NOT NULL DEFAULT 0` 字段。
-   * 每次更新缓存时，校验版本号：
+   - 在 `account_balance_cache` 表中引入 `version INT NOT NULL DEFAULT 0` 字段。
+   - 每次更新缓存时，校验版本号：
      ```sql
-     UPDATE account_balance_cache 
+     UPDATE account_balance_cache
      SET balance = 1250.00, version = version + 1, updated_at = NOW()
      WHERE account_id = 1 AND version = $current_version;
      ```
-   * 若更新受影响行数为 0，说明存在并发冲突，系统将自动触发“缓存失效并重新计算”的自愈逻辑。
+   - 若更新受影响行数为 0，说明存在并发冲突，系统将自动触发“缓存失效并重新计算”的自愈逻辑。
 3. **定时对账自愈任务（Reconciliation Job）**：
-   * 调度器中注册每日定时任务 `ReconciliationJob`。
-   * 该任务在后台现场计算所有账户的流水总和，并与 `account_balance_cache` 中的缓存值进行比对。
-   * 若发现不一致，自动以现场计算的真实值为准重构缓存，并记录 `Warning` 级别审计日志，实现缓存的自动对账与自愈。
+   - 调度器中注册每日定时任务 `ReconciliationJob`。
+   - 该任务在后台现场计算所有账户的流水总和，并与 `account_balance_cache` 中的缓存值进行比对。
+   - 若发现不一致，自动以现场计算的真实值为准重构缓存，并记录 `Warning` 级别审计日志，实现缓存的自动对账与自愈。
 
 ---
 
@@ -342,7 +342,7 @@ INSERT INTO system_category_templates (name, locale, group_name, default_board, 
         SELECT $userId, name, default_board, 'system', id
         FROM system_category_templates
         WHERE locale = $locale AND default_board IN ('income', 'expense')
-        ON CONFLICT (user_id, name, COALESCE(parent_id, -1)) 
+        ON CONFLICT (user_id, name, COALESCE(parent_id, -1))
         DO UPDATE SET updated_at = NOW();
 
 7.   [AuditLogRepository]
@@ -359,7 +359,7 @@ INSERT INTO system_category_templates (name, locale, group_name, default_board, 
 
 1. **第一层（应用层）**：在 `users` 表或 `user_preferences` 表中引入 `categories_initialized` 状态标志。这是防止重复初始化的主要手段。
 2. **第二层（数据库层）**：在 `categories` 表上建立唯一索引，并使用 `ON CONFLICT DO UPDATE`（非 `DO NOTHING`，以便触发 `updated_at` 刷新，保留可观测性）作为兜底。
-   * **注意**：由于根分类的 `parent_id` 为 `NULL`，而 SQL 中 `NULL != NULL`，因此唯一索引必须使用 `COALESCE` 或部分索引（Partial Index）来处理：
+   - **注意**：由于根分类的 `parent_id` 为 `NULL`，而 SQL 中 `NULL != NULL`，因此唯一索引必须使用 `COALESCE` 或部分索引（Partial Index）来处理：
      ```sql
      CREATE UNIQUE INDEX uq_categories_user_name_parent
      ON categories (user_id, name, COALESCE(parent_id, -1));

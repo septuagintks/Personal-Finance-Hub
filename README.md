@@ -51,6 +51,7 @@ DTO Mapping       Transactions      Services     Scheduler / Outbox
 ### 构建步骤
 
 1. **配置项目**:
+
    ```powershell
    mkdir build
    cd build
@@ -58,6 +59,7 @@ DTO Mapping       Transactions      Services     Scheduler / Outbox
    ```
 
 2. **编译**:
+
    ```powershell
    cmake --build . --config Debug
    ```
@@ -70,6 +72,7 @@ DTO Mapping       Transactions      Services     Scheduler / Outbox
 ### 配置文件
 
 1. 复制示例配置:
+
    ```powershell
    Copy-Item config/config.example.json config/config.local.json
    ```
@@ -87,6 +90,7 @@ DTO Mapping       Transactions      Services     Scheduler / Outbox
 ```
 
 此脚本会执行：
+
 - Git 空白符检查
 - CMake 配置
 - 完整构建
@@ -123,6 +127,7 @@ C++/PFH/
 ## 开发阶段
 
 ### Phase 1: 核心后端（进行中）
+
 - ✅ 项目骨架和构建系统
 - ⏳ 金融原语（Decimal、Money、Currency、ExchangeRate）
 - ⏳ 领域模型（Account、Transaction、Transfer）
@@ -131,12 +136,14 @@ C++/PFH/
 - ⏳ 基础报表
 
 ### Phase 2: 增强功能（计划中）
+
 - 高级报表和分析
 - 外部平台同步框架
 - 性能优化
 - 增强安全性
 
 ### Phase 3: 生产就绪（计划中）
+
 - 全面监控
 - 生产部署
 - 文档完善
@@ -146,11 +153,13 @@ C++/PFH/
 ## 测试策略
 
 测试遵循命名约定:
+
 ```
 <ClassName>_When<Condition>_<ExpectedBehavior>
 ```
 
 示例:
+
 ```cpp
 Money_WhenAddingSameCurrency_ReturnsCorrectSum
 TransferAggregate_WhenOutgoingAndRateProvided_CalculatesIncoming
@@ -159,6 +168,7 @@ TransferAggregate_WhenOutgoingAndRateProvided_CalculatesIncoming
 详见 [tests/TEST_NAMING_CONVENTION.md](tests/TEST_NAMING_CONVENTION.md)
 
 **覆盖率目标:**
+
 - Domain Layer: ≥ 90%
 - Application Layer: ≥ 80%
 - Infrastructure Layer: ≥ 60%
