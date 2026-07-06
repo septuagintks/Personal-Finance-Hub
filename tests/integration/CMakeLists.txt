@@ -13,8 +13,8 @@ set(INTEGRATION_TEST_SOURCES
 # target_link_libraries(pfh_integration_tests PRIVATE
 #     pfh_infrastructure
 #     pfh_domain
-#     GTest::GTest
-#     GTest::Main
+#     GTest::gtest
+#     GTest::gtest_main
 #     PostgreSQL::PostgreSQL
 # )
 

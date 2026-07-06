@@ -3,25 +3,12 @@
 // Test naming: ClassName_WhenCondition_ExpectedBehavior
 
 #include "pfh/domain/currency_conversion_service.h"
+#include "test_support.h"
 #include <gtest/gtest.h>
 
 using namespace pfh::domain;
 
 namespace pfh::test {
-
-namespace {
-Currency ccy(std::string_view code) { return Currency::create(code).value(); }
-Decimal dec(std::string_view text) { return Decimal::parse(text).value(); }
-
-ExchangeRate::TimePoint t(std::time_t v) {
-    return std::chrono::system_clock::from_time_t(v);
-}
-
-ExchangeRate rate(std::string_view base, std::string_view target,
-                  std::string_view r, std::time_t when = 1719302400) {
-    return ExchangeRate::create(ccy(base), ccy(target), dec(r), t(when), "Test").value();
-}
-} // namespace
 
 // ---- Triangular cross-rate via USD pivot ----
 
@@ -53,7 +40,7 @@ TEST(CurrencyConversionService, WhenCrossRate_UsesLaterTimestamp) {
     auto usd_cny = rate("USD", "CNY", "7.18", 2000);
     auto cross = CurrencyConversionService::cross_rate(usd_eur, usd_cny);
     ASSERT_TRUE(cross.has_value());
-    EXPECT_EQ(cross->fetched_at(), t(2000)); // later of the two
+    EXPECT_EQ(cross->fetched_at(), time_at(2000)); // later of the two
 }
 
 TEST(CurrencyConversionService, WhenFirstInputNotPivotBased_ReturnsError) {

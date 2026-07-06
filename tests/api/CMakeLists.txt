@@ -15,8 +15,8 @@ set(API_TEST_SOURCES
 #     pfh_application
 #     pfh_infrastructure
 #     pfh_domain
-#     GTest::GTest
-#     GTest::Main
+#     GTest::gtest
+#     GTest::gtest_main
 #     Drogon::Drogon
 # )
 

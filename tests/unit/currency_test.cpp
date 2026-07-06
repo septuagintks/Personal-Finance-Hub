@@ -3,19 +3,12 @@
 // Test naming: ClassName_WhenCondition_ExpectedBehavior
 
 #include "pfh/domain/currency.h"
+#include "test_support.h"
 #include <gtest/gtest.h>
 
 using namespace pfh::domain;
 
 namespace pfh::test {
-
-namespace {
-Currency make(std::string_view code) {
-    auto r = Currency::create(code);
-    EXPECT_TRUE(r.has_value()) << "Failed to create currency: " << code;
-    return r.value_or(Currency::create("USD").value());
-}
-} // namespace
 
 // ---- Valid creation ----
 
@@ -44,8 +37,8 @@ TEST(Currency, WhenCryptoWhitelisted_Creates) {
 }
 
 TEST(Currency, WhenFiat_IsNotCrypto) {
-    EXPECT_FALSE(make("USD").is_crypto());
-    EXPECT_FALSE(make("JPY").is_crypto());
+    EXPECT_FALSE(ccy("USD").is_crypto());
+    EXPECT_FALSE(ccy("JPY").is_crypto());
 }
 
 // ---- Invalid creation ----
@@ -83,15 +76,15 @@ TEST(Currency, WhenEmpty_ReturnsError) {
 // ---- Comparison ----
 
 TEST(Currency, WhenSameCode_AreEqual) {
-    EXPECT_EQ(make("USD"), make("USD"));
+    EXPECT_EQ(ccy("USD"), ccy("USD"));
 }
 
 TEST(Currency, WhenDifferentCode_AreNotEqual) {
-    EXPECT_NE(make("USD"), make("CNY"));
+    EXPECT_NE(ccy("USD"), ccy("CNY"));
 }
 
 TEST(Currency, WhenLowercaseVsUppercase_AreEqualAfterNormalization) {
-    EXPECT_EQ(make("usd"), make("USD"));
+    EXPECT_EQ(ccy("usd"), ccy("USD"));
 }
 
 // ---- Pivot ----

@@ -3,31 +3,17 @@
 // Test naming: ClassName_WhenCondition_ExpectedBehavior
 
 #include "pfh/domain/exchange_rate.h"
+#include "test_support.h"
 #include <gtest/gtest.h>
 
 using namespace pfh::domain;
 
 namespace pfh::test {
 
-namespace {
-Currency ccy(std::string_view code) { return Currency::create(code).value(); }
-Decimal dec(std::string_view text) { return Decimal::parse(text).value(); }
-
-ExchangeRate::TimePoint some_time() {
-    return std::chrono::system_clock::from_time_t(1719302400); // 2024-06-25
-}
-
-ExchangeRate rate(std::string_view base, std::string_view target, std::string_view r) {
-    auto er = ExchangeRate::create(ccy(base), ccy(target), dec(r), some_time(), "Test");
-    EXPECT_TRUE(er.has_value());
-    return er.value();
-}
-} // namespace
-
 // ---- Creation ----
 
 TEST(ExchangeRate, WhenValid_Creates) {
-    auto er = ExchangeRate::create(ccy("USD"), ccy("CNY"), dec("7.18"), some_time(), "ECB");
+    auto er = ExchangeRate::create(ccy("USD"), ccy("CNY"), dec("7.18"), sample_time(), "ECB");
     ASSERT_TRUE(er.has_value());
     EXPECT_EQ(er->base().code(), "USD");
     EXPECT_EQ(er->target().code(), "CNY");
@@ -36,19 +22,19 @@ TEST(ExchangeRate, WhenValid_Creates) {
 }
 
 TEST(ExchangeRate, WhenBaseEqualsTarget_ReturnsError) {
-    auto er = ExchangeRate::create(ccy("USD"), ccy("USD"), dec("1"), some_time(), "X");
+    auto er = ExchangeRate::create(ccy("USD"), ccy("USD"), dec("1"), sample_time(), "X");
     ASSERT_FALSE(er.has_value());
     EXPECT_EQ(er.error().code, DomainErrorCode::InvalidExchangeRate);
 }
 
 TEST(ExchangeRate, WhenRateZero_ReturnsError) {
-    auto er = ExchangeRate::create(ccy("USD"), ccy("CNY"), dec("0"), some_time(), "X");
+    auto er = ExchangeRate::create(ccy("USD"), ccy("CNY"), dec("0"), sample_time(), "X");
     ASSERT_FALSE(er.has_value());
     EXPECT_EQ(er.error().code, DomainErrorCode::InvalidExchangeRate);
 }
 
 TEST(ExchangeRate, WhenRateNegative_ReturnsError) {
-    auto er = ExchangeRate::create(ccy("USD"), ccy("CNY"), dec("-7.18"), some_time(), "X");
+    auto er = ExchangeRate::create(ccy("USD"), ccy("CNY"), dec("-7.18"), sample_time(), "X");
     ASSERT_FALSE(er.has_value());
     EXPECT_EQ(er.error().code, DomainErrorCode::InvalidExchangeRate);
 }

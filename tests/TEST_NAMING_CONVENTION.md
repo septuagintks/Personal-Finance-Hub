@@ -14,7 +14,7 @@ All tests must follow this naming pattern:
 ```cpp
 // Money tests
 Money_WhenAddingSameCurrency_ReturnsCorrectSum
-Money_WhenAddingDifferentCurrency_ThrowsError
+Money_WhenAddingDifferentCurrency_ReturnsError
 
 // ExchangeRate tests
 ExchangeRate_WhenCalculatingReverse_ReturnsAccurateInverse

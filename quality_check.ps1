@@ -5,6 +5,11 @@
 
 $ErrorActionPreference = "Stop"
 
+# Pass -Clean to wipe the build directory before configuring. Default is an
+# incremental build so repeated runs do not re-fetch dependencies (spdlog,
+# nlohmann_json, GoogleTest) via FetchContent, which is slow.
+$Clean = $args -contains "-Clean"
+
 Write-Host "=====================================================" -ForegroundColor Cyan
 Write-Host "Personal Finance Hub - Quality Check" -ForegroundColor Cyan
 Write-Host "=====================================================" -ForegroundColor Cyan
@@ -34,10 +39,13 @@ Write-Host ""
 # 2. CMake Configure
 # =============================================================================
 Write-Host "[2/5] Running CMake configure..." -ForegroundColor Yellow
-if (Test-Path "build") {
+if ($Clean -and (Test-Path "build")) {
+    Write-Host "  -Clean specified: removing build/ (dependencies will be re-fetched)" -ForegroundColor Gray
     Remove-Item -Recurse -Force "build"
 }
-New-Item -ItemType Directory -Path "build" | Out-Null
+if (-not (Test-Path "build")) {
+    New-Item -ItemType Directory -Path "build" | Out-Null
+}
 
 try {
     Push-Location "build"
@@ -78,37 +86,38 @@ try {
 Write-Host ""
 
 # =============================================================================
-# 4. Unit Tests (when available)
+# 4. Unit Tests
 # =============================================================================
 Write-Host "[4/5] Running unit tests..." -ForegroundColor Yellow
-# TODO: Uncomment when unit tests are implemented
-# try {
-#     Push-Location "build"
-#     ctest -C Debug --output-on-failure
-#     if ($LASTEXITCODE -eq 0) {
-#         Write-Host "✓ Unit tests passed" -ForegroundColor Green
-#     } else {
-#         Write-Host "✗ Unit tests failed" -ForegroundColor Red
-#         $failedChecks += "Unit tests"
-#     }
-#     Pop-Location
-# } catch {
-#     Write-Host "✗ Unit tests failed: $_" -ForegroundColor Red
-#     $failedChecks += "Unit tests"
-#     Pop-Location
-# }
-Write-Host "⊘ Unit tests not yet implemented (will enable when tests are added)" -ForegroundColor Gray
+try {
+    Push-Location "build"
+    ctest -C Debug --output-on-failure
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "✓ Unit tests passed" -ForegroundColor Green
+    } else {
+        Write-Host "✗ Unit tests failed" -ForegroundColor Red
+        $failedChecks += "Unit tests"
+    }
+    Pop-Location
+} catch {
+    Write-Host "✗ Unit tests failed: $_" -ForegroundColor Red
+    $failedChecks += "Unit tests"
+    Pop-Location
+}
 Write-Host ""
 
 # =============================================================================
 # 5. Markdown Check
 # =============================================================================
 Write-Host "[5/5] Checking Markdown files..." -ForegroundColor Yellow
-# Basic markdown checks - can be enhanced with markdownlint if available
-$mdFiles = Get-ChildItem -Recurse -Filter "*.md" -Exclude "node_modules","build"
+# Basic markdown checks - can be enhanced with markdownlint if available.
+# Only check project-owned docs; skip build/ (FetchContent deps) and vendored dirs.
+# -Exclude does not filter directories under -Recurse, so filter paths explicitly.
+$mdFiles = Get-ChildItem -Recurse -Filter "*.md" | Where-Object {
+    $_.FullName -notmatch '[\\/](build|_deps|node_modules|vcpkg_installed)[\\/]'
+}
 $mdIssues = 0
 foreach ($file in $mdFiles) {
-    $content = Get-Content $file.FullName -Raw
     # Check for trailing whitespace on non-empty lines
     $lines = Get-Content $file.FullName
     for ($i = 0; $i -lt $lines.Count; $i++) {

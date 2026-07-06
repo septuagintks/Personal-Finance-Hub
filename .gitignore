@@ -82,9 +82,8 @@ config/secrets.json
 .env
 .env.local
 
-# Logs
+# Logs (see also *.log above)
 logs/
-*.log
 
 # Database
 *.db
@@ -103,9 +102,3 @@ desktop.ini
 # Executables
 pfh_server
 pfh_server.exe
-
-# Debug/Release directories
-Debug/
-Release/
-_deps/
-CTestTestfile.cmake

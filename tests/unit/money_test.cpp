@@ -3,23 +3,12 @@
 // Test naming: ClassName_WhenCondition_ExpectedBehavior
 
 #include "pfh/domain/money.h"
+#include "test_support.h"
 #include <gtest/gtest.h>
 
 using namespace pfh::domain;
 
 namespace pfh::test {
-
-namespace {
-Currency ccy(std::string_view code) {
-    return Currency::create(code).value();
-}
-Decimal dec(std::string_view text) {
-    return Decimal::parse(text).value();
-}
-Money money(std::string_view amount, std::string_view code) {
-    return Money(dec(amount), ccy(code));
-}
-} // namespace
 
 // ---- Construction & accessors ----
 
