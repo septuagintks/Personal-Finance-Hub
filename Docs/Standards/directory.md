@@ -27,7 +27,7 @@ Docs/
 │
 ├── Development/
 │   ├── Phase_1_S01-S03_Delivery_Summary.md
-│   ├── Phase_1_S04_Completion_Report.md
+│   ├── Phase_1_S04-S04_Delivery_Summary.md
 │   ├── Phase_1_S05_Progress_Report.md
 │   └── tasks.md
 │
