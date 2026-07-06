@@ -9,7 +9,7 @@ Status: Draft
 
 ## 1. 导言与总目标
 
-本文档用于把 PFH 的开发内容划分为三个阶段，先给出总路线和阶段边界。详细阶段计划可以在本大纲确认后，再分别展开或调整。
+本文档用于把 PFH 的开发内容划分为三个阶段，先给出总路线和阶段边界。详细阶段计划分别记录在 `Phase_1_Development_Plan.md`、`Phase_2_Development_Plan.md` 和 `Phase_3_Development_Plan.md`。
 
 ### 1.1 总体目标
 
@@ -133,6 +133,6 @@ Phase 1: 基础闭环与核心正确性
 
 ## 4. 待决策选项
 
-当前需要维护者确认的是：本三阶段边界是否符合预期。
+当前需要维护者确认的是：三阶段边界以及 Phase 2、Phase 3 的详细计划是否符合预期。
 
-确认后再决定是否调整 `Docs/Develop_Plan/Phase_1_Development_Plan.md`。
+确认后再决定是否调整 `Docs/Develop_Plan/Phase_1_Development_Plan.md` 或拆分更细的阶段计划。

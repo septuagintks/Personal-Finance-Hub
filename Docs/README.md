@@ -35,7 +35,9 @@ Docs/
 │
 ├── Develop_Plan/                       # 阶段性开发计划
 │   ├── Overall_Development_Plan.md     # 三阶段总开发计划大纲
-│   └── Phase_1_Development_Plan.md     # Phase 1 后端最小闭环开发计划
+│   ├── Phase_1_Development_Plan.md     # Phase 1 后端最小闭环开发计划
+│   ├── Phase_2_Development_Plan.md     # Phase 2 产品体验与稳定性计划
+│   └── Phase_3_Development_Plan.md     # Phase 3 外部接入与预留扩展计划
 │
 ├── Standards/                          # 团队与文档规范
 │   ├── directory.md                    # 文档目录结构规范
@@ -47,7 +49,7 @@ Docs/
     └── Documents_Optimize_3.md         # 优化记录 3 (文档治理、任务清单、计划归档)
 ```
 
-计划类文档按需创建并跟随任务推进维护：`Docs/Development/Documents_Optimize_Plan.md` 仅在有正在设计中的文档优化方案时创建；当前文档优化事项已归档到 `Docs/Completed_Modifications/Documents_Optimize_3.md`。总体路线以 [Develop_Plan/Overall_Development_Plan.md](Develop_Plan/Overall_Development_Plan.md) 为准，阶段性开发计划以 [Develop_Plan/Phase_1_Development_Plan.md](Develop_Plan/Phase_1_Development_Plan.md) 为准，开发任务跟踪以 [Development/tasks.md](Development/tasks.md) 为准。
+计划类文档按需创建并跟随任务推进维护：`Docs/Development/Documents_Optimize_Plan.md` 仅在有正在设计中的文档优化方案时创建；当前文档优化事项已归档到 `Docs/Completed_Modifications/Documents_Optimize_3.md`。总体路线以 [Develop_Plan/Overall_Development_Plan.md](Develop_Plan/Overall_Development_Plan.md) 为准，阶段性开发计划以 `Docs/Develop_Plan/Phase_N_Development_Plan.md` 为准，开发任务跟踪以 [Development/tasks.md](Development/tasks.md) 为准。
 
 ---
 
@@ -77,5 +79,5 @@ Docs/
 ## 4. 开发者快速上手
 
 1. **阅读顺序推荐**：先看 [Architecture/01_Technical_Architecture.md](Architecture/01_Technical_Architecture.md) 和 [Architecture/07_Workflow_and_Lifecycle_Design.md](Architecture/07_Workflow_and_Lifecycle_Design.md)，再看 [Architecture/04_Money_Currency_System_Design.md](Architecture/04_Money_Currency_System_Design.md)、[Architecture/06_Service_and_Use_Case_Design.md](Architecture/06_Service_and_Use_Case_Design.md)、[Architecture/08_Exchange_Rate_System_Design.md](Architecture/08_Exchange_Rate_System_Design.md)，最后补齐 [Architecture/02_Database_Design.md](Architecture/02_Database_Design.md) 与 [Architecture/05_Repository_and_Persistence_Design.md](Architecture/05_Repository_and_Persistence_Design.md)。
-2. **阶段计划**：进入代码实现前，先阅读 [Develop_Plan/Overall_Development_Plan.md](Develop_Plan/Overall_Development_Plan.md) 与 [Develop_Plan/Phase_1_Development_Plan.md](Develop_Plan/Phase_1_Development_Plan.md)，并以 [Development/tasks.md](Development/tasks.md) 跟踪进度。
+2. **阶段计划**：进入代码实现前，先阅读 [Develop_Plan/Overall_Development_Plan.md](Develop_Plan/Overall_Development_Plan.md) 与对应 Phase 开发计划，并以 [Development/tasks.md](Development/tasks.md) 跟踪进度。
 3. **开发规范**：新文档或修改文档时，请遵守 [Standards/Documents_Format_Standard.md](Standards/Documents_Format_Standard.md)；目录树变更时，请同步更新 [Standards/directory.md](Standards/directory.md)。
