@@ -454,23 +454,19 @@ AccountId account_id(1);
 
 ### 依赖安装
 
-**当前状态**: 代码已编写，但依赖尚未安装
+**当前状态**: ✅ 已在 P1-S05 阶段通过 CMake FetchContent 自动拉取并验证构建通过。
 
-**下一步操作**:
+依赖解析策略（见 `cmake/Dependencies.cmake`）：优先 `find_package`（vcpkg/系统包），
+未找到时自动 FetchContent 拉取 spdlog、nlohmann_json、GoogleTest。无需手动安装 vcpkg 即可构建。
+
 ```powershell
-# 安装 vcpkg（如果没有）
-git clone https://github.com/microsoft/vcpkg.git
-cd vcpkg
-.\bootstrap-vcpkg.bat
-
-# 使用 vcpkg 安装依赖
-vcpkg install spdlog:x64-windows
-vcpkg install nlohmann-json:x64-windows
-vcpkg install gtest:x64-windows
-
-# 或使用 vcpkg.json 自动安装
-cmake -B build -DCMAKE_TOOLCHAIN_FILE=[vcpkg root]/scripts/buildsystems/vcpkg.cmake
+# 开箱即用（首次会拉取依赖）
+cmake -B build -DCMAKE_BUILD_TYPE=Debug
+cmake --build build --config Debug
+cd build; ctest -C Debug --output-on-failure
 ```
+
+如需强制使用 FetchContent（可复现 CI）：`cmake -B build -DPFH_FORCE_FETCHCONTENT=ON`
 
 详见: [DEPENDENCY_INSTALLATION.md](DEPENDENCY_INSTALLATION.md)
 

@@ -99,7 +99,7 @@ Initializing...
 **验收标准达成**:
 - ✅ 测试命名约定已建立：`ClassName_WhenCondition_ExpectedBehavior`
 - ✅ 测试目录结构完整
-- ⚠️ GoogleTest 依赖尚未实际安装（需要 vcpkg 或手动配置）
+- ✅ GoogleTest 已通过 CMake FetchContent 自动拉取（无需手动安装 vcpkg）
 
 ### 4. 质量门禁 ✅
 
@@ -188,8 +188,8 @@ Initializing...
 - [x] .gitignore 保护敏感文件
 - [x] 测试命名规范文档完整
 - [x] 质量检查脚本可执行
-- [ ] GoogleTest 实际可运行（需安装依赖）
-- [ ] 单元测试实际执行通过（需安装依赖）
+- [x] GoogleTest 实际可运行（FetchContent 自动拉取 v1.15.2）
+- [x] 单元测试实际执行通过（71 个测试全部通过）
 
 ---
 

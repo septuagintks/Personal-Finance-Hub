@@ -47,63 +47,63 @@ public:
         try {
             AppConfig config;
 
-            config.environment = json.value("environment", "development");
+            config.environment = json.value("environment", std::string("development"));
 
             // Server config
             if (json.contains("server")) {
                 const auto& server = json["server"];
-                config.server.host = server.value("host", "0.0.0.0");
-                config.server.port = server.value("port", 8080);
-                config.server.threads = server.value("threads", 4);
+                config.server.host = server.value("host", std::string("0.0.0.0"));
+                config.server.port = server.value<std::uint16_t>("port", 8080);
+                config.server.threads = server.value<std::uint32_t>("threads", 4);
             }
 
             // Database config
             if (json.contains("database")) {
                 const auto& db = json["database"];
-                config.database.host = db.value("host", "localhost");
-                config.database.port = db.value("port", 5432);
-                config.database.name = db.value("name", "pfh_dev");
-                config.database.user = db.value("user", "pfh_user");
-                config.database.password = db.value("password", "");
-                config.database.pool_size = db.value("pool_size", 10);
+                config.database.host = db.value("host", std::string("localhost"));
+                config.database.port = db.value<std::uint16_t>("port", 5432);
+                config.database.name = db.value("name", std::string("pfh_dev"));
+                config.database.user = db.value("user", std::string("pfh_user"));
+                config.database.password = db.value("password", std::string(""));
+                config.database.pool_size = db.value<std::uint32_t>("pool_size", 10);
                 config.database.connection_timeout = std::chrono::seconds(
-                    db.value("connection_timeout", 30)
+                    db.value<std::int64_t>("connection_timeout", 30)
                 );
             }
 
             // JWT config
             if (json.contains("jwt")) {
                 const auto& jwt = json["jwt"];
-                config.jwt.secret = jwt.value("secret", "");
+                config.jwt.secret = jwt.value("secret", std::string(""));
                 config.jwt.access_token_expiry = std::chrono::seconds(
-                    jwt.value("access_token_expiry_seconds", 900)
+                    jwt.value<std::int64_t>("access_token_expiry_seconds", 900)
                 );
                 config.jwt.refresh_token_expiry = std::chrono::seconds(
-                    jwt.value("refresh_token_expiry_seconds", 2592000)
+                    jwt.value<std::int64_t>("refresh_token_expiry_seconds", 2592000)
                 );
             }
 
             // Logging config
             if (json.contains("logging")) {
                 const auto& logging = json["logging"];
-                config.logging.level = parse_log_level(logging.value("level", "info"));
-                config.logging.output = parse_log_output(logging.value("output", "console"));
-                config.logging.file = logging.value("file", "logs/pfh.log");
+                config.logging.level = parse_log_level(logging.value("level", std::string("info")));
+                config.logging.output = parse_log_output(logging.value("output", std::string("console")));
+                config.logging.file = logging.value("file", std::string("logs/pfh.log"));
             }
 
             // Scheduler config
             if (json.contains("scheduler")) {
                 const auto& scheduler = json["scheduler"];
                 config.scheduler.exchange_rate_refresh_interval = std::chrono::minutes(
-                    scheduler.value("exchange_rate_refresh_interval_minutes", 60)
+                    scheduler.value<std::int64_t>("exchange_rate_refresh_interval_minutes", 60)
                 );
             }
 
             // Exchange rate config
             if (json.contains("exchange_rate")) {
                 const auto& exchange_rate = json["exchange_rate"];
-                config.exchange_rate.provider = exchange_rate.value("provider", "mock");
-                config.exchange_rate.api_key = exchange_rate.value("api_key", "");
+                config.exchange_rate.provider = exchange_rate.value("provider", std::string("mock"));
+                config.exchange_rate.api_key = exchange_rate.value("api_key", std::string(""));
             }
 
             // Validate required fields

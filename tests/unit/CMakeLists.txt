@@ -1,20 +1,21 @@
 # Unit Tests CMake Configuration
-# These tests do not require database or Drogon
-
-find_package(GTest REQUIRED)
+# These tests do not require database or Drogon.
+# GoogleTest is resolved by cmake/Dependencies.cmake (root scope).
 
 # Unit test sources
 set(UNIT_TEST_SOURCES
     smoke_test.cpp
     typed_id_test.cpp
     error_test.cpp
+    decimal_test.cpp
 )
 
 add_executable(pfh_unit_tests ${UNIT_TEST_SOURCES})
 
 target_link_libraries(pfh_unit_tests PRIVATE
-    GTest::GTest
-    GTest::Main
+    pfh_domain
+    GTest::gtest
+    GTest::gtest_main
     spdlog::spdlog
     nlohmann_json::nlohmann_json
 )

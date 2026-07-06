@@ -71,12 +71,13 @@ endif()
 # Dependencies
 # =============================================================================
 
-# Find packages (will be configured as dependencies are added)
-# find_package(Drogon REQUIRED)
-# find_package(PostgreSQL REQUIRED)
-find_package(spdlog REQUIRED)
-find_package(nlohmann_json REQUIRED)
-find_package(GTest REQUIRED)
+# find_package(Drogon REQUIRED)     # Added in P1-S10
+# find_package(PostgreSQL REQUIRED)  # Added in P1-S07
+
+# Resolves spdlog, nlohmann_json and GoogleTest via find_package with a
+# FetchContent fallback (see cmake/Dependencies.cmake).
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+include(Dependencies)
 
 # =============================================================================
 # Include Directories
@@ -91,8 +92,7 @@ include_directories(${PFH_INCLUDE_DIR})
 
 # Domain Layer - Pure business logic, no framework dependencies
 set(PFH_DOMAIN_SOURCES
-    # Core types (header-only for now)
-    # src/domain/typed_id.cpp  # Header-only
+    src/domain/decimal.cpp
 )
 
 # Application Layer - Use cases and application services
@@ -117,9 +117,9 @@ set(PFH_PRESENTATION_SOURCES
 # Library Targets
 # =============================================================================
 
-# Domain Library (no external dependencies)
-# add_library(pfh_domain STATIC ${PFH_DOMAIN_SOURCES})
-# target_include_directories(pfh_domain PUBLIC ${PFH_INCLUDE_DIR})
+# Domain Library (no external dependencies - MUST NOT link Drogon/PostgreSQL/spdlog)
+add_library(pfh_domain STATIC ${PFH_DOMAIN_SOURCES})
+target_include_directories(pfh_domain PUBLIC ${PFH_INCLUDE_DIR})
 
 # Application Library
 # add_library(pfh_application STATIC ${PFH_APPLICATION_SOURCES})

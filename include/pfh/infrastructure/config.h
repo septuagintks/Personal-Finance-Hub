@@ -7,6 +7,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <expected>
 #include <string>
 
 namespace pfh::infrastructure {

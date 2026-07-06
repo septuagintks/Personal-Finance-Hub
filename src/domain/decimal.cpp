@@ -1,0 +1,353 @@
+// Personal Finance Hub - Decimal Fixed-Point Type Implementation
+// Version: 1.0
+// C++23
+
+#include "pfh/domain/decimal.h"
+#include <array>
+#include <charconv>
+#include <cstdlib>
+#include <limits>
+
+// The Decimal storage type is GCC/Clang's native __int128. Under -pedantic the
+// compiler warns that ISO C++ does not support __int128; that is expected and
+// deliberate (see the P1-S05 decision to use native __int128_t). Suppress the
+// pedantic diagnostic for this translation unit only.
+#if defined(__clang__)
+#    pragma clang diagnostic ignored "-Wpedantic"
+#elif defined(__GNUC__)
+#    pragma GCC diagnostic ignored "-Wpedantic"
+#endif
+
+namespace pfh::domain {
+
+namespace {
+
+using Storage = Decimal::StorageType;
+using UStorage = Decimal::UStorageType;
+
+// Maximum absolute value we treat as valid. __int128 max is ~1.7e38.
+// With scale 10^10 that leaves ~1.7e28 for the integer part, far beyond the
+// NUMERIC(20,8) requirement. We keep the full range and only guard true overflow.
+constexpr Storage kInt128Max = (static_cast<Storage>(1) << 126); // safe headroom bound
+
+/// @brief Multiply two 128-bit values, detecting overflow.
+[[nodiscard]] bool checked_mul(Storage a, Storage b, Storage& out) noexcept {
+    if (a == 0 || b == 0) {
+        out = 0;
+        return true;
+    }
+    Storage result = a * b;
+    // Detect overflow by reversing the multiplication.
+    if (result / b != a) {
+        return false;
+    }
+    out = result;
+    return true;
+}
+
+/// @brief Add two 128-bit values, detecting overflow.
+[[nodiscard]] bool checked_add(Storage a, Storage b, Storage& out) noexcept {
+    // Overflow if both same sign and result flips sign.
+    Storage result = static_cast<Storage>(static_cast<UStorage>(a) +
+                                          static_cast<UStorage>(b));
+    if (((a ^ result) & (b ^ result)) < 0) {
+        return false;
+    }
+    out = result;
+    return true;
+}
+
+/// @brief Convert an unsigned 128-bit magnitude to a decimal digit string.
+[[nodiscard]] std::string u128_to_string(UStorage v) {
+    if (v == 0) {
+        return "0";
+    }
+    std::array<char, 40> buf{};
+    std::size_t pos = buf.size();
+    while (v > 0) {
+        buf[--pos] = static_cast<char>('0' + static_cast<int>(v % 10));
+        v /= 10;
+    }
+    return std::string(buf.data() + pos, buf.size() - pos);
+}
+
+} // namespace
+
+DomainResult<Decimal> Decimal::from_integer(std::int64_t value) noexcept {
+    Storage scaled = 0;
+    if (!checked_mul(static_cast<Storage>(value), kScaleFactor, scaled)) {
+        return std::unexpected(DomainError::overflow("from_integer"));
+    }
+    return Decimal(scaled);
+}
+
+DomainResult<Decimal> Decimal::parse(std::string_view text) {
+    // Trim surrounding whitespace.
+    std::size_t begin = 0;
+    std::size_t end = text.size();
+    while (begin < end && (text[begin] == ' ' || text[begin] == '\t')) {
+        ++begin;
+    }
+    while (end > begin && (text[end - 1] == ' ' || text[end - 1] == '\t')) {
+        --end;
+    }
+    text = text.substr(begin, end - begin);
+
+    if (text.empty()) {
+        return std::unexpected(DomainError::parse_error("empty string"));
+    }
+
+    // Sign.
+    bool negative = false;
+    std::size_t i = 0;
+    if (text[i] == '+' || text[i] == '-') {
+        negative = (text[i] == '-');
+        ++i;
+    }
+    if (i >= text.size()) {
+        return std::unexpected(DomainError::parse_error("no digits"));
+    }
+
+    // Split into integer and fractional digit runs.
+    std::string int_part;
+    std::string frac_part;
+    bool seen_dot = false;
+    bool seen_digit = false;
+    for (; i < text.size(); ++i) {
+        const char c = text[i];
+        if (c == '.') {
+            if (seen_dot) {
+                return std::unexpected(DomainError::parse_error("multiple decimal points"));
+            }
+            seen_dot = true;
+        } else if (c >= '0' && c <= '9') {
+            seen_digit = true;
+            if (seen_dot) {
+                frac_part.push_back(c);
+            } else {
+                int_part.push_back(c);
+            }
+        } else {
+            return std::unexpected(DomainError::parse_error(
+                std::string("invalid character '") + c + "'"));
+        }
+    }
+    if (!seen_digit) {
+        return std::unexpected(DomainError::parse_error("no digits"));
+    }
+
+    // Round fractional part to kScale digits using Half-Even.
+    bool round_up = false;
+    if (frac_part.size() > static_cast<std::size_t>(kScale)) {
+        const char first_dropped = frac_part[static_cast<std::size_t>(kScale)];
+        // Determine if anything nonzero exists beyond the first dropped digit.
+        bool rest_nonzero = false;
+        for (std::size_t k = static_cast<std::size_t>(kScale) + 1; k < frac_part.size(); ++k) {
+            if (frac_part[k] != '0') {
+                rest_nonzero = true;
+                break;
+            }
+        }
+        if (first_dropped > '5' || (first_dropped == '5' && rest_nonzero)) {
+            round_up = true;
+        } else if (first_dropped == '5' && !rest_nonzero) {
+            // Exactly halfway: round to even.
+            const char last_kept = (kScale > 0)
+                ? frac_part[static_cast<std::size_t>(kScale) - 1]
+                : (int_part.empty() ? '0' : int_part.back());
+            if (((last_kept - '0') % 2) != 0) {
+                round_up = true;
+            }
+        }
+        frac_part.resize(static_cast<std::size_t>(kScale));
+    } else {
+        // Pad with zeros up to kScale.
+        frac_part.append(static_cast<std::size_t>(kScale) - frac_part.size(), '0');
+    }
+
+    // Build magnitude = int_part * 10^kScale + frac_part, with overflow checks.
+    Storage magnitude = 0;
+    auto push_digit = [&](char digit) -> bool {
+        Storage tmp = 0;
+        if (!checked_mul(magnitude, static_cast<Storage>(10), tmp)) {
+            return false;
+        }
+        if (!checked_add(tmp, static_cast<Storage>(digit - '0'), magnitude)) {
+            return false;
+        }
+        return true;
+    };
+
+    for (const char c : int_part) {
+        if (!push_digit(c)) {
+            return std::unexpected(DomainError::overflow("integer part too large"));
+        }
+    }
+    for (const char c : frac_part) {
+        if (!push_digit(c)) {
+            return std::unexpected(DomainError::overflow("value too large"));
+        }
+    }
+
+    // Apply Half-Even rounding carry.
+    if (round_up) {
+        Storage carried = 0;
+        if (!checked_add(magnitude, static_cast<Storage>(1), carried)) {
+            return std::unexpected(DomainError::overflow("rounding carry"));
+        }
+        magnitude = carried;
+    }
+
+    if (magnitude > kInt128Max) {
+        return std::unexpected(DomainError::overflow("value out of range"));
+    }
+
+    return Decimal(negative ? -magnitude : magnitude);
+}
+
+std::string Decimal::to_string() const {
+    if (value_ == 0) {
+        return "0";
+    }
+
+    const bool negative = value_ < 0;
+    UStorage magnitude = negative
+        ? static_cast<UStorage>(-value_)
+        : static_cast<UStorage>(value_);
+
+    const UStorage scale = static_cast<UStorage>(kScaleFactor);
+    const UStorage int_part = magnitude / scale;
+    const UStorage frac_part = magnitude % scale;
+
+    std::string result;
+    if (negative) {
+        result.push_back('-');
+    }
+    result += u128_to_string(int_part);
+
+    if (frac_part != 0) {
+        // Zero-pad fractional to kScale, then trim trailing zeros.
+        std::string frac = u128_to_string(frac_part);
+        if (frac.size() < static_cast<std::size_t>(kScale)) {
+            frac.insert(frac.begin(),
+                        static_cast<std::size_t>(kScale) - frac.size(), '0');
+        }
+        while (!frac.empty() && frac.back() == '0') {
+            frac.pop_back();
+        }
+        if (!frac.empty()) {
+            result.push_back('.');
+            result += frac;
+        }
+    }
+
+    return result;
+}
+
+DomainResult<Decimal> Decimal::add(const Decimal& other) const noexcept {
+    Storage result = 0;
+    if (!checked_add(value_, other.value_, result)) {
+        return std::unexpected(DomainError::overflow("add"));
+    }
+    return Decimal(result);
+}
+
+DomainResult<Decimal> Decimal::subtract(const Decimal& other) const noexcept {
+    Storage negated_other = 0;
+    // -other cannot overflow for our valid range, but guard the extreme.
+    if (other.value_ == std::numeric_limits<Storage>::min()) {
+        return std::unexpected(DomainError::overflow("subtract"));
+    }
+    negated_other = -other.value_;
+    Storage result = 0;
+    if (!checked_add(value_, negated_other, result)) {
+        return std::unexpected(DomainError::overflow("subtract"));
+    }
+    return Decimal(result);
+}
+
+DomainResult<Decimal> Decimal::multiply(const Decimal& other) const noexcept {
+    // (a * 10^s) * (b * 10^s) = (a*b) * 10^(2s); divide once by 10^s with Half-Even.
+    // Work in the sign-magnitude domain to keep rounding symmetric.
+    const bool negative = (value_ < 0) != (other.value_ < 0);
+
+    UStorage lhs = value_ < 0
+        ? static_cast<UStorage>(-value_)
+        : static_cast<UStorage>(value_);
+    UStorage rhs = other.value_ < 0
+        ? static_cast<UStorage>(-other.value_)
+        : static_cast<UStorage>(other.value_);
+
+    if (lhs != 0 && rhs != 0) {
+        // Overflow check on the raw product before scaling down.
+        UStorage product = lhs * rhs;
+        if (product / rhs != lhs) {
+            return std::unexpected(DomainError::overflow("multiply"));
+        }
+
+        const UStorage scale = static_cast<UStorage>(kScaleFactor);
+        UStorage quotient = product / scale;
+        UStorage remainder = product % scale;
+
+        // Half-Even rounding on the division by scale.
+        const UStorage half = scale / 2;
+        if (remainder > half || (remainder == half && (quotient & 1) != 0)) {
+            ++quotient;
+        }
+
+        if (quotient > static_cast<UStorage>(kInt128Max)) {
+            return std::unexpected(DomainError::overflow("multiply result out of range"));
+        }
+
+        Storage signed_result = static_cast<Storage>(quotient);
+        return Decimal(negative ? -signed_result : signed_result);
+    }
+
+    return Decimal(0);
+}
+
+DomainResult<Decimal> Decimal::divide(const Decimal& other) const noexcept {
+    if (other.value_ == 0) {
+        return std::unexpected(DomainError::division_by_zero());
+    }
+    if (value_ == 0) {
+        return Decimal(0);
+    }
+
+    // result = (a / b) * 10^s = (a * 10^s) / b, computed as
+    // (value_ * 10^s) / other.value_ with Half-Even rounding.
+    const bool negative = (value_ < 0) != (other.value_ < 0);
+
+    UStorage num = value_ < 0
+        ? static_cast<UStorage>(-value_)
+        : static_cast<UStorage>(value_);
+    UStorage den = other.value_ < 0
+        ? static_cast<UStorage>(-other.value_)
+        : static_cast<UStorage>(other.value_);
+
+    const UStorage scale = static_cast<UStorage>(kScaleFactor);
+
+    // Scale numerator by 10^s with overflow detection.
+    UStorage scaled_num = num * scale;
+    if (scaled_num / scale != num) {
+        return std::unexpected(DomainError::overflow("divide"));
+    }
+
+    UStorage quotient = scaled_num / den;
+    UStorage remainder = scaled_num % den;
+
+    // Half-Even rounding: compare 2*remainder to den.
+    UStorage twice_rem = remainder * 2;
+    if (twice_rem > den || (twice_rem == den && (quotient & 1) != 0)) {
+        ++quotient;
+    }
+
+    if (quotient > static_cast<UStorage>(kInt128Max)) {
+        return std::unexpected(DomainError::overflow("divide result out of range"));
+    }
+
+    Storage signed_result = static_cast<Storage>(quotient);
+    return Decimal(negative ? -signed_result : signed_result);
+}
+
+} // namespace pfh::domain

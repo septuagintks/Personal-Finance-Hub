@@ -31,6 +31,12 @@ Docs/
 │   └── 16_Testing_Strategy.md          # 测试策略与规范
 │
 ├── Development/                        # 开发过程管理
+│   ├── DEPENDENCY_INSTALLATION.md      # 依赖安装说明
+│   ├── PHASE_1_FOUNDATION_COMPLETE.md  # Phase 1 基础设施完成记录
+│   ├── Phase_1_Progress_Report.md      # Phase 1 进度报告
+│   ├── Phase_1_S01-S03_Delivery_Summary.md # Phase 1 S01-S03 交付摘要
+│   ├── Phase_1_S04_Completion_Report.md # Phase 1 S04 完成报告
+│   ├── QUICK_REFERENCE.md              # 开发者快速参考
 │   └── tasks.md                        # 待办任务跟踪
 │
 ├── Develop_Plan/                       # 阶段性开发计划
@@ -51,7 +57,7 @@ Docs/
     └── Documents_Optimize_3.md         # 优化记录 3 (文档治理、任务清单、计划归档)
 ```
 
-计划类文档按需创建并跟随任务推进维护：`Docs/Development/Documents_Optimize_Plan.md` 仅在有正在设计中的文档优化方案时创建；当前文档优化事项已归档到 `Docs/Completed_Modifications/Documents_Optimize_3.md`。总体路线以 [Develop_Plan/Overall_Development_Plan.md](Develop_Plan/Overall_Development_Plan.md) 为准，阶段性开发计划以 `Docs/Develop_Plan/Phase_N_Development_Plan.md` 为准，开发任务跟踪以 [Development/tasks.md](Development/tasks.md) 为准。
+计划类文档按需创建并跟随任务推进维护：`Docs/Development/Documents_Optimize_Plan.md` 仅在有正在设计中的文档优化方案时创建；当前文档优化事项已归档到 `Docs/Completed_Modifications/Documents_Optimize_3.md`。开发阶段交付记录在开发中存放于 `Docs/Development/`，推荐命名为 `Phase_<N>_S<start>-S<end>_Delivery_Summary.md`，验收完成后归档到 `Docs/Completed_Modifications/`。总体路线以 [Develop_Plan/Overall_Development_Plan.md](Develop_Plan/Overall_Development_Plan.md) 为准，阶段性开发计划以 `Docs/Develop_Plan/Phase_N_Development_Plan.md` 为准，开发任务跟踪以 [Development/tasks.md](Development/tasks.md) 为准。
 
 ---
 

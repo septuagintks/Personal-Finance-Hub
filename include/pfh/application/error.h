@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include "pfh/domain/domain_error.h"
 #include <expected>
 #include <string>
 #include <system_error>
@@ -148,69 +149,8 @@ template <typename T>
 
 } // namespace pfh::application
 
-// Domain-layer error types (no HTTP status code dependency)
-namespace pfh::domain {
-
-/// @brief Domain-specific error codes
-enum class DomainErrorCode {
-    // Money and currency errors
-    InvalidAmount,
-    InvalidCurrency,
-    CurrencyMismatch,
-    InvalidExchangeRate,
-    ExchangeRateNotFound,
-
-    // Account errors
-    InvalidAccountType,
-    AccountArchived,
-
-    // Transaction errors
-    InvalidTransactionType,
-    InvalidTransferStructure,
-    TransferAmountMismatch,
-
-    // Category errors
-    CategoryBoardMismatch,
-    InvalidCategoryHierarchy,
-
-    // Business rule errors
-    NegativeAmount,
-    ZeroAmount,
-    InsufficientBalance,
-
-    // Generic errors
-    InvalidOperation,
-    PreconditionFailed
-};
-
-/// @brief Domain error information
-struct DomainError {
-    DomainErrorCode code;
-    std::string message;
-
-    DomainError(DomainErrorCode code, std::string message)
-        : code(code), message(std::move(message)) {}
-
-    [[nodiscard]] static DomainError invalid_amount(std::string details) {
-        return DomainError(DomainErrorCode::InvalidAmount, "Invalid amount: " + details);
-    }
-
-    [[nodiscard]] static DomainError currency_mismatch(std::string expected, std::string actual) {
-        return DomainError(DomainErrorCode::CurrencyMismatch,
-                          "Currency mismatch: expected " + expected + ", got " + actual);
-    }
-
-    [[nodiscard]] static DomainError exchange_rate_not_found(std::string from, std::string to) {
-        return DomainError(DomainErrorCode::ExchangeRateNotFound,
-                          "Exchange rate not found: " + from + " -> " + to);
-    }
-};
-
-/// @brief Domain result type
-template <typename T>
-using DomainResult = std::expected<T, DomainError>;
-
-/// @brief Domain void result type
-using DomainVoidResult = std::expected<void, DomainError>;
-
-} // namespace pfh::domain
+// Note: Domain-layer error types (DomainError, DomainErrorCode, DomainResult)
+// live in pfh/domain/domain_error.h so the domain layer stays free of any
+// dependency on the application layer. This header includes that file above,
+// so existing users of pfh::application that also referenced pfh::domain
+// error types continue to compile.
