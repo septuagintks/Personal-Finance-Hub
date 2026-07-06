@@ -88,7 +88,8 @@ P1-S12 Phase 1 测试收尾与文档回写
 │   ├── application/
 │   ├── infrastructure/
 │   ├── presentation/
-│   └── main.cpp
+│   └── bootstrap/
+│       └── main.cpp
 ├── tests/
 │   ├── unit/
 │   ├── integration/
