@@ -146,7 +146,7 @@ public:
 CNY → EUR = r_base / r_target
 ```
 
-当数据库中只有 `USD -> CNY` 和 `USD -> EUR`，而业务需要 `EUR -> CNY` 时，由 `CurrencyConversionService` 负责在纯内存中推导。
+当数据库中只有 `USD -> CNY` 和 `USD -> EUR`，而业务需要 `EUR -> CNY` 时，由应用层先读取所需的 `ExchangeRate`，再交给 `CurrencyConversionService` 在纯内存中推导。
 不要定义单独的 `ExchangeRateService`，避免和应用层汇率刷新用例、基础设施 Provider 混在一起。
 
 ```cpp
@@ -166,6 +166,18 @@ private:
     static constexpr const char* PIVOT_CURRENCY = "USD";
 
 public:
+    // 逆向折算：已知 Base->Target，推导 Target->Base
+    // 例如：USD->CNY = 7.18，推导 CNY->USD = 1 / 7.18
+    static std::expected<ExchangeRate, CurrencyConversionError> calculateInverseRate(
+        const ExchangeRate& rate)
+    {
+        if (rate.getRate().isZeroOrNegative()) {
+            return std::unexpected(CurrencyConversionError::InfiniteOrZeroRate);
+        }
+
+        return rate.inverse();
+    }
+
     // 三角折算：已知 Pivot->Base 和 Pivot->Target，推导 Base->Target
     // 例如：USD->EUR 和 USD->CNY，推导 EUR->CNY
     static std::expected<ExchangeRate, CurrencyConversionError> calculateCrossRate(
@@ -194,62 +206,6 @@ public:
             "TriangularCalculation"
         );
     }
-
-    // 便捷方法：直接从 Repository 查询并推导
-    // 适用于 Application 层调用
-    static std::expected<ExchangeRate, CurrencyConversionError> findOrCalculateRate(
-        const Currency& base,
-        const Currency& target,
-        IExchangeRateRepository& repository,
-        std::optional<std::chrono::system_clock::time_point> timestamp = std::nullopt)
-    {
-        // 1. 尝试直接查询 Base -> Target
-        auto directRate = timestamp
-            ? repository.getHistorical(base, target, *timestamp)
-            : repository.getLatest(base, target);
-
-        if (directRate) {
-            return directRate;
-        }
-
-        // 2. 尝试查询逆向汇率 Target -> Base，然后取倒数
-        auto inverseRate = timestamp
-            ? repository.getHistorical(target, base, *timestamp)
-            : repository.getLatest(target, base);
-
-        if (inverseRate) {
-            return inverseRate->inverse();
-        }
-
-        // 3. 三角折算：通过 USD 枢纽推导
-        Currency pivot(PIVOT_CURRENCY);
-
-        // 如果 Base 或 Target 本身就是 USD，说明缺少必要汇率
-        if (base == pivot || target == pivot) {
-            return std::unexpected(CurrencyConversionError::MissingPivotRate);
-        }
-
-        // 查询 USD -> Base
-        auto pivotToBase = timestamp
-            ? repository.getHistorical(pivot, base, *timestamp)
-            : repository.getLatest(pivot, base);
-
-        if (!pivotToBase) {
-            return std::unexpected(CurrencyConversionError::MissingPivotRate);
-        }
-
-        // 查询 USD -> Target
-        auto pivotToTarget = timestamp
-            ? repository.getHistorical(pivot, target, *timestamp)
-            : repository.getLatest(pivot, target);
-
-        if (!pivotToTarget) {
-            return std::unexpected(CurrencyConversionError::MissingPivotRate);
-        }
-
-        // 执行三角折算
-        return calculateCrossRate(*pivotToBase, *pivotToTarget);
-    }
 };
 
 ```
@@ -257,11 +213,10 @@ public:
 **使用示例**
 
 ```cpp
-// 应用层 Use Case 中
-auto rateResult = CurrencyConversionService::findOrCalculateRate(
-    Currency("EUR"),
-    Currency("CNY"),
-    *exchangeRateRepo_
+// 应用层 Use Case 中已经从 Repository 读取 USD->EUR 和 USD->CNY
+auto rateResult = CurrencyConversionService::calculateCrossRate(
+    usdToEur,
+    usdToCny
 );
 
 if (!rateResult) {
@@ -398,13 +353,13 @@ public:
 
 #### 3.2.1 多级降级查询链 (Fallback Chain)
 
-在 `CurrencyConversionService` 中，汇率换算采用责任链模式进行降级：
+在应用层 `ExchangeRateQueryService` 中，汇率查询采用责任链模式进行降级；`CurrencyConversionService` 只负责逆向折算、三角折算等纯内存计算：
 
 1. **直接汇率**：尝试直接查询 Base -> Target。
 2. **逆向汇率**：尝试查询逆向汇率 Target -> Base，然后取倒数。
 3. **三角折算**：通过 USD 枢纽推导。
 4. **历史降级**：寻找历史上最接近（但在此时间点之前）的汇率记录。
-5. **抛出异常**：若以上均不可得，抛出 `ExchangeRateUnavailableException`。
+5. **返回明确错误**：若以上均不可得，返回 `ExchangeRateNotAvailable` 类应用层错误。
 
 #### 3.2.2 熔断与告警机制
 
@@ -414,7 +369,7 @@ public:
   * **Open（断开）**：熔断状态，所有请求直接拦截，不调用外部 API，直接降级使用本地数据库的历史汇率。1 小时后，状态转移到 `Half-Open`。
   * **Half-Open（半开）**：尝试状态，允许 1 次请求发送给外部 API。如果请求成功，断路器恢复到 `Closed` 状态；如果请求失败，断路器重新回到 `Open` 状态并重置 1 小时计时器。
 - **L1 内存缓存（高频查询优化）**：
-  * 在 `CurrencyConversionService` 或 `ExchangeRateQueryService` 内部维护一个轻量级的进程内 L1 缓存：`std::unordered_map<std::string, ExchangeRate>`，其中 Key 为 `base_currency + "_" + target_currency`。
+  * 在应用层 `ExchangeRateQueryService` 内部维护一个轻量级的进程内 L1 缓存：`std::unordered_map<std::string, ExchangeRate>`，其中 Key 为 `base_currency + "_" + target_currency`。
   * 每次高频查询（如报表生成、净资产折算）时，优先命中 L1 缓存。若未命中，再查询数据库（L2 缓存）并回填 L1。
   * L1 缓存的生命周期与单次请求上下文绑定，或设置 5 分钟的滑动过期时间，防止内存无限膨胀和数据严重滞后。
 - **事件告警**：一旦触发降级（如使用了超过 24 小时未更新的历史汇率），通过 `EventBus` 发布 `ExchangeRateDegradedEvent`，触发系统审计日志，并通过邮件/Webhook 告警通知管理员。
@@ -430,6 +385,22 @@ class ExchangeRateQueryService {
 private:
     std::shared_ptr<IExchangeRateRepository> repository_;
 
+    std::expected<ExchangeRate, std::string> readRate(
+        const Currency& base,
+        const Currency& target,
+        std::optional<std::chrono::system_clock::time_point> timestamp)
+    {
+        auto result = timestamp
+            ? repository_->getHistorical(base, target, *timestamp)
+            : repository_->getLatest(base, target);
+
+        if (!result) {
+            return std::unexpected("Exchange rate not found");
+        }
+
+        return *result;
+    }
+
 public:
     explicit ExchangeRateQueryService(std::shared_ptr<IExchangeRateRepository> repository)
         : repository_(repository) {}
@@ -440,25 +411,38 @@ public:
         const Currency& target,
         std::optional<std::chrono::system_clock::time_point> timestamp = std::nullopt)
     {
-        auto result = CurrencyConversionService::findOrCalculateRate(
-            base, target, *repository_, timestamp
-        );
+        // 1. 直接查询 Base -> Target
+        if (auto directRate = readRate(base, target, timestamp)) {
+            return directRate;
+        }
 
-        if (!result) {
-            // 映射领域错误为应用层错误消息
-            switch (result.error()) {
-                case CurrencyConversionError::MissingPivotRate:
-                    return std::unexpected("Exchange rate not available for currency pair");
-                case CurrencyConversionError::InfiniteOrZeroRate:
-                    return std::unexpected("Invalid exchange rate calculation result");
-                case CurrencyConversionError::UnsupportedCurrencyPair:
-                    return std::unexpected("Unsupported currency pair");
-                default:
-                    return std::unexpected("Unknown exchange rate error");
+        // 2. 查询逆向 Target -> Base，由 Domain Service 纯计算倒数
+        if (auto inverseRate = readRate(target, base, timestamp)) {
+            auto calculated = CurrencyConversionService::calculateInverseRate(*inverseRate);
+            if (calculated) {
+                return calculated;
             }
         }
 
-        return result;
+        // 3. 查询 USD 枢纽两侧汇率，由 Domain Service 纯计算交叉汇率
+        Currency pivot("USD");
+        if (base != pivot && target != pivot) {
+            auto pivotToBase = readRate(pivot, base, timestamp);
+            auto pivotToTarget = readRate(pivot, target, timestamp);
+
+            if (pivotToBase && pivotToTarget) {
+                auto calculated = CurrencyConversionService::calculateCrossRate(
+                    *pivotToBase,
+                    *pivotToTarget
+                );
+
+                if (calculated) {
+                    return calculated;
+                }
+            }
+        }
+
+        return std::unexpected("Exchange rate not available for currency pair");
     }
 
     // 批量转换金额到基准货币
