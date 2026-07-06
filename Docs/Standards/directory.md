@@ -27,17 +27,22 @@ Docs/
 ├── Development/
 │   └── tasks.md
 │
+├── Develop_Plan/
+│   ├── Overall_Development_Plan.md
+│   └── Phase_1_Development_Plan.md
+│
 ├── Standards/
 │   ├── directory.md
 │   └── Documents_Format_Standard.md
 │
 └── Completed_Modifications/
     ├── Documents_Optimize_1.md
-    └── Documents_Optimize_2.md
+    ├── Documents_Optimize_2.md
+    └── Documents_Optimize_3.md
 ```
 
 说明：
 
 1. 上述目录树只描述当前仓库中已经提交的文档。
 2. `Docs/Development/Documents_Optimize_Plan.md` 用于正在设计中的文档优化方案，按需创建。
-3. `Docs/Develop_Plan/` 用于阶段性开发计划，按需创建。
+3. `Docs/Develop_Plan/` 用于总体与阶段性开发计划，当前包含三阶段总开发计划大纲和 Phase 1 后端最小闭环开发计划。
