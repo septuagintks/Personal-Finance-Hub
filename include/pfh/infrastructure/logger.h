@@ -45,61 +45,76 @@ public:
                      to_string(config.level), to_string(config.output));
     }
 
-    /// @brief Log with trace ID context
+    // Context-aware logging.
+    //
+    // The user message is formatted first with fmt::format(fmt::runtime(...)),
+    // then the fully-rendered line (context prefix + message) is emitted to
+    // spdlog as a single literal argument. Using fmt::runtime avoids the
+    // consteval format-string check firing on the already-substituted string,
+    // and emitting one literal keeps the placeholder count correct regardless
+    // of how many args the caller passed.
+
     template <typename... Args>
-    static void trace(const std::string& trace_id, spdlog::format_string_t<Args...> fmt, Args&&... args) {
-        spdlog::trace("[TraceId:{}] {}", trace_id, fmt::format(fmt, std::forward<Args>(args)...));
+    static void trace(const std::string& trace_id, fmt::format_string<Args...> fmt_str, Args&&... args) {
+        spdlog::trace("{}", with_trace(trace_id, fmt::format(fmt_str, std::forward<Args>(args)...)));
     }
 
     template <typename... Args>
-    static void debug(const std::string& trace_id, spdlog::format_string_t<Args...> fmt, Args&&... args) {
-        spdlog::debug("[TraceId:{}] ", trace_id, fmt::format(fmt, std::forward<Args>(args)...));
+    static void debug(const std::string& trace_id, fmt::format_string<Args...> fmt_str, Args&&... args) {
+        spdlog::debug("{}", with_trace(trace_id, fmt::format(fmt_str, std::forward<Args>(args)...)));
     }
 
     template <typename... Args>
-    static void info(const std::string& trace_id, spdlog::format_string_t<Args...> fmt, Args&&... args) {
-        spdlog::info("[TraceId:{}] {}", trace_id, fmt::format(fmt, std::forward<Args>(args)...));
+    static void info(const std::string& trace_id, fmt::format_string<Args...> fmt_str, Args&&... args) {
+        spdlog::info("{}", with_trace(trace_id, fmt::format(fmt_str, std::forward<Args>(args)...)));
     }
 
     template <typename... Args>
-    static void warn(const std::string& trace_id, spdlog::format_string_t<Args...> fmt, Args&&... args) {
-        spdlog::warn("[TraceId:{}] {}", trace_id, fmt::format(fmt, std::forward<Args>(args)...));
+    static void warn(const std::string& trace_id, fmt::format_string<Args...> fmt_str, Args&&... args) {
+        spdlog::warn("{}", with_trace(trace_id, fmt::format(fmt_str, std::forward<Args>(args)...)));
     }
 
     template <typename... Args>
-    static void error(const std::string& trace_id, spdlog::format_string_t<Args...> fmt, Args&&... args) {
-        spdlog::error("[TraceId:{}] {}", trace_id, fmt::format(fmt, std::forward<Args>(args)...));
+    static void error(const std::string& trace_id, fmt::format_string<Args...> fmt_str, Args&&... args) {
+        spdlog::error("{}", with_trace(trace_id, fmt::format(fmt_str, std::forward<Args>(args)...)));
     }
 
     template <typename... Args>
-    static void critical(const std::string& trace_id, spdlog::format_string_t<Args...> fmt, Args&&... args) {
-        spdlog::critical("[TraceId:{}] {}", trace_id, fmt::format(fmt, std::forward<Args>(args)...));
+    static void critical(const std::string& trace_id, fmt::format_string<Args...> fmt_str, Args&&... args) {
+        spdlog::critical("{}", with_trace(trace_id, fmt::format(fmt_str, std::forward<Args>(args)...)));
     }
 
-    /// @brief Log with user context
+    /// @brief Log with user context (info level).
     template <typename... Args>
     static void info_user(const std::string& trace_id, domain::UserId user_id,
-                         spdlog::format_string_t<Args...> fmt, Args&&... args) {
-        spdlog::info("[TraceId:{}] [UserId:{}] {}",
-                     trace_id, user_id.value(), fmt::format(fmt, std::forward<Args>(args)...));
+                          fmt::format_string<Args...> fmt_str, Args&&... args) {
+        spdlog::info("[TraceId:{}] [UserId:{}] {}", trace_id, user_id.value(),
+                     fmt::format(fmt_str, std::forward<Args>(args)...));
     }
 
+    /// @brief Log with user context (error level).
     template <typename... Args>
     static void error_user(const std::string& trace_id, domain::UserId user_id,
-                          spdlog::format_string_t<Args...> fmt, Args&&... args) {
-        spdlog::error("[TraceId:{}] [UserId:{}] {}",
-                      trace_id, user_id.value(), fmt::format(fmt, std::forward<Args>(args)...));
+                           fmt::format_string<Args...> fmt_str, Args&&... args) {
+        spdlog::error("[TraceId:{}] [UserId:{}] {}", trace_id, user_id.value(),
+                      fmt::format(fmt_str, std::forward<Args>(args)...));
     }
 
-    /// @brief Log with error context
+    /// @brief Log with an error-context label (error level).
     template <typename... Args>
     static void error_with_context(const std::string& trace_id, const std::string& context,
-                                   spdlog::format_string_t<Args...> fmt, Args&&... args) {
-        spdlog::error("[TraceId:{}] [Context:{}] {}",
-                      trace_id, context, fmt::format(fmt, std::forward<Args>(args)...));
+                                   fmt::format_string<Args...> fmt_str, Args&&... args) {
+        spdlog::error("[TraceId:{}] [Context:{}] {}", trace_id, context,
+                      fmt::format(fmt_str, std::forward<Args>(args)...));
     }
 
 private:
+    /// @brief Compose the "[TraceId:...] message" line as a single literal string.
+    [[nodiscard]] static std::string with_trace(const std::string& trace_id,
+                                                 const std::string& message) {
+        return "[TraceId:" + trace_id + "] " + message;
+    }
+
     [[nodiscard]] static spdlog::level::level_enum to_spdlog_level(LogLevel level) {
         switch (level) {
             case LogLevel::Trace: return spdlog::level::trace;

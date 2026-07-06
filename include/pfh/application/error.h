@@ -125,26 +125,24 @@ using Result = std::expected<T, Error>;
 /// @brief Result type for operations that don't return a value
 using VoidResult = std::expected<void, Error>;
 
-/// @brief Helper to create a success result
+/// @brief Wrap a value as a success Result. Deduces Result<decay_t<T>>.
+/// Callers wanting a different target type can construct Result<T> directly.
 template <typename T>
-[[nodiscard]] constexpr Result<T> ok(T&& value) {
-    return Result<T>(std::forward<T>(value));
+[[nodiscard]] constexpr Result<std::decay_t<T>> ok(T&& value) {
+    return Result<std::decay_t<T>>(std::forward<T>(value));
 }
 
-/// @brief Helper to create a success result for void
+/// @brief Success result for void.
 [[nodiscard]] constexpr VoidResult ok() {
     return VoidResult();
 }
 
-/// @brief Helper to create an error result
-template <typename T>
-[[nodiscard]] constexpr Result<T> err(Error error) {
-    return std::unexpected(std::move(error));
-}
-
-/// @brief Helper to create a void error result
-[[nodiscard]] constexpr VoidResult err_void(Error error) {
-    return std::unexpected(std::move(error));
+/// @brief Create an error result that implicitly converts to any Result<T>
+/// or VoidResult. No explicit template argument required, symmetric with ok().
+///
+/// Usage: return err(Error::not_found(...));  // works for Result<T> and VoidResult
+[[nodiscard]] inline std::unexpected<Error> err(Error error) {
+    return std::unexpected<Error>(std::move(error));
 }
 
 } // namespace pfh::application

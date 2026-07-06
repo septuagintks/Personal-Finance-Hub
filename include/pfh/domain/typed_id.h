@@ -29,8 +29,10 @@ public:
     /// @brief Get the raw value
     [[nodiscard]] constexpr ValueType value() const noexcept { return value_; }
 
-    /// @brief Check if ID is valid (non-zero)
-    [[nodiscard]] constexpr bool is_valid() const noexcept { return value_ != 0; }
+    /// @brief Check if ID is valid. Persisted IDs come from DB auto-increment
+    /// sequences and are always positive; 0 (default/unset) and negative values
+    /// are treated as invalid.
+    [[nodiscard]] constexpr bool is_valid() const noexcept { return value_ > 0; }
 
     /// @brief Spaceship operator for three-way comparison
     [[nodiscard]] constexpr auto operator<=>(const TypedId&) const noexcept = default;

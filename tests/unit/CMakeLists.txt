@@ -12,6 +12,8 @@ set(UNIT_TEST_SOURCES
     money_test.cpp
     exchange_rate_test.cpp
     currency_conversion_service_test.cpp
+    config_test.cpp
+    logger_test.cpp
 )
 
 add_executable(pfh_unit_tests ${UNIT_TEST_SOURCES})

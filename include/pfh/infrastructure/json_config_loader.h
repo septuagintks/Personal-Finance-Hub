@@ -23,16 +23,20 @@ public:
         : config_path_(std::move(config_path)) {}
 
     /// @brief Load configuration from JSON file
-    [[nodiscard]] std::expected<AppConfig, std::string> load() override {
+    [[nodiscard]] application::Result<AppConfig> load() override {
+        using application::Error;
+
         // Check if file exists
         if (!std::filesystem::exists(config_path_)) {
-            return std::unexpected("Config file not found: " + config_path_.string());
+            return std::unexpected(Error(application::ErrorCode::ConfigurationError,
+                "Config file not found", config_path_.string()));
         }
 
         // Read file content
         std::ifstream file(config_path_);
         if (!file.is_open()) {
-            return std::unexpected("Failed to open config file: " + config_path_.string());
+            return std::unexpected(Error(application::ErrorCode::ConfigurationError,
+                "Failed to open config file", config_path_.string()));
         }
 
         // Parse JSON
@@ -40,7 +44,8 @@ public:
         try {
             file >> json;
         } catch (const nlohmann::json::exception& e) {
-            return std::unexpected("Failed to parse JSON: " + std::string(e.what()));
+            return std::unexpected(Error(application::ErrorCode::ConfigurationError,
+                "Failed to parse JSON", e.what()));
         }
 
         // Convert to AppConfig
@@ -108,13 +113,22 @@ public:
 
             // Validate required fields
             if (config.jwt.secret.empty()) {
-                return std::unexpected("JWT secret is required but not provided");
+                return std::unexpected(Error(application::ErrorCode::ConfigurationError,
+                    "JWT secret is required but not provided"));
+            }
+            // Reject unreplaced placeholder secrets so a config template cannot
+            // be started in production with a dummy signing key.
+            if (config.jwt.secret.starts_with("REPLACE_WITH_")) {
+                return std::unexpected(Error(application::ErrorCode::ConfigurationError,
+                    "JWT secret still holds a placeholder value; set a real secret",
+                    "secret starts with REPLACE_WITH_"));
             }
 
             return config;
 
         } catch (const std::exception& e) {
-            return std::unexpected("Failed to parse config: " + std::string(e.what()));
+            return std::unexpected(Error(application::ErrorCode::ConfigurationError,
+                "Failed to parse config", e.what()));
         }
     }
 

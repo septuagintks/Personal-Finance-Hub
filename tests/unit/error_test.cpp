@@ -57,17 +57,28 @@ TEST(VoidResult, WhenSuccessful_HasValue) {
 
 // Result type - error cases
 TEST(Result, WhenCreatedWithError_IsError) {
-    Result<int> result = err<int>(Error::validation("Invalid input"));
+    Result<int> result = err(Error::validation("Invalid input"));
 
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, ErrorCode::ValidationError);
 }
 
 TEST(VoidResult, WhenError_HasNoValue) {
-    VoidResult result = err_void(Error::unauthorized());
+    VoidResult result = err(Error::unauthorized());
 
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, ErrorCode::Unauthorized);
+}
+
+TEST(Result, WhenErrHelperUsed_ConvertsToAnyResultType) {
+    // Same err() call site converts to different Result<T> and VoidResult.
+    auto make_int = []() -> Result<int> { return err(Error::internal_error()); };
+    auto make_str = []() -> Result<std::string> { return err(Error::internal_error()); };
+    auto make_void = []() -> VoidResult { return err(Error::internal_error()); };
+
+    EXPECT_FALSE(make_int().has_value());
+    EXPECT_FALSE(make_str().has_value());
+    EXPECT_FALSE(make_void().has_value());
 }
 
 // Result pattern matching with expected
@@ -87,7 +98,7 @@ TEST(Result, WhenSuccess_CanAccessValue) {
 
 TEST(Result, WhenError_CanAccessError) {
     auto compute = []() -> Result<int> {
-        return err<int>(Error::not_found("User", "999"));
+        return err(Error::not_found("User", "999"));
     };
 
     auto result = compute();
@@ -116,7 +127,7 @@ TEST(Result, WhenChained_PropagatesSuccess) {
 
 TEST(Result, WhenChained_PropagatesError) {
     auto step1 = []() -> Result<int> {
-        return err<int>(Error::validation("Step 1 failed"));
+        return err(Error::validation("Step 1 failed"));
     };
     auto step2 = [](int x) -> Result<int> { return ok(x * 2); };
 

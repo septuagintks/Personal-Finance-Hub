@@ -28,12 +28,12 @@ TEST(TypedId, WhenZeroValue_IsInvalid) {
     EXPECT_FALSE(account_id.is_valid());
 }
 
-TEST(TypedId, WhenNegativeValue_IsValid) {
-    // Negative IDs are technically valid (non-zero)
-    // Though in practice we won't use negative IDs
+TEST(TypedId, WhenNegativeValue_IsInvalid) {
+    // Persisted IDs come from DB auto-increment sequences and are always
+    // positive; a negative value indicates a logic error and is not valid.
     TransactionId tx_id(-1);
-    EXPECT_TRUE(tx_id.is_valid());
-    EXPECT_EQ(tx_id.value(), -1);
+    EXPECT_FALSE(tx_id.is_valid());
+    EXPECT_EQ(tx_id.value(), -1); // value is preserved, only validity is false
 }
 
 // Type safety

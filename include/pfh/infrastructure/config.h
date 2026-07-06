@@ -5,9 +5,9 @@
 
 #pragma once
 
+#include "pfh/application/error.h"
 #include <chrono>
 #include <cstdint>
-#include <expected>
 #include <string>
 
 namespace pfh::infrastructure {
@@ -86,9 +86,10 @@ class IConfigLoader {
 public:
     virtual ~IConfigLoader() = default;
 
-    /// @brief Load configuration from file or environment
-    /// @return AppConfig on success, error message on failure
-    [[nodiscard]] virtual std::expected<AppConfig, std::string> load() = 0;
+    /// @brief Load configuration from file or environment.
+    /// @return AppConfig on success; application::Error (ConfigurationError) on failure,
+    ///         so the presentation layer can map it uniformly.
+    [[nodiscard]] virtual application::Result<AppConfig> load() = 0;
 };
 
 } // namespace pfh::infrastructure

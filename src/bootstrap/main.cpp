@@ -25,7 +25,12 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
     auto config_result = config_loader.load();
 
     if (!config_result) {
-        std::cerr << "Failed to load configuration: " << config_result.error() << std::endl;
+        const auto& err = config_result.error();
+        std::cerr << "Failed to load configuration: " << err.message;
+        if (!err.details.empty()) {
+            std::cerr << " (" << err.details << ")";
+        }
+        std::cerr << std::endl;
         return 1;
     }
 

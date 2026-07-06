@@ -512,6 +512,31 @@ Copy-Item config/config.example.json config/config.local.json
 
 ---
 
+## 🔍 S04 复查修复记录
+
+对 S04 全部产物复查后修复 7 项问题（复查日期 2026-07-07）：
+
+1. **[高] `Logger::debug` 丢消息**：格式串 `"[TraceId:{}] "` 只有 1 个占位符却传 2 个参数，
+   实测调试消息被静默丢弃。重写全部 Logger 方法：先 `fmt::format` 渲染消息，再以
+   单个字面量 `"{}"` 交给 spdlog，杜绝占位符数量不匹配。
+2. **[高] Logger `format_string_t` + 预格式化潜伏编译错**：原实现一旦带参调用即 consteval
+   报错（因从未被调用而未暴露）。改用 `fmt::format_string<Args...>` 并统一渲染路径。
+3. **[中] `IConfigLoader` 错误类型不一致**：`std::expected<AppConfig, std::string>` 改为
+   `application::Result<AppConfig>`，配置失败统一为 `ErrorCode::ConfigurationError`，
+   表现层可单向映射。
+4. **[中] `ok/err` 不对称**：`err<T>`/`err_void` 合并为单个 `err(Error)` 返回
+   `std::unexpected<Error>`，隐式转换到任意 `Result<T>`/`VoidResult`；`ok` 用 `decay_t` 推导。
+5. **[中] config/logger 无测试**：新增 `config_test.cpp`（加载、默认值、缺失/占位符 secret、
+   非法 JSON、日志级别解析）与 `logger_test.cpp`（各级别、用户/错误上下文、debug 回归、
+   花括号不被二次解析）。
+6. **[低] 占位符密钥弱校验**：loader 拒绝以 `REPLACE_WITH_` 开头的 JWT secret，
+   防止带模板密钥启动生产。
+7. **[低] `TypedId::is_valid` 放行负值**：改为要求 `> 0`（DB 自增 ID 恒正），同步更新测试。
+
+复查后验证：130 个单元测试全部通过，构建 `-Werror -pedantic` 无警告。
+
+---
+
 ## 📚 相关文档
 
 - [Phase 1 详细开发计划](../Develop_Plan/Phase_1/Phase_1_Detailed_Development_Plan.md) - P1-S04 章节
