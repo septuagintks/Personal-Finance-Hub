@@ -8,6 +8,10 @@ set(UNIT_TEST_SOURCES
     typed_id_test.cpp
     error_test.cpp
     decimal_test.cpp
+    currency_test.cpp
+    money_test.cpp
+    exchange_rate_test.cpp
+    currency_conversion_service_test.cpp
 )
 
 add_executable(pfh_unit_tests ${UNIT_TEST_SOURCES})

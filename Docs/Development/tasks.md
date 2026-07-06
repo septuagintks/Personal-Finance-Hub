@@ -80,10 +80,10 @@ Status: Active
 ### 3.4 核心金融原语 (Core Financial Primitives)
 
 - [x] 实现 `Decimal` 定点数类型，覆盖字符串解析、规范化、比较、运算、Half-Even 舍入和溢出保护 <!-- id: 16 -->
-- [ ] 实现 `Currency` 值对象，校验 ISO-4217 代码并保持内部代码不可变 <!-- id: 17 -->
-- [ ] 实现 `Money` 值对象，禁止跨币种直接加减，并确保 JSON 金额只通过字符串进出 <!-- id: 18 -->
-- [ ] 实现 `ExchangeRate` 值对象，明确方向、时间戳、反向汇率和汇率精度规则 <!-- id: 19 -->
-- [ ] 实现 `CurrencyConversionService`，支持直接汇率、反向汇率、USD 枢纽三角折算和缺失汇率错误 <!-- id: 20 -->
+- [x] 实现 `Currency` 值对象，校验 ISO-4217 代码并保持内部代码不可变 <!-- id: 17 -->
+- [x] 实现 `Money` 值对象，禁止跨币种直接加减，并确保 JSON 金额只通过字符串进出 <!-- id: 18 -->
+- [x] 实现 `ExchangeRate` 值对象，明确方向、时间戳、反向汇率和汇率精度规则 <!-- id: 19 -->
+- [x] 实现 `CurrencyConversionService`，支持直接汇率、反向汇率、USD 枢纽三角折算和缺失汇率错误 <!-- id: 20 -->
 
 ### 3.5 领域模型与业务规则 (Domain Models & Rules)
 

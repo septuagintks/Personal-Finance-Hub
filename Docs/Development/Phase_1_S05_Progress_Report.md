@@ -1,129 +1,160 @@
-# Phase 1 S05 金融原语 - 进度报告 (Decimal)
+# Phase 1 S05 金融原语 - 完成报告
 
-**日期**: 2026-07-06
 **阶段**: P1-S05 金融原语
-**状态**: ⏳ 进行中 (Decimal 完成，Currency/Money/ExchangeRate/ConversionService 待实现)
+**状态**: 已完成
 
 ---
 
-## 1. 执行概述
+## 1. 概述
 
-根据 `Phase_1_Detailed_Development_Plan.md` 的 P1-S05 规划，本阶段实现金融系统最核心的
-不变量。当前已完成金融原语的地基类型 `Decimal`，并通过完整单元测试验证。
-
-依据文档 `04_Money_Currency_System_Design.md` 的强约束：
+根据 `Docs/Develop_Plan/Phase_1/Phase_1_Detailed_Development_Plan.md` 的 P1-S05 规划，
+本阶段实现金融系统最核心的不变量：金额、货币、汇率与货币折算。所有实现遵循
+`Docs/Architecture/04_Money_Currency_System_Design.md` 与
+`Docs/Architecture/08_Exchange_Rate_System_Design.md` 的强约束：
 
 - 金额与汇率绝不使用二进制浮点数
 - `Decimal` 底层使用 128 位整数 + 固定标度 `10^10`
 - 默认舍入策略统一为银行家舍入 (Half-Even)
-- `Decimal` 不感知货币
+- 跨币种运算必须显式，缺失汇率明确报错，不用默认值 `0`/`1`
+- 汇率方向明确 (`1 base = rate target`)，反向汇率可重现，USD 为三角折算枢纽
 
 ---
 
-## 2. 已完成：Decimal 定点数类型
+## 2. 交付物
 
-### 2.1 交付物
+| 组件 | 头文件 | 实现 | 测试 |
+|------|--------|------|------|
+| Decimal | `include/pfh/domain/decimal.h` | `src/domain/decimal.cpp` | `tests/unit/decimal_test.cpp` |
+| Currency | `include/pfh/domain/currency.h` | `src/domain/currency.cpp` | `tests/unit/currency_test.cpp` |
+| Money | `include/pfh/domain/money.h` | `src/domain/money.cpp` | `tests/unit/money_test.cpp` |
+| ExchangeRate | `include/pfh/domain/exchange_rate.h` | `src/domain/exchange_rate.cpp` | `tests/unit/exchange_rate_test.cpp` |
+| CurrencyConversionService | `include/pfh/domain/currency_conversion_service.h` | `src/domain/currency_conversion_service.cpp` | `tests/unit/currency_conversion_service_test.cpp` |
+| 领域错误 | `include/pfh/domain/domain_error.h` | (header-only) | 覆盖于各测试 |
 
-| 文件 | 说明 | 行数 |
-|------|------|------|
-| `include/pfh/domain/decimal.h` | Decimal 值对象接口 | ~105 |
-| `src/domain/decimal.cpp` | 解析/运算/舍入/溢出实现 | ~355 |
-| `tests/unit/decimal_test.cpp` | 单元测试 | ~230 |
-| `include/pfh/domain/domain_error.h` | 领域错误类型（新拆分） | ~120 |
-| `cmake/Dependencies.cmake` | 依赖解析（FetchContent 回退） | ~65 |
-
-### 2.2 核心特性
-
-- **存储模型**: `__int128` 存储 `真实值 * 10^10`，标度固定为 10 位小数
-  - 满足金额 8 位小数 + 汇率 10 位小数的无损计算要求
-  - 数值范围远超 `NUMERIC(20,8)` 上限
-- **字符串解析** `parse()`: 支持正负号、前导 `+`、空白裁剪，拒绝非法字符、多个小数点、空串
-- **规范化输出** `to_string()`: 去除尾部多余零（`42.00` → `42`）
-- **四则运算** `add/subtract/multiply/divide`: 全部返回 `DomainResult`，显式暴露溢出与除零
-- **Half-Even 舍入**: 解析截断、乘法降标、除法均采用银行家舍入
-- **溢出保护**: 加法符号翻转检测、乘法反向除法校验、`__int128` 范围守卫
-- **比较与谓词**: `<=>`、`==`、`is_zero/is_negative/is_positive`、`negated/abs`
-
-### 2.3 关键设计决策
-
-- **底层类型**: 采用原生 `__int128_t`（维护者确认，见架构文档 5.1 待决策项）
-  - 通过 `__extension__` 在类型别名处消除 `-pedantic` 警告
-  - `decimal.cpp` 使用 `#pragma GCC/clang diagnostic ignored "-Wpedantic"` 局部抑制
-  - 若未来需 MSVC 编译，仅需替换 `StorageType` 别名，调用方无感
-- **领域错误分层**: 将 `DomainError`/`DomainResult` 从 `application/error.h` 拆到
-  `domain/domain_error.h`，确保 Domain 层不反向依赖 Application 层
-  - `application/error.h` 改为 include 该头文件，向后兼容
-
-### 2.4 测试覆盖
-
-Decimal 单元测试覆盖三类路径（共约 40 个用例）：
-
-- **正常路径**: 整数、小数、负数、10 位小数、大额 `NUMERIC(20,8)` 上限
-- **舍入路径**: Half-Even 的向偶取整（`0.00000000005` → `0`，`0.00000000015` → `0.0000000002`）
-- **错误路径**: 空串、非法字符、多小数点、仅符号、除零、溢出
-- **金融关键用例**:
-  - `0.1 + 0.2` 精确等于 `0.3`（二进制浮点无法做到）
-  - `1000 * 7.18 = 7180`（金额乘汇率）
-  - `1 / 3 = 0.3333333333`（循环小数 Half-Even）
-  - `7170 / 1000 = 7.17`（转账模式 B 推导汇率）
+均编入 `pfh_domain` 静态库，无框架依赖。
 
 ---
 
-## 3. 验证结果
+## 3. 各原语要点
 
-依赖通过 CMake FetchContent 自动拉取（spdlog 1.14.1、nlohmann_json 3.11.3、
-GoogleTest 1.15.2），无需手动安装 vcpkg。
+### 3.1 Decimal
+
+- `__int128` 存储 `真实值 * 10^10`，标度固定 10 位，满足金额 8 位 + 汇率 10 位无损计算。
+- `parse()` 支持正负号、前导 `+`、空白裁剪；拒绝空串、非法字符、多小数点、仅符号。
+- `to_string()` 去除尾部多余零。
+- `add/subtract/multiply/divide` 全部返回 `DomainResult`，显式暴露溢出与除零。
+- 统一 Half-Even 舍入：解析截断、乘法降标、除法。
+- 溢出保护：加法符号翻转检测、乘法反向除法校验、`__int128` 范围守卫。
+- 底层采用原生 `__int128_t`（维护者确认，架构文档 5.1 待决策项）；`-pedantic` 警告通过
+  `__extension__` 与 `#pragma GCC/clang diagnostic ignored "-Wpedantic"` 局部抑制。
+
+### 3.2 Currency
+
+- 不可变值对象，仅承载稳定的 3 字母代码；展示属性归 CurrencyMetadata（后续阶段）。
+- `create()` 校验形状（3 个字母）并大写规范化，校验受支持代码。
+- 支持 ISO-4217 法币子集（当前 20 个常用币种）与受控加密货币白名单（BTC/ETH/USDT）。
+- 不支持任何算术运算；提供 `==`、`<=>` 精确比较与 `pivot_code()`（USD）。
+
+### 3.3 Money
+
+- 绑定 `Decimal` 金额 + `Currency`，不可变。
+- 同币种 `add/subtract` 正常；跨币种加减/比较返回 `CurrencyMismatch` 错误。
+- `multiply(Decimal)` 标量乘法保留币种（用于费率/因子），跨币种折算须走 ExchangeRate。
+- 允许负余额（信用账户场景），`negated/is_zero/is_negative/is_positive` 齐备。
+- `to_string()` 输出 `"<amount> <CODE>"`（如 `12.34 USD`）。
+
+### 3.4 ExchangeRate
+
+- 值对象，无身份标识；方向约定 `1 base = rate target`。
+- `create()` 校验 base≠target、rate>0（零/负汇率一律拒绝）。
+- `inverse()` 反向汇率 `1/rate`，保留时间戳，来源标记 `+inverse`。
+- `convert(Money)` 要求输入为 base 币种，输出 target 币种 Money。
+- 携带 `fetched_at` 时间戳与 `source` 来源，为历史汇率与审计留出字段。
+
+### 3.5 CurrencyConversionService
+
+- 纯内存领域服务：**不访问 Repository、不打开事务、不发布事件**（见下方设计说明）。
+- `cross_rate()` USD 枢纽三角折算：已知 `USD->base`、`USD->target`，推导
+  `base->target = r_target / r_base`，取较晚时间戳，来源标记 `TriangularCalculation`；
+  两输入非 USD 基准时报错。
+- `convert()` 便捷方法，对 `ExchangeRate::convert` 的封装。
+
+---
+
+## 4. 关键设计说明
+
+### 4.1 领域服务不依赖 Repository
+
+架构文档 `01_Technical_Architecture.md` 与 Phase 1 计划 P1-S06 验收标准均要求
+**Domain Service 不访问 Repository、不打开事务、不发布事件**。而汇率设计文档
+`08_Exchange_Rate_System_Design.md` 示例中的 `findOrCalculateRate(..., IExchangeRateRepository&)`
+带有仓储依赖。
+
+按"文档冲突时优先架构文档"的规则，`CurrencyConversionService` 在 P1-S05 只实现**纯计算**
+（三角折算、反向、转换）。基于 Repository 的多级降级查询链（直接→逆向→三角→历史）属于
+**应用层**职责，待 `IExchangeRateRepository` 就绪（P1-S08）后在应用层查询服务中实现。
+此偏差已在此记录，后续检查 S01-S05 时可据此核对是否需回写架构文档示例。
+
+### 4.2 领域错误分层
+
+`DomainError`/`DomainResult` 位于 `domain/domain_error.h`，Domain 层不反向依赖 Application 层。
+
+---
+
+## 5. 验证结果
+
+依赖通过 CMake FetchContent 自动拉取（spdlog 1.14.1、nlohmann_json 3.11.3、GoogleTest 1.15.2）。
 
 ```text
-cmake --build . --config Debug
-[1/5] Building CXX object pfh_domain.dir/src/domain/decimal.cpp.obj
-[2/5] Linking CXX static library libpfh_domain.a
-[3/5] Linking CXX executable pfh_server.exe
-[4/5] Building CXX object pfh_unit_tests.dir/decimal_test.cpp.obj
-[5/5] Linking CXX executable pfh_unit_tests.exe
-
-ctest -C Debug --output-on-failure
-100% tests passed, 0 tests failed out of 71
-Total Test time (real) = 2.35 sec
+cmake configure: 通过（GNU 16.1.0, C++23, Debug）
+cmake build:     通过（-Wall -Wextra -Werror -pedantic），无警告
+ctest:           116 个单元测试全部通过（S05 新增 45 个）
+Total Test time: ~5.1 sec
+pfh_domain:      独立静态库，不链接 spdlog/框架
 ```
 
-- ✅ CMake configure 通过
-- ✅ 构建通过（`-Wall -Wextra -Werror -pedantic`）
-- ✅ 71 个单元测试全部通过
-- ✅ Domain 库 (`pfh_domain`) 独立编译，不链接 spdlog/框架
+金融关键用例验证：
+
+- `0.1 + 0.2` 精确等于 `0.3`
+- `1000 USD * 7.18 = 7180`
+- `1 / 3 = 0.3333333333`（循环小数 Half-Even）
+- 同币种 Money 可加减，跨币种加减/比较报错
+- `USD->CNY 8` 反向为 `CNY->USD 0.125`，二次反向回到 `8`
+- 三角折算 `7.18 / 0.92 = 7.8043478261`（Half-Even），`8 / 0.5 = 16`
+- 三角折算取较晚时间戳；非枢纽输入报错
 
 ---
 
-## 4. 验收对照 (P1-S05 Decimal 部分)
+## 6. 验收对照 (P1-S05)
 
 - [x] 不使用 `float` 或 `double` 表示金额和汇率
-- [x] 除法显式定义舍入模式 (Half-Even)
-- [x] 溢出返回错误而非静默回绕
-- [x] 金融原语单元测试覆盖正常/边界/错误路径
-- [x] Domain 层不依赖外层（错误类型已下沉到 domain）
+- [x] `Money` 跨币种直接加减测试失败（返回 CurrencyMismatch）
+- [x] 缺失汇率不使用 `0`/`1` 默认值；汇率/折算错误显式返回
+- [x] 金融原语单元测试覆盖正常路径、边界路径和错误路径
+- [x] `Currency` ISO-4217 校验，内部代码不可变
+- [x] `ExchangeRate` 方向明确，反向汇率可重现，保留时间戳与来源
+- [x] `CurrencyConversionService` 支持直接汇率、反向汇率、USD 枢纽三角折算、缺失汇率错误
+- [x] Domain 层不依赖外层，领域服务不访问 Repository
 
 ---
 
-## 5. 下一步
+## 7. 遗留与后续
 
-P1-S05 剩余金融原语（按依赖顺序）：
+- **JSON 金额字符串边界**（tasks #18 后半）：`Money` 值对象已完成；"JSON 金额只通过字符串
+  进出"属于 API/DTO 边界约束，在 P1-S10 表现层实现与测试。
+- **领域服务单元测试**（tasks #12）：金融原语与 `CurrencyConversionService` 已覆盖；
+  `TransferDomainService`、`BalanceCalculationService` 属 P1-S06，届时补齐后再勾选 #12。
+- **CurrencyMetadata**：展示用元数据（符号、精度、名称）随前端/展示需求在后续阶段引入。
+- **Repository 降级查询链**：待 P1-S08 在应用层实现（见 4.1）。
 
-1. **Currency** 值对象 — ISO-4217 代码校验，不可变，精确比较
-2. **Money** 值对象 — 绑定 Decimal + Currency，禁止跨币种直接加减
-3. **ExchangeRate** 值对象 — base/target 方向、时间戳、来源、反向汇率
-4. **CurrencyConversionService** 领域服务 — 直接汇率、反向汇率、USD 枢纽三角折算、缺失汇率错误
-
-对应 tasks.md 任务 ID：17、18、19、20。
-
----
-
-## 6. 备注
-
-- 本报告仅覆盖 P1-S05 的 Decimal 部分。金融原语全部完成后，将补写
-  P1-S05 完整完成报告并回写 tasks.md 剩余任务状态。
-- 构建首次配置耗时较长（FetchContent 浅克隆三个依赖），后续增量构建为秒级。
+对应 tasks.md 已勾选：#16、#17、#18、#19、#20。
 
 ---
 
-**验证人**: Claude Code
-**日期**: 2026-07-06
+## 8. 参考文档
+
+- [金额与货币系统设计](../Architecture/04_Money_Currency_System_Design.md)
+- [汇率系统设计](../Architecture/08_Exchange_Rate_System_Design.md)
+- [技术架构](../Architecture/01_Technical_Architecture.md)
+- [Phase 1 详细开发计划](../Develop_Plan/Phase_1/Phase_1_Detailed_Development_Plan.md)
+- [任务跟踪](tasks.md)

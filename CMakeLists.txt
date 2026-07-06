@@ -93,6 +93,10 @@ include_directories(${PFH_INCLUDE_DIR})
 # Domain Layer - Pure business logic, no framework dependencies
 set(PFH_DOMAIN_SOURCES
     src/domain/decimal.cpp
+    src/domain/currency.cpp
+    src/domain/money.cpp
+    src/domain/exchange_rate.cpp
+    src/domain/currency_conversion_service.cpp
 )
 
 # Application Layer - Use cases and application services

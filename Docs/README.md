@@ -34,7 +34,7 @@ Docs/
 ├── Development/                        # 开发过程管理
 │   ├── Phase_1_S01-S03_Delivery_Summary.md # Phase 1 S01-S03 工程骨架交付记录
 │   ├── Phase_1_S04_Completion_Report.md # Phase 1 S04 基础类型与错误模型完成报告
-│   ├── Phase_1_S05_Progress_Report.md  # Phase 1 S05 金融原语进度报告（Decimal）
+│   ├── Phase_1_S05_Progress_Report.md  # Phase 1 S05 金融原语完成报告（Decimal/Currency/Money/ExchangeRate/Conversion）
 │   └── tasks.md                        # 待办任务跟踪
 │
 ├── Develop_Plan/                       # 阶段性开发计划
