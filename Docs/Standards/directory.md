@@ -30,6 +30,8 @@ Docs/
 ├── Develop_Plan/
 │   ├── Overall_Development_Plan.md
 │   ├── Phase_1_Development_Plan.md
+│   ├── Phase_1/
+│   │   └── Phase_1_Detailed_Development_Plan.md
 │   ├── Phase_2_Development_Plan.md
 │   └── Phase_3_Development_Plan.md
 │
@@ -47,4 +49,4 @@ Docs/
 
 1. 上述目录树只描述当前仓库中已经提交的文档。
 2. `Docs/Development/Documents_Optimize_Plan.md` 用于正在设计中的文档优化方案，按需创建。
-3. `Docs/Develop_Plan/` 用于总体与阶段性开发计划，当前包含三阶段总开发计划大纲和 Phase 1、Phase 2、Phase 3 开发计划。
+3. `Docs/Develop_Plan/` 用于总体与阶段性开发计划，当前包含三阶段总开发计划大纲、Phase 1 细化子计划和 Phase 1、Phase 2、Phase 3 开发计划。

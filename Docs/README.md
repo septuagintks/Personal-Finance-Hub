@@ -36,6 +36,8 @@ Docs/
 ├── Develop_Plan/                       # 阶段性开发计划
 │   ├── Overall_Development_Plan.md     # 三阶段总开发计划大纲
 │   ├── Phase_1_Development_Plan.md     # Phase 1 后端最小闭环开发计划
+│   ├── Phase_1/                        # Phase 1 细化子计划
+│   │   └── Phase_1_Detailed_Development_Plan.md # Phase 1 具体开发顺序与测试收尾
 │   ├── Phase_2_Development_Plan.md     # Phase 2 产品体验与稳定性计划
 │   └── Phase_3_Development_Plan.md     # Phase 3 外部接入与预留扩展计划
 │

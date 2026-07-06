@@ -37,6 +37,10 @@ Phase 1 不包含：
 - Redis、RabbitMQ、Kafka 等额外基础设施。
 - 多节点分布式调度优化。
 
+### 1.3 细化子计划
+
+Phase 1 的具体开发顺序、目录结构、实现步骤和测试收尾清单见 [Phase_1/Phase_1_Detailed_Development_Plan.md](Phase_1/Phase_1_Detailed_Development_Plan.md)。
+
 ---
 
 ## 2. 架构定位与职责边界
@@ -73,6 +77,7 @@ Presentation
 交付物：
 
 - `Docs/Develop_Plan/Phase_1_Development_Plan.md`
+- `Docs/Develop_Plan/Phase_1/Phase_1_Detailed_Development_Plan.md`
 - `Docs/Development/tasks.md`
 - 更新后的目录说明文档
 
