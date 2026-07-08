@@ -73,7 +73,7 @@ Status: Active
 
 - [x] 搭建 GoogleTest 单元测试框架，并提供统一测试命令 <!-- id: 10 -->
 - [x] 建立测试数据目录和测试命名规范，覆盖正常路径、边界路径和错误路径 <!-- id: 11 -->
-- [ ] 编写核心金融原语与领域服务的单元测试 <!-- id: 12 -->
+- [x] 编写核心金融原语与领域服务的单元测试 <!-- id: 12 -->
 - [ ] 编写 Repository 集成测试，覆盖 PostgreSQL、事务和 outbox 落库行为 <!-- id: 13 -->
 - [ ] 编写 API 接口集成测试 <!-- id: 14 -->
 - [x] 增加本地质量检查命令，至少覆盖构建、测试和 Markdown 检查 <!-- id: 15 -->
@@ -88,13 +88,13 @@ Status: Active
 
 ### 3.5 领域模型与业务规则 (Domain Models & Rules)
 
-- [ ] 实现 `User` 与 `UserPreference` 领域对象，覆盖默认基准货币与扩展偏好映射 <!-- id: 21 -->
-- [ ] 实现 `Account` 与 `Transaction` 领域实体基础，覆盖账户类型、币种、归档状态、流水类型、负余额和版本字段 <!-- id: 22 -->
-- [ ] 补充 `Transaction` 业务分类规则，区分收入、支出、调整和转账派生流水 <!-- id: 23 -->
-- [ ] 实现 `TransferAggregate` 聚合根，支持三种构造模式、手续费来源和汇兑损益记录 <!-- id: 24 -->
-- [ ] 实现 `TransferDomainService`，只负责纯领域规则，不访问 Repository 或发布事件 <!-- id: 25 -->
-- [ ] 实现 `BalanceCalculationService`，覆盖余额重建、转账排除和调整流水处理 <!-- id: 26 -->
-- [ ] 实现分类 board 校验规则，确保收入、支出和调整类型不能误用分类 <!-- id: 27 -->
+- [x] 实现 `User` 与 `UserPreference` 领域对象，覆盖默认基准货币与扩展偏好映射 <!-- id: 21 -->
+- [x] 实现 `Account` 与 `Transaction` 领域实体基础，覆盖账户类型、币种、归档状态、流水类型、负余额和版本字段 <!-- id: 22 -->
+- [x] 补充 `Transaction` 业务分类规则，区分收入、支出、调整和转账派生流水 <!-- id: 23 -->
+- [x] 实现 `TransferAggregate` 聚合根，支持三种构造模式、手续费来源和汇兑损益记录 <!-- id: 24 -->
+- [x] 实现 `TransferDomainService`，只负责纯领域规则，不访问 Repository 或发布事件 <!-- id: 25 -->
+- [x] 实现 `BalanceCalculationService`，覆盖余额重建、转账排除和调整流水处理 <!-- id: 26 -->
+- [x] 实现分类 board 校验规则，确保收入、支出和调整类型不能误用分类 <!-- id: 27 -->
 
 ### 3.6 持久化与事务 (Repository & Persistence)
 

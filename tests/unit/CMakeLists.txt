@@ -12,6 +12,9 @@ set(UNIT_TEST_SOURCES
     money_test.cpp
     exchange_rate_test.cpp
     currency_conversion_service_test.cpp
+    transfer_domain_service_test.cpp
+    balance_calculation_service_test.cpp
+    category_test.cpp
     config_test.cpp
     logger_test.cpp
 )

@@ -91,6 +91,10 @@ struct DomainError {
         return DomainError(DomainErrorCode::ExchangeRateNotFound,
                            "Exchange rate not found: " + from + " -> " + to);
     }
+
+    [[nodiscard]] static DomainError invalid_operation(std::string details) {
+        return DomainError(DomainErrorCode::InvalidOperation, "Invalid operation: " + details);
+    }
 };
 
 /// @brief Domain result type.

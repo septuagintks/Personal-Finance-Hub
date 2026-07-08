@@ -97,6 +97,8 @@ set(PFH_DOMAIN_SOURCES
     src/domain/money.cpp
     src/domain/exchange_rate.cpp
     src/domain/currency_conversion_service.cpp
+    src/domain/transfer_domain_service.cpp
+    src/domain/balance_calculation_service.cpp
 )
 
 # Application Layer - Use cases and application services
