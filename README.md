@@ -40,10 +40,10 @@ DTO Mapping       Transactions      Services     Scheduler / Outbox
 
 ### 环境要求
 
-- **C++23 兼容编译器**:
-  - MSVC 2022 (17.6+)
-  - GCC 13+
-  - Clang 16+
+- **C++23 兼容编译器**（Phase 1 依赖 `__int128` 扩展实现高精度 Decimal，当前仅支持 GCC/Clang）:
+  - GCC 13+ （推荐）
+  - Clang 18+
+  - MSVC 支持计划在后续阶段（需切换至 Boost.Multiprecision 或自实现 128 位定点数）
 - **CMake** 3.20 或更高版本
 - **PostgreSQL** 16 或更高版本
 - **vcpkg**（推荐用于依赖管理）

@@ -121,7 +121,7 @@ P1-S12 Phase 1 测试收尾与文档回写
 开发内容：
 
 - 根 `CMakeLists.txt` 设置 C++23。
-- 拆分核心库目标，例如 `pfh_domain`、`pfh_application`、`pfh_infrastructure`、`pfh_presentation`。
+- 建立可拆分的架构层目录与编译目标结构（`pfh_domain`、`pfh_application`、`pfh_infrastructure`、`pfh_presentation`），当前阶段优先落地已具备稳定实现内容的目标（如 `pfh_domain`），其余目标按实现进度逐步启用，避免空壳目标噪音。
 - 测试目标单独放在 `tests/`。
 - 引入或预留 Drogon、PostgreSQL client、spdlog、GoogleTest 和必要的 Decimal 支持库。
 - 设置 Debug/Release 构建类型。
@@ -189,7 +189,7 @@ P1-S12 Phase 1 测试收尾与文档回写
   - Half-Even 舍入。
   - 溢出保护。
 - 实现 `Currency`：
-  - ISO-4217 代码校验。
+  - 受控的 ISO-4217 fiat 子集 + 加密货币白名单校验（当前不支持全 ISO-4217 库，按需扩展）。
   - 不可变值对象。
   - 精确比较。
 - 实现 `Money`：

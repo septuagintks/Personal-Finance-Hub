@@ -73,7 +73,9 @@ Architecture: Clean Architecture + Lightweight DDD
 class Decimal
 {
 private:
-    __int128_t value; // 缩放后的 128 位整数（跨平台可使用 boost::multiprecision::int128_t）
+    __int128_t value; // 缩放后的 128 位整数
+                      // Phase 1 使用 GCC/Clang 原生 __int128；
+                      // MSVC 兼容需切换至 boost::multiprecision::int128_t 或自实现。
     int32_t scale;    // 小数点后位数（统一为 10）
 };
 ```
@@ -113,7 +115,8 @@ Decimal 不应该知道任何关于货币的信息。
    - 数据库中汇率字段定义为 `NUMERIC(20,10)` 和 `DECIMAL(30,10)`。
    - 为了统一支持金额（8位小数）和汇率（10位小数）的无损计算，C++ 的 `Decimal` 底层**必须支持至少 10 位小数的精度**。
    - 若使用 `int64_t` 配合 $10^{10}$ 的缩放，其最大值仅约为 $922.33$（922），这对于金额计算是完全不够的。
-   - 因此，**`Decimal` 底层必须使用 `__int128_t`（或 `boost::multiprecision::int128_t`）配合 $10^{10}$ 的缩放**。这可以提供极大的数值范围，同时满足金额和汇率的精度要求，避免在跨币种换算时产生累计本金偏差。
+   - 因此，**`Decimal` 底层必须使用 `__int128_t` 配合 $10^{10}$ 的缩放**。这可以提供极大的数值范围，同时满足金额和汇率的精度要求，避免在跨币种换算时产生累计本金偏差。
+   - **编译器支持备注**：Phase 1 实现采用 GCC/Clang 的原生 `__int128_t`（非 ISO C++ 标准，但广泛支持且性能优异）。MSVC 不支持该扩展，需在后续阶段通过 `boost::multiprecision::int128_t` 或自实现 128 位定点运算实现跨平台兼容。
 
 ---
 
