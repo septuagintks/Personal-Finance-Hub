@@ -223,6 +223,10 @@ P1-S12 Phase 1 测试收尾与文档回写
 开发内容：
 
 - 实现 `User` 与 `UserPreference`。
+- 明确 `User` / `UserPreference` 持久化边界：
+  - `User` 由 `IUserRepository` 负责聚合读取与保存。
+  - `UserPreference` 保留独立 Repository 接口，供偏好单独读取与更新。
+  - 如读取用户聚合时需要偏好，可由应用层通过 `IUserRepository` + `IUserPreferenceRepository` 组合装配，不在 Domain Service 内处理。
 - 实现 `Account`：
   - 账户类型。
   - 币种。
@@ -269,6 +273,8 @@ P1-S12 Phase 1 测试收尾与文档回写
   - transactions。
   - transfer groups 或等价转账关联结构。
   - exchange_rates。
+  - refresh_tokens。
+  - revoked_access_tokens。
   - account_balance_cache。
   - domain_events_outbox。
   - audit logs。
@@ -291,8 +297,14 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 - 实现 `DrogonUnitOfWork`。
 - Repository 写入必须使用同一事务上下文。
-- 实现 `UserRepository` 与 `UserPreferenceRepository`。
+- 实现 `UserRepository` 与 `UserPreferenceRepository`：
+  - `UserRepository` 负责 `User` 聚合持久化。
+  - `UserPreferenceRepository` 负责偏好数据的独立读取与更新。
 - 实现 `AccountRepository` 与 `TransactionRepository`。
+- 实现 `TransferAggregate` 持久化写路径：
+  - 提供 `saveTransfer(const TransferAggregate&)` 或等价边界。
+  - 按聚合约束同时落 `transfer_groups` 与底层派生流水。
+  - 不允许把转账聚合拆成应用层手工拼接的多次普通流水写入。
 - 实现 `ExchangeRateRepository`。
 - 实现余额缓存更新路径。
 - 实现 outbox 写入路径。
@@ -391,10 +403,12 @@ P1-S12 Phase 1 测试收尾与文档回写
 - 跑通领域服务单元测试。
 - 跑通 Repository 集成测试。
 - 跑通 API smoke test。
+- 在 Linux 环境跑通对应构建与测试命令。
 - 检查报表是否排除 Transfer。
 - 检查金额字段是否拒绝 JSON number。
 - 检查危险删除、事务回滚、outbox 和历史汇率关键路径。
 - 回写 `Docs/Development/Tasks.md`。
+- 检查当前 Phase 分支是否满足交付与合并回 `main` 的前置条件。
 - 如实现与设计不一致，先更新架构文档，再调整任务状态。
 
 验收标准：
@@ -404,7 +418,11 @@ P1-S12 Phase 1 测试收尾与文档回写
 - unit tests 通过。
 - repository integration tests 通过。
 - api smoke tests 通过。
+- Linux Debug 构建通过。
+- Linux 对应测试集通过。
 - `git diff --check` 通过。
+- Phase 1 交付总结文档已回写完成。
+- 当前 Phase 分支满足合并回 `main` 的交付门槛。
 - Phase 1 未完成项、风险和延期内容已记录。
 
 ---
