@@ -62,25 +62,34 @@
 
 ### 3.2 优化与修改记录文档命名
 
-- **规则**：已完成的优化与修改记录文档存放在 `Docs/Completed_Modifications/` 目录下。
+- **规则**：已完成的优化与修改记录文档存放在 `Docs/Archive/` 目录下。
 - **命名格式**：
   - 正在更改/设计中的文档：必须以 `_Plan` 作为文件名后缀（如 `Documents_Optimize_Plan.md`），并且存放在 `Docs/Development/` 目录下。
-  - 更改/设计完成并经评审通过的文档：**必须删掉 `_Plan` 后缀**，并归档入 `Docs/Completed_Modifications/` 目录。
+  - 更改/设计完成并经评审通过的文档：**必须删掉 `_Plan` 后缀**，并归档入 `Docs/Archive/` 目录。
   - 历史已归档的修改记录：使用数字递增命名（如 `Documents_Optimize_1.md`）。
 
 ### 3.3 开发阶段交付记录文档命名
 
-- **规则**：开发阶段的阶段性交付、验收与复盘记录在开发过程中存放在 `Docs/Development/` 目录下；对应交付内容验收完成并不再继续维护后，归档入 `Docs/Completed_Modifications/` 目录。
+- **规则**：开发阶段的阶段性交付、验收与复盘记录在开发过程中存放在 `Docs/Development/` 目录下；对应交付内容验收完成并不再继续维护后，归档入 `Docs/Archive/` 目录。
 - **命名格式**：
   - 单个开发步骤交付记录：`Phase_<阶段编号>_S<步骤编号>_Delivery_Summary.md`。
   - 连续多个开发步骤交付记录：`Phase_<阶段编号>_S<起始步骤编号>-S<结束步骤编号>_Delivery_Summary.md`。
-  - 示例：`Phase_1_S01-S03_Delivery_Summary.md`。
+  - 示例：`Phase_1_S04_Delivery_Summary.md`、`Phase_1_S01-S03_Delivery_Summary.md`。
 - **归档规则**：
   - 开发中、待评审或仍需补充的交付记录：保留在 `Docs/Development/` 目录下。
-  - 已验收并完成归档的交付记录：移动到 `Docs/Completed_Modifications/` 目录下，文件名保持不变，以保留 Phase 与步骤范围的可追溯性。
+  - 已验收并完成归档的交付记录：移动到 `Docs/Archive/` 目录下，文件名保持不变，以保留 Phase 与步骤范围的可追溯性。
+  - 单个开发步骤不得写成 `S04-S04` 这类重复范围；只有连续多个步骤才使用 `S<起始>-S<结束>`。
   - 同一 Phase 和步骤范围不得重复创建多个交付记录；确需补充时，应优先修改原文件。
 
-### 3.4 实际目录与规划目录
+### 3.4 开发计划、指南与归档目录命名
+
+- **开发计划目录**：总体和阶段性开发计划统一存放在 `Docs/Development_Plans/` 下。
+- **指南目录**：实时目录结构说明、依赖安装、命令速查等操作型文档统一存放在 `Docs/Guides/` 下。
+- **规范目录**：稳定的格式、命名和架构描述约束统一存放在 `Docs/Standards/` 下。
+- **归档目录**：已完成的文档优化记录、交付记录和其他不再持续维护的阶段性记录统一存放在 `Docs/Archive/` 下。
+- **命名格式**：上述目录中的英文文档名使用 PascalCase 风格，单词间使用下划线连接，例如 `Directory_Guidance.md`、`Dependency_Installation_Guide.md`、`Overall_Development_Plan.md`。
+
+### 3.5 实际目录与规划目录
 
 - **规则**：目录结构文档必须区分“当前仓库已提交内容”和“规划中、按需创建内容”。
 - **规则**：README 中的目录树只列出当前已提交的文件和目录；规划中的目录或文件必须用正文说明，不得写入当前目录树。

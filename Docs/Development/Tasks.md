@@ -29,7 +29,7 @@ Status: Active
 
 ### 2.1 近期顺序
 
-1. 按 `Docs/Develop_Plan/Phase_1/Phase_1_Detailed_Development_Plan.md` 创建目录结构与工程骨架。
+1. 按 `Docs/Development_Plans/Phase_1/Phase_1_Detailed_Development_Plan.md` 创建目录结构与工程骨架。
 2. 搭建 CMake、编译选项、GoogleTest 入口和本地质量命令。
 3. 实现 `Decimal`、`Currency`、`Money` 和 `ExchangeRate`，优先锁定金额与汇率的不可变规则。
 4. 实现最小领域闭环：账户、流水、转账、汇率折算和余额规则。
@@ -37,8 +37,8 @@ Status: Active
 
 ### 2.2 当前前置条件
 
-- Phase 1 开发计划已创建：`Docs/Develop_Plan/Phase_1_Development_Plan.md`。
-- Phase 1 细化子计划已创建：`Docs/Develop_Plan/Phase_1/Phase_1_Detailed_Development_Plan.md`。
+- Phase 1 开发计划已创建：`Docs/Development_Plans/Phase_1_Development_Plan.md`。
+- Phase 1 细化子计划已创建：`Docs/Development_Plans/Phase_1/Phase_1_Detailed_Development_Plan.md`。
 - 进入代码实现前，需要先完成工程骨架和测试入口，否则金融原语缺少回归验证。
 
 ---
@@ -47,9 +47,9 @@ Status: Active
 
 ### 3.1 迭代与计划 (Planning)
 
-- [x] 编写 Phase 1 开发计划文档 `Docs/Develop_Plan/Phase_1_Development_Plan.md` <!-- id: 1 -->
-- [x] 编写 Phase 1 细化子计划文档 `Docs/Develop_Plan/Phase_1/Phase_1_Detailed_Development_Plan.md` <!-- id: 2 -->
-- [ ] 根据 Phase 1 细化子计划评审结果，必要时回写 `Docs/Develop_Plan/Phase_1_Development_Plan.md` <!-- id: 3 -->
+- [x] 编写 Phase 1 开发计划文档 `Docs/Development_Plans/Phase_1_Development_Plan.md` <!-- id: 1 -->
+- [x] 编写 Phase 1 细化子计划文档 `Docs/Development_Plans/Phase_1/Phase_1_Detailed_Development_Plan.md` <!-- id: 2 -->
+- [ ] 根据 Phase 1 细化子计划评审结果，必要时回写 `Docs/Development_Plans/Phase_1_Development_Plan.md` <!-- id: 3 -->
 - [ ] 在 Phase 1 每个里程碑完成后回写任务状态和风险记录，保持计划与实际进度同步 <!-- id: 4 -->
 
 ### 3.2 工程骨架与本地开发 (Project Foundation)

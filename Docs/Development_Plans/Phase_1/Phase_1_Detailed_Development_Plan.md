@@ -394,7 +394,7 @@ P1-S12 Phase 1 测试收尾与文档回写
 - 检查报表是否排除 Transfer。
 - 检查金额字段是否拒绝 JSON number。
 - 检查危险删除、事务回滚、outbox 和历史汇率关键路径。
-- 回写 `Docs/Development/tasks.md`。
+- 回写 `Docs/Development/Tasks.md`。
 - 如实现与设计不一致，先更新架构文档，再调整任务状态。
 
 验收标准：

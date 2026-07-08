@@ -71,14 +71,14 @@ Presentation
 目标：
 
 - 完成 Phase 1 开发计划。
-- 优化 `Docs/Development/tasks.md`，让任务项具备可验证产物。
-- 同步 `Docs/README.md` 与 `Docs/Standards/directory.md`。
+- 优化 `Docs/Development/Tasks.md`，让任务项具备可验证产物。
+- 同步 `Docs/README.md` 与 `Docs/Guides/Directory_Guidance.md`。
 
 交付物：
 
-- `Docs/Develop_Plan/Phase_1_Development_Plan.md`
-- `Docs/Develop_Plan/Phase_1/Phase_1_Detailed_Development_Plan.md`
-- `Docs/Development/tasks.md`
+- `Docs/Development_Plans/Phase_1_Development_Plan.md`
+- `Docs/Development_Plans/Phase_1/Phase_1_Detailed_Development_Plan.md`
+- `Docs/Development/Tasks.md`
 - 更新后的目录说明文档
 
 验收标准：

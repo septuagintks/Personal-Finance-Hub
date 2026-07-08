@@ -135,4 +135,4 @@ Phase 1: 基础闭环与核心正确性
 
 当前需要维护者确认的是：三阶段边界以及 Phase 2、Phase 3 的详细计划是否符合预期。
 
-确认后再决定是否调整 `Docs/Develop_Plan/Phase_1_Development_Plan.md` 或拆分更细的阶段计划。
+确认后再决定是否调整 `Docs/Development_Plans/Phase_1_Development_Plan.md` 或拆分更细的阶段计划。
