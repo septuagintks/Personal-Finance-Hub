@@ -94,6 +94,9 @@ logs/
 test_results/
 *.xml
 
+# Local documentation
+Docs/Guides/Gitignore_Local_Notes.md
+
 # OS
 .DS_Store
 Thumbs.db
