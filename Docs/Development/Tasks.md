@@ -67,7 +67,7 @@ Status: Active
 - [x] 定义应用层错误类型，覆盖 Validation、Unauthorized、Forbidden、NotFound、Conflict、DomainRuleViolation、InfrastructureFailure <!-- id: 9c -->
 - [x] 定义领域层错误类型，不依赖 HTTP 状态码 <!-- id: 9d -->
 - [x] 编写强类型 ID 和错误处理的单元测试 <!-- id: 9e -->
-- [ ] 为 `JsonConfigLoader` 增加环境变量 overlay 支持，关键字段（JWT_SECRET、DB_PASSWORD、DB_HOST 等）优先从环境变量读取，详见 `Docs/Development/Config_Env_Overlay_Design.md` <!-- id: 9f -->
+- [x] 为 `JsonConfigLoader` 增加环境变量 overlay 支持，关键字段（JWT_SECRET、DB_PASSWORD、DB_HOST 等）优先从环境变量读取，详见 `Docs/Development/Config_Env_Overlay_Design.md` <!-- id: 9f -->
 
 ### 3.3 测试与质量门禁 (Testing & Quality Gates)
 

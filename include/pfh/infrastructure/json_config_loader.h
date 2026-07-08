@@ -6,6 +6,7 @@
 #pragma once
 
 #include "pfh/infrastructure/config.h"
+#include <cstdlib>
 #include <expected>
 #include <filesystem>
 #include <fstream>
@@ -111,6 +112,9 @@ public:
                 config.exchange_rate.api_key = exchange_rate.value("api_key", std::string(""));
             }
 
+            // Apply environment variable overrides (higher priority than JSON)
+            apply_env_overrides(config);
+
             // Validate required fields
             if (config.jwt.secret.empty()) {
                 return std::unexpected(Error(application::ErrorCode::ConfigurationError,
@@ -150,6 +154,49 @@ private:
         if (output == "file") return LogOutput::File;
         if (output == "both") return LogOutput::Both;
         return LogOutput::Console;
+    }
+
+    /// @brief Apply environment variable overrides to configuration.
+    ///
+    /// Environment variables take precedence over JSON file values. This allows
+    /// sensitive values (secrets, passwords) to be injected at runtime without
+    /// storing them in version-controlled config files.
+    ///
+    /// Supported environment variables:
+    /// - JWT_SECRET: Overrides jwt.secret
+    /// - DB_HOST: Overrides database.host
+    /// - DB_PORT: Overrides database.port
+    /// - DB_NAME: Overrides database.name
+    /// - DB_USER: Overrides database.user
+    /// - DB_PASSWORD: Overrides database.password
+    ///
+    /// @param config Configuration to apply overrides to (modified in-place).
+    static void apply_env_overrides(AppConfig& config) {
+        // JWT secret
+        if (const char* env_jwt_secret = std::getenv("JWT_SECRET")) {
+            config.jwt.secret = env_jwt_secret;
+        }
+
+        // Database configuration
+        if (const char* env_db_host = std::getenv("DB_HOST")) {
+            config.database.host = env_db_host;
+        }
+        if (const char* env_db_port = std::getenv("DB_PORT")) {
+            try {
+                config.database.port = static_cast<std::uint16_t>(std::stoi(env_db_port));
+            } catch (...) {
+                // Ignore invalid port; keep JSON/default value
+            }
+        }
+        if (const char* env_db_name = std::getenv("DB_NAME")) {
+            config.database.name = env_db_name;
+        }
+        if (const char* env_db_user = std::getenv("DB_USER")) {
+            config.database.user = env_db_user;
+        }
+        if (const char* env_db_password = std::getenv("DB_PASSWORD")) {
+            config.database.password = env_db_password;
+        }
     }
 };
 

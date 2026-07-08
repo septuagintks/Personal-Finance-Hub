@@ -144,4 +144,114 @@ TEST(JsonConfigLoader, WhenLogLevelVariants_ParseCorrectly) {
     }
 }
 
+// ---- Environment variable overrides ----
+
+TEST(JsonConfigLoader, WhenJwtSecretEnvSet_OverridesJsonValue) {
+    TempConfig cfg(kValidConfig);
+
+    // Set environment variable
+    #ifdef _WIN32
+    _putenv_s("JWT_SECRET", "env-secret-123");
+    #else
+    setenv("JWT_SECRET", "env-secret-123", 1);
+    #endif
+
+    JsonConfigLoader loader(cfg.path());
+    auto r = loader.load();
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->jwt.secret, "env-secret-123");
+
+    // Clean up
+    #ifdef _WIN32
+    _putenv_s("JWT_SECRET", "");
+    #else
+    unsetenv("JWT_SECRET");
+    #endif
+}
+
+TEST(JsonConfigLoader, WhenDbEnvVarsSet_OverrideJsonValues) {
+    TempConfig cfg(kValidConfig);
+
+    // Set environment variables
+    #ifdef _WIN32
+    _putenv_s("DB_HOST", "env-db-host");
+    _putenv_s("DB_PORT", "7777");
+    _putenv_s("DB_NAME", "env_db");
+    _putenv_s("DB_USER", "env_user");
+    _putenv_s("DB_PASSWORD", "env_pass");
+    #else
+    setenv("DB_HOST", "env-db-host", 1);
+    setenv("DB_PORT", "7777", 1);
+    setenv("DB_NAME", "env_db", 1);
+    setenv("DB_USER", "env_user", 1);
+    setenv("DB_PASSWORD", "env_pass", 1);
+    #endif
+
+    JsonConfigLoader loader(cfg.path());
+    auto r = loader.load();
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->database.host, "env-db-host");
+    EXPECT_EQ(r->database.port, 7777);
+    EXPECT_EQ(r->database.name, "env_db");
+    EXPECT_EQ(r->database.user, "env_user");
+    EXPECT_EQ(r->database.password, "env_pass");
+
+    // Clean up
+    #ifdef _WIN32
+    _putenv_s("DB_HOST", "");
+    _putenv_s("DB_PORT", "");
+    _putenv_s("DB_NAME", "");
+    _putenv_s("DB_USER", "");
+    _putenv_s("DB_PASSWORD", "");
+    #else
+    unsetenv("DB_HOST");
+    unsetenv("DB_PORT");
+    unsetenv("DB_NAME");
+    unsetenv("DB_USER");
+    unsetenv("DB_PASSWORD");
+    #endif
+}
+
+TEST(JsonConfigLoader, WhenEnvVarNotSet_UsesJsonValue) {
+    TempConfig cfg(kValidConfig);
+
+    // Ensure env vars are not set
+    #ifdef _WIN32
+    _putenv_s("JWT_SECRET", "");
+    _putenv_s("DB_HOST", "");
+    #else
+    unsetenv("JWT_SECRET");
+    unsetenv("DB_HOST");
+    #endif
+
+    JsonConfigLoader loader(cfg.path());
+    auto r = loader.load();
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->jwt.secret, "a-real-secret");  // From JSON
+    EXPECT_EQ(r->database.host, "db");          // From JSON
+}
+
+TEST(JsonConfigLoader, WhenDbPortEnvInvalid_KeepsJsonValue) {
+    TempConfig cfg(kValidConfig);
+
+    // Set invalid port
+    #ifdef _WIN32
+    _putenv_s("DB_PORT", "not-a-number");
+    #else
+    setenv("DB_PORT", "not-a-number", 1);
+    #endif
+
+    JsonConfigLoader loader(cfg.path());
+    auto r = loader.load();
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->database.port, 6543);  // From JSON (env ignored)
+
+    // Clean up
+    #ifdef _WIN32
+    _putenv_s("DB_PORT", "");
+    #else
+    unsetenv("DB_PORT");
+    #endif
+}
+
 } // namespace pfh::test
