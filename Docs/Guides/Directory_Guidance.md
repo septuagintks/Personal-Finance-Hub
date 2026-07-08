@@ -41,6 +41,7 @@ Docs/
 ├── Guides/
 │   ├── Directory_Guidance.md
 │   ├── Dependency_Installation_Guide.md
+│   ├── Linux_Development_Workflow.md
 │   └── Quick_Reference.md
 │
 ├── Standards/

@@ -457,7 +457,7 @@ AccountId account_id(1);
    - 使用 DomainResult 返回错误
 
 2. **Currency** 值对象
-   - ISO-4217 代码校验
+   - 受控支持的 ISO-4217 法币子集与加密货币白名单校验
    - 使用 DomainError 报告错误
 
 3. **Money** 值对象

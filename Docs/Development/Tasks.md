@@ -58,7 +58,7 @@ Status: Active
 - [x] 建立 Clean Architecture 目录边界，区分 `domain`、`application`、`infrastructure`、`presentation` 和 `bootstrap` <!-- id: 6 -->
 - [x] 配置统一编译选项，启用 C++23、警告级别和 Debug/Release 构建类型 <!-- id: 7 -->
 - [x] 接入 `spdlog` 日志基础设施，并约定 TraceId、用户 ID、任务 ID 和错误上下文输出格式 <!-- id: 8 -->
-- [x] 建立配置加载机制，支持数据库连接、JWT 密钥、日志级别和运行环境变量注入 <!-- id: 9 -->
+- [x] 建立配置加载机制，支持数据库连接、JWT 密钥、日志级别和基础运行环境配置加载 <!-- id: 9 -->
 
 ### 3.2.1 基础类型与错误模型 (Foundation Types)
 
@@ -81,7 +81,7 @@ Status: Active
 ### 3.4 核心金融原语 (Core Financial Primitives)
 
 - [x] 实现 `Decimal` 定点数类型，覆盖字符串解析、规范化、比较、运算、Half-Even 舍入和溢出保护 <!-- id: 16 -->
-- [x] 实现 `Currency` 值对象，校验 ISO-4217 代码并保持内部代码不可变 <!-- id: 17 -->
+- [x] 实现 `Currency` 值对象，校验受控支持的 ISO-4217 法币子集与加密货币白名单，并保持内部代码不可变 <!-- id: 17 -->
 - [x] 实现 `Money` 值对象，禁止跨币种直接加减，并确保 JSON 金额只通过字符串进出 <!-- id: 18 -->
 - [x] 实现 `ExchangeRate` 值对象，明确方向、时间戳、反向汇率和汇率精度规则 <!-- id: 19 -->
 - [x] 实现 `CurrencyConversionService`，支持直接汇率、反向汇率、USD 枢纽三角折算和缺失汇率错误 <!-- id: 20 -->

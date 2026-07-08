@@ -248,7 +248,7 @@ HKD
 Requirements:
 
 - Immutable
-- ISO-4217 valid
+- Valid within the project-supported ISO-4217 fiat subset or approved crypto whitelist
 
 ### 6.1 CurrencyMetadata
 

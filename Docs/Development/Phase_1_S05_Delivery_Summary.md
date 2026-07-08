@@ -131,7 +131,7 @@ pfh_domain:      独立静态库，不链接 spdlog/框架
 - [x] `Money` 跨币种直接加减测试失败（返回 CurrencyMismatch）
 - [x] 缺失汇率不使用 `0`/`1` 默认值；汇率/折算错误显式返回
 - [x] 金融原语单元测试覆盖正常路径、边界路径和错误路径
-- [x] `Currency` ISO-4217 校验，内部代码不可变
+- [x] `Currency` 校验受控支持的 ISO-4217 法币子集与加密货币白名单，内部代码不可变
 - [x] `ExchangeRate` 方向明确，反向汇率可重现，保留时间戳与来源
 - [x] `CurrencyConversionService` 支持直接汇率、反向汇率、USD 枢纽三角折算、缺失汇率错误
 - [x] Domain 层不依赖外层，领域服务不访问 Repository

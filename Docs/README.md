@@ -46,6 +46,7 @@ Docs/
 ├── Guides/                             # 实时指南与操作说明
 │   ├── Directory_Guidance.md           # 当前文档目录结构指南
 │   ├── Dependency_Installation_Guide.md # 依赖安装说明
+│   ├── Linux_Development_Workflow.md   # Linux 编译、运行与测试工作流
 │   └── Quick_Reference.md              # 开发者快速参考（构建、测试、命令速查）
 │
 ├── Standards/                          # 团队与文档规范
@@ -89,3 +90,4 @@ Docs/
 1. **阅读顺序推荐**：先看 [Architecture/01_Technical_Architecture.md](Architecture/01_Technical_Architecture.md) 和 [Architecture/07_Workflow_and_Lifecycle_Design.md](Architecture/07_Workflow_and_Lifecycle_Design.md)，再看 [Architecture/04_Money_Currency_System_Design.md](Architecture/04_Money_Currency_System_Design.md)、[Architecture/06_Service_and_Use_Case_Design.md](Architecture/06_Service_and_Use_Case_Design.md)、[Architecture/08_Exchange_Rate_System_Design.md](Architecture/08_Exchange_Rate_System_Design.md)，最后补齐 [Architecture/02_Database_Design.md](Architecture/02_Database_Design.md) 与 [Architecture/05_Repository_and_Persistence_Design.md](Architecture/05_Repository_and_Persistence_Design.md)。
 2. **阶段计划**：进入代码实现前，先阅读 [Development_Plans/Overall_Development_Plan.md](Development_Plans/Overall_Development_Plan.md) 与对应 Phase 开发计划，并以 [Development/Tasks.md](Development/Tasks.md) 跟踪进度。
 3. **开发规范**：新文档或修改文档时，请遵守 [Standards/Documents_Format_Standard.md](Standards/Documents_Format_Standard.md)；目录树变更时，请同步更新 [Guides/Directory_Guidance.md](Guides/Directory_Guidance.md)。
+4. **Linux 工作流**：最终部署目标为 Linux，建议在进入 PostgreSQL、Repository 和 API 阶段前，按 [Guides/Linux_Development_Workflow.md](Guides/Linux_Development_Workflow.md) 建立并持续验证 Linux 构建与测试环境。

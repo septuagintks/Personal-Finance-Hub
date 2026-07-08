@@ -155,9 +155,12 @@ git diff
 
 ### 分支策略
 
-- `main` - 主分支，保持稳定
-- `feature/*` - 功能分支
-- `fix/*` - 修复分支
+- `main` - 稳定分支，只接收已完成完整验证的 Phase 交付
+- `phase/phase-1` - Phase 1 长期开发分支
+- `phase/phase-2` - Phase 2 长期开发分支
+- `phase/phase-3` - Phase 3 长期开发分支
+
+Phase 内的代码、文档、测试和交付总结应先在对应 Phase 分支完成，再统一合并回 `main`。
 
 ---
 
@@ -220,6 +223,7 @@ Presentation → Application → Domain ← Infrastructure
 - [测试策略](../Architecture/16_Testing_Strategy.md)
 - [Phase 1 开发计划](../Development_Plans/Phase_1_Development_Plan.md)
 - [Phase 1 详细计划](../Development_Plans/Phase_1/Phase_1_Detailed_Development_Plan.md)
+- [Linux 开发工作流](Linux_Development_Workflow.md)
 
 ---
 
