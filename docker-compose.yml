@@ -1,0 +1,51 @@
+version: '3.9'
+
+services:
+  # PostgreSQL 16+ database for local development
+  postgres:
+    image: postgres:16-alpine
+    container_name: pfh-postgres
+    environment:
+      POSTGRES_DB: pfh_dev
+      POSTGRES_USER: pfh_user
+      POSTGRES_PASSWORD: ${PFH_DB_PASSWORD:-pfh_dev_password_REPLACE_ME}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pfh_user -d pfh_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pfh-network
+
+  # Flyway migration runner (optional; can also run CLI directly)
+  flyway:
+    image: flyway/flyway:10
+    container_name: pfh-flyway
+    command: migrate
+    environment:
+      FLYWAY_URL: jdbc:postgresql://postgres:5432/pfh_dev
+      FLYWAY_USER: pfh_user
+      FLYWAY_PASSWORD: ${PFH_DB_PASSWORD:-pfh_dev_password_REPLACE_ME}
+      FLYWAY_LOCATIONS: filesystem:/flyway/sql
+      FLYWAY_BASELINE_ON_MIGRATE: "true"
+      FLYWAY_VALIDATE_ON_MIGRATE: "true"
+    volumes:
+      - ./migrations:/flyway/sql
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - pfh-network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  pfh-network:
+    driver: bridge

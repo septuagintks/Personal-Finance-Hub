@@ -1,0 +1,420 @@
+// Personal Finance Hub - Repository Integration Tests (In-Memory)
+// Version: 1.0
+//
+// These tests exercise repository consistency rules without PostgreSQL:
+// user isolation, optimistic locking, balance cache rebuild, append-only
+// exchange rates, historical rate selection, and UnitOfWork commit/rollback
+// with outbox co-commit.
+//
+// When Drogon/PostgreSQL adapters land, the same scenarios should be re-run
+// against a real test database.
+
+#include "pfh/application/persistence/i_unit_of_work.h"
+#include "pfh/domain/events/simple_domain_event.h"
+#include "pfh/domain/repositories/i_account_repository.h"
+#include "pfh/domain/repositories/i_exchange_rate_repository.h"
+#include "pfh/domain/repositories/i_transaction_repository.h"
+#include "pfh/domain/repositories/i_user_preference_repository.h"
+#include "pfh/domain/repositories/i_user_repository.h"
+#include "pfh/domain/transfer_domain_service.h"
+#include "pfh/infrastructure/persistence/in_memory_account_repository.h"
+#include "pfh/infrastructure/persistence/in_memory_exchange_rate_repository.h"
+#include "pfh/infrastructure/persistence/in_memory_store.h"
+#include "pfh/infrastructure/persistence/in_memory_transaction_repository.h"
+#include "pfh/infrastructure/persistence/in_memory_unit_of_work.h"
+#include "pfh/infrastructure/persistence/in_memory_user_repository.h"
+#include "test_support.h"
+#include <gtest/gtest.h>
+#include <memory>
+
+using namespace pfh::domain;
+using namespace pfh::infrastructure;
+using namespace pfh::test;
+
+namespace pfh::test {
+
+class RepositoryIntegrationTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        store_ = std::make_unique<InMemoryStore>();
+        uow_ = std::make_unique<InMemoryUnitOfWork>(*store_);
+        user_repo_ = std::make_unique<InMemoryUserRepository>(*store_);
+        pref_repo_ = std::make_unique<InMemoryUserPreferenceRepository>(*store_);
+        tx_repo_ = std::make_unique<InMemoryTransactionRepository>(*store_);
+        account_repo_ = std::make_unique<InMemoryAccountRepository>(*store_, *tx_repo_);
+        rate_repo_ = std::make_unique<InMemoryExchangeRateRepository>(*store_);
+    }
+
+    std::unique_ptr<InMemoryStore> store_;
+    std::unique_ptr<application::IUnitOfWork> uow_;
+    std::unique_ptr<IUserRepository> user_repo_;
+    std::unique_ptr<IUserPreferenceRepository> pref_repo_;
+    std::unique_ptr<ITransactionRepository> tx_repo_;
+    std::unique_ptr<IAccountRepository> account_repo_;
+    std::unique_ptr<IExchangeRateRepository> rate_repo_;
+
+    // Helper: create user + two accounts in one transaction.
+    struct FixtureIds {
+        UserId user;
+        AccountId cash;
+        AccountId savings;
+    };
+
+    FixtureIds seed_user_with_accounts(const std::string& username = "alice") {
+        FixtureIds ids;
+        auto result = uow_->execute_in_transaction([&](ITransactionContext& tx)
+                                                       -> RepositoryVoidResult {
+            auto uid = user_repo_->create(tx, username, "hash", ccy("USD"));
+            if (!uid) {
+                return std::unexpected(uid.error());
+            }
+            ids.user = *uid;
+
+            Account cash(
+                AccountId{}, // invalid => create
+                ids.user,
+                "Cash Wallet",
+                AccountType::Cash,
+                "wallet",
+                ccy("USD"));
+            auto cash_id = account_repo_->save(tx, cash);
+            if (!cash_id) {
+                return std::unexpected(cash_id.error());
+            }
+            ids.cash = *cash_id;
+
+            Account savings(
+                AccountId{},
+                ids.user,
+                "Savings",
+                AccountType::Savings,
+                "bank",
+                ccy("USD"));
+            auto savings_id = account_repo_->save(tx, savings);
+            if (!savings_id) {
+                return std::unexpected(savings_id.error());
+            }
+            ids.savings = *savings_id;
+            return {};
+        });
+        EXPECT_TRUE(result.has_value()) << result.error().message;
+        return ids;
+    }
+};
+
+// ---- Unit of Work commit / rollback + outbox co-commit ----
+
+TEST_F(RepositoryIntegrationTest, UnitOfWork_WhenActionSucceeds_CommitsBusinessAndOutbox) {
+    auto commit = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
+        auto uid = user_repo_->create(tx, "bob", "hash", ccy("USD"));
+        if (!uid) {
+            return std::unexpected(uid.error());
+        }
+        uow_->register_event(std::make_shared<SimpleDomainEvent>(
+            "UserCreated",
+            "User",
+            uid->to_string(),
+            R"({"username":"bob"})"));
+        return {};
+    });
+    ASSERT_TRUE(commit.has_value());
+    ASSERT_EQ(store_->users.size(), 1u);
+    ASSERT_EQ(store_->outbox.size(), 1u);
+    EXPECT_EQ(store_->outbox[0].event_name, "UserCreated");
+    EXPECT_EQ(store_->outbox[0].status, "pending");
+}
+
+TEST_F(RepositoryIntegrationTest, UnitOfWork_WhenActionFails_RollsBackBusinessAndOutbox) {
+    auto failed = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
+        auto uid = user_repo_->create(tx, "carol", "hash", ccy("USD"));
+        if (!uid) {
+            return std::unexpected(uid.error());
+        }
+        uow_->register_event(std::make_shared<SimpleDomainEvent>(
+            "UserCreated", "User", uid->to_string(), "{}"));
+        return std::unexpected(RepositoryError::validation("forced failure"));
+    });
+    ASSERT_FALSE(failed.has_value());
+    EXPECT_TRUE(store_->users.empty());
+    EXPECT_TRUE(store_->outbox.empty())
+        << "Outbox must not retain rows after rollback";
+}
+
+// ---- User isolation ----
+
+TEST_F(RepositoryIntegrationTest, AccountRepository_WhenQueryingOtherUser_ReturnsNotFound) {
+    auto alice = seed_user_with_accounts("alice");
+    UserId bob;
+    auto bob_create = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
+        auto uid = user_repo_->create(tx, "bob", "hash", ccy("USD"));
+        if (!uid) {
+            return std::unexpected(uid.error());
+        }
+        bob = *uid;
+        return {};
+    });
+    ASSERT_TRUE(bob_create.has_value());
+
+    // Alice's account is invisible to Bob.
+    auto result = account_repo_->find_by_id_for_user(alice.cash, bob);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().status, RepositoryStatus::NotFound);
+}
+
+TEST_F(RepositoryIntegrationTest, TransactionRepository_WhenQueryingByUser_ReturnsOnlyOwnTransactions) {
+    auto alice = seed_user_with_accounts("alice");
+    auto bob = seed_user_with_accounts("bob");
+
+    auto write = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
+        Transaction alice_tx(
+            TransactionId{},
+            alice.user,
+            alice.cash,
+            money("100", "USD"),
+            TransactionType::Income,
+            sample_time(),
+            "Alice salary");
+        auto a = tx_repo_->save_single(tx, alice_tx);
+        if (!a) {
+            return std::unexpected(a.error());
+        }
+
+        Transaction bob_tx(
+            TransactionId{},
+            bob.user,
+            bob.cash,
+            money("50", "USD"),
+            TransactionType::Income,
+            sample_time(),
+            "Bob salary");
+        auto b = tx_repo_->save_single(tx, bob_tx);
+        if (!b) {
+            return std::unexpected(b.error());
+        }
+        return {};
+    });
+    ASSERT_TRUE(write.has_value());
+
+    auto alice_txs = tx_repo_->find_by_user(alice.user);
+    ASSERT_TRUE(alice_txs.has_value());
+    ASSERT_EQ(alice_txs->size(), 1u);
+    EXPECT_EQ(alice_txs->front().user_id(), alice.user);
+    EXPECT_EQ(alice_txs->front().description(), "Alice salary");
+}
+
+// ---- Optimistic locking ----
+
+TEST_F(RepositoryIntegrationTest, AccountRepository_WhenVersionMismatch_ReturnsConflict) {
+    auto ids = seed_user_with_accounts();
+    auto current = account_repo_->find_by_id(ids.cash);
+    ASSERT_TRUE(current.has_value());
+    EXPECT_EQ(current->version(), 1);
+
+    // First update with correct version succeeds and bumps version to 2.
+    auto first = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
+        Account updated(
+            current->id(),
+            current->owner(),
+            "Renamed Cash",
+            current->type(),
+            current->subtype(),
+            current->currency(),
+            current->description(),
+            current->is_archived(),
+            current->archived_at(),
+            current->created_at(),
+            sample_time(),
+            current->version()); // expected current version
+        auto r = account_repo_->save(tx, updated);
+        if (!r) {
+            return std::unexpected(r.error());
+        }
+        return {};
+    });
+    ASSERT_TRUE(first.has_value());
+
+    auto after = account_repo_->find_by_id(ids.cash);
+    ASSERT_TRUE(after.has_value());
+    EXPECT_EQ(after->version(), 2);
+    EXPECT_EQ(after->name(), "Renamed Cash");
+
+    // Stale update with old version fails.
+    auto stale = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
+        Account stale_update(
+            current->id(),
+            current->owner(),
+            "Stale Name",
+            current->type(),
+            current->subtype(),
+            current->currency(),
+            current->description(),
+            current->is_archived(),
+            current->archived_at(),
+            current->created_at(),
+            sample_time(),
+            1); // stale version
+        auto r = account_repo_->save(tx, stale_update);
+        if (!r) {
+            return std::unexpected(r.error());
+        }
+        return {};
+    });
+    ASSERT_FALSE(stale.has_value());
+    EXPECT_EQ(stale.error().status, RepositoryStatus::Conflict);
+}
+
+// ---- Balance cache rebuild ----
+
+TEST_F(RepositoryIntegrationTest, AccountRepository_WhenBalanceCacheMiss_RebuildsFromTransactions) {
+    auto ids = seed_user_with_accounts();
+
+    auto write = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
+        Transaction income(
+            TransactionId{},
+            ids.user,
+            ids.cash,
+            money("1000", "USD"),
+            TransactionType::Income,
+            sample_time(),
+            "Salary");
+        auto a = tx_repo_->save_single(tx, income);
+        if (!a) {
+            return std::unexpected(a.error());
+        }
+
+        Transaction expense(
+            TransactionId{},
+            ids.user,
+            ids.cash,
+            money("250", "USD"),
+            TransactionType::Expense,
+            sample_time(),
+            "Rent");
+        auto b = tx_repo_->save_single(tx, expense);
+        if (!b) {
+            return std::unexpected(b.error());
+        }
+        return {};
+    });
+    ASSERT_TRUE(write.has_value());
+
+    auto snapshot = account_repo_->balance_of(ids.cash);
+    ASSERT_TRUE(snapshot.has_value()) << snapshot.error().message;
+    EXPECT_EQ(snapshot->balance.to_string(), "750 USD");
+
+    // Second call should hit cache (same result).
+    auto again = account_repo_->balance_of(ids.cash);
+    ASSERT_TRUE(again.has_value());
+    EXPECT_EQ(again->balance.to_string(), "750 USD");
+    EXPECT_TRUE(store_->balance_cache.contains(ids.cash.value()));
+}
+
+// ---- Transfer aggregate atomic write ----
+
+TEST_F(RepositoryIntegrationTest, TransactionRepository_WhenSavingTransfer_PersistsGroupAndBothSides) {
+    auto ids = seed_user_with_accounts();
+
+    auto write = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
+        auto aggregate = TransferDomainService::build_from_both_amounts(
+            money("100", "USD"),
+            money("100", "USD"),
+            ids.cash,
+            ids.savings,
+            ids.user,
+            sample_time(),
+            "Internal move",
+            TransferGroupId{});
+        if (!aggregate) {
+            return std::unexpected(RepositoryError::validation(aggregate.error().message));
+        }
+        auto group = tx_repo_->save_transfer(tx, *aggregate);
+        if (!group) {
+            return std::unexpected(group.error());
+        }
+        return {};
+    });
+    ASSERT_TRUE(write.has_value()) << write.error().message;
+
+    EXPECT_EQ(store_->transfer_groups.size(), 1u);
+    auto all = tx_repo_->find_by_user(ids.user);
+    ASSERT_TRUE(all.has_value());
+    ASSERT_EQ(all->size(), 2u);
+    for (const auto& tx : *all) {
+        EXPECT_EQ(tx.type(), TransactionType::Transfer);
+        EXPECT_TRUE(tx.transfer_group_id().has_value());
+        EXPECT_TRUE(tx.transfer_group_id()->is_valid());
+    }
+
+    // Signed amount convention after persistence:
+    // one outgoing (negative) and one incoming (positive).
+    int negative_count = 0;
+    int positive_count = 0;
+    for (const auto& tx : *all) {
+        if (tx.amount().is_negative()) {
+            ++negative_count;
+        } else if (tx.amount().is_positive()) {
+            ++positive_count;
+        }
+    }
+    EXPECT_EQ(negative_count, 1);
+    EXPECT_EQ(positive_count, 1);
+}
+
+// ---- Exchange rate append-only + historical query ----
+
+TEST_F(RepositoryIntegrationTest, ExchangeRateRepository_WhenAppending_NeverOverwritesHistory) {
+    auto write = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
+        auto r1 = rate_repo_->append(tx, rate("USD", "CNY", "7.10", 1000, "ECB"));
+        if (!r1) {
+            return std::unexpected(r1.error());
+        }
+        auto r2 = rate_repo_->append(tx, rate("USD", "CNY", "7.25", 2000, "ECB"));
+        if (!r2) {
+            return std::unexpected(r2.error());
+        }
+        return {};
+    });
+    ASSERT_TRUE(write.has_value());
+    EXPECT_EQ(store_->exchange_rates.size(), 2u);
+
+    auto all = rate_repo_->find_all_for_pair(ccy("USD"), ccy("CNY"));
+    ASSERT_TRUE(all.has_value());
+    ASSERT_EQ(all->size(), 2u);
+}
+
+TEST_F(RepositoryIntegrationTest, ExchangeRateRepository_WhenQueryingHistorical_UsesLatestAtOrBeforeTarget) {
+    auto write = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
+        if (auto r = rate_repo_->append(tx, rate("USD", "CNY", "7.10", 1000)); !r) {
+            return std::unexpected(r.error());
+        }
+        if (auto r = rate_repo_->append(tx, rate("USD", "CNY", "7.20", 2000)); !r) {
+            return std::unexpected(r.error());
+        }
+        if (auto r = rate_repo_->append(tx, rate("USD", "CNY", "7.30", 3000)); !r) {
+            return std::unexpected(r.error());
+        }
+        return {};
+    });
+    ASSERT_TRUE(write.has_value());
+
+    // Target time between second and third snapshot => second rate.
+    auto historical = rate_repo_->find_historical(ccy("USD"), ccy("CNY"), time_at(2500));
+    ASSERT_TRUE(historical.has_value()) << historical.error().message;
+    EXPECT_EQ(historical->rate().to_string(), "7.2");
+
+    auto latest = rate_repo_->find_latest(ccy("USD"), ccy("CNY"));
+    ASSERT_TRUE(latest.has_value());
+    EXPECT_EQ(latest->rate().to_string(), "7.3");
+}
+
+// ---- Preference fallback ----
+
+TEST_F(RepositoryIntegrationTest, UserPreferenceRepository_WhenMissingRow_FallsBackToUserBaseCurrency) {
+    auto ids = seed_user_with_accounts();
+    auto pref = pref_repo_->find_by_user(ids.user);
+    ASSERT_TRUE(pref.has_value()) << pref.error().message;
+    EXPECT_EQ(pref->base_currency().code(), "USD");
+    EXPECT_EQ(pref->locale(), "en-US");
+}
+
+} // namespace pfh::test

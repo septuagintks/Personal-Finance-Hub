@@ -146,14 +146,39 @@ TEST(JsonConfigLoader, WhenLogLevelVariants_ParseCorrectly) {
 
 // ---- Environment variable overrides ----
 
+TEST(JsonConfigLoader, WhenPfhPrefixedEnvSet_OverridesJsonValue) {
+    TempConfig cfg(kValidConfig);
+
+#ifdef _WIN32
+    _putenv_s("PFH_JWT_SECRET", "pfh-prefixed-secret");
+    _putenv_s("JWT_SECRET", "");
+#else
+    setenv("PFH_JWT_SECRET", "pfh-prefixed-secret", 1);
+    unsetenv("JWT_SECRET");
+#endif
+
+    JsonConfigLoader loader(cfg.path());
+    auto r = loader.load();
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->jwt.secret, "pfh-prefixed-secret");
+
+#ifdef _WIN32
+    _putenv_s("PFH_JWT_SECRET", "");
+#else
+    unsetenv("PFH_JWT_SECRET");
+#endif
+}
+
 TEST(JsonConfigLoader, WhenJwtSecretEnvSet_OverridesJsonValue) {
     TempConfig cfg(kValidConfig);
 
     // Set environment variable
     #ifdef _WIN32
     _putenv_s("JWT_SECRET", "env-secret-123");
+    _putenv_s("PFH_JWT_SECRET", "");
     #else
     setenv("JWT_SECRET", "env-secret-123", 1);
+    unsetenv("PFH_JWT_SECRET");
     #endif
 
     JsonConfigLoader loader(cfg.path());

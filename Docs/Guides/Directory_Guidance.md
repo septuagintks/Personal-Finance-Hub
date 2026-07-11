@@ -28,6 +28,9 @@ Docs/
 │   ├── Phase_1_S01-S03_Delivery_Summary.md
 │   ├── Phase_1_S04_Delivery_Summary.md
 │   ├── Phase_1_S05_Delivery_Summary.md
+│   ├── Phase_1_S06_Delivery_Summary.md
+│   ├── Phase_1_S07_Delivery_Summary.md
+│   ├── Phase_1_S08_Delivery_Summary.md
 │   └── Tasks.md
 │
 ├── Development_Plans/
@@ -41,6 +44,7 @@ Docs/
 ├── Guides/
 │   ├── Directory_Guidance.md
 │   ├── Dependency_Installation_Guide.md
+│   ├── Database_Migration_Guide.md
 │   ├── Linux_Development_Workflow.md
 │   └── Quick_Reference.md
 │

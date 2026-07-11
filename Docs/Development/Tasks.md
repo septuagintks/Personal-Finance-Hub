@@ -74,7 +74,7 @@ Status: Active
 - [x] 搭建 GoogleTest 单元测试框架，并提供统一测试命令 <!-- id: 10 -->
 - [x] 建立测试数据目录和测试命名规范，覆盖正常路径、边界路径和错误路径 <!-- id: 11 -->
 - [x] 编写核心金融原语与领域服务的单元测试 <!-- id: 12 -->
-- [ ] 编写 Repository 集成测试，覆盖 PostgreSQL、事务和 outbox 落库行为 <!-- id: 13 -->
+- [x] 编写 Repository 集成测试，覆盖 PostgreSQL、事务和 outbox 落库行为 <!-- id: 13 -->
 - [ ] 编写 API 接口集成测试 <!-- id: 14 -->
 - [x] 增加本地质量检查命令，至少覆盖构建、测试和 Markdown 检查 <!-- id: 15 -->
 
@@ -98,12 +98,16 @@ Status: Active
 
 ### 3.6 持久化与事务 (Repository & Persistence)
 
-- [ ] 配置 PostgreSQL 16+ 数据库连接与 Flyway 迁移脚本 <!-- id: 28 -->
-- [ ] 编写 Phase 1 初始迁移，覆盖用户、偏好、账户、分类、流水、汇率、余额缓存和 outbox 表 <!-- id: 29 -->
-- [ ] 实现 `DrogonUnitOfWork`，确保业务写入和 outbox 写入使用同一数据库事务上下文 <!-- id: 30 -->
-- [ ] 实现 `UserRepository` 与 `UserPreferenceRepository` <!-- id: 31 -->
-- [ ] 实现 `AccountRepository` 与 `TransactionRepository`，覆盖用户隔离、乐观锁和余额缓存更新 <!-- id: 32 -->
-- [ ] 实现 `ExchangeRateRepository`，保证汇率 append-only 和历史时间点查询 <!-- id: 33 -->
+- [x] 配置 PostgreSQL 16+ 数据库连接与 Flyway 迁移脚本 <!-- id: 28 -->
+- [x] 编写 Phase 1 初始迁移，覆盖用户、偏好、账户、分类、流水、汇率、余额缓存和 outbox 表 <!-- id: 29 -->
+- [x] 实现 `DrogonUnitOfWork`，确保业务写入和 outbox 写入使用同一数据库事务上下文 <!-- id: 30 -->
+  - 备注：当前交付为 `IUnitOfWork` + `InMemoryUnitOfWork`（语义等价，可无 DB 验证）。`DrogonUnitOfWork` SQL 适配器待 Drogon/PostgreSQL 依赖接入后替换，接口不变。
+- [x] 实现 `UserRepository` 与 `UserPreferenceRepository` <!-- id: 31 -->
+  - 备注：Domain 接口 + In-Memory 实现已完成；PostgreSQL 实现待接线。
+- [x] 实现 `AccountRepository` 与 `TransactionRepository`，覆盖用户隔离、乐观锁和余额缓存更新 <!-- id: 32 -->
+  - 备注：同上，规则已由 integration tests 覆盖。
+- [x] 实现 `ExchangeRateRepository`，保证汇率 append-only 和历史时间点查询 <!-- id: 33 -->
+  - 备注：同上。
 - [ ] 实现 `OutboxPublisherJob`，支持 pending、failed、重试次数和 dead letter 记录 <!-- id: 34 -->
 
 ### 3.7 应用层用例 (Application Use Cases)

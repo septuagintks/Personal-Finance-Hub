@@ -81,6 +81,7 @@ config/database.json
 config/secrets.json
 .env
 .env.local
+.env.*.local
 
 # Logs (see also *.log above)
 logs/
@@ -89,6 +90,9 @@ logs/
 *.db
 *.sqlite
 *.sqlite3
+*.sql.tmp
+pgdata/
+postgres_data/
 
 # Test results
 test_results/

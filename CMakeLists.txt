@@ -175,7 +175,7 @@ enable_testing()
 add_subdirectory(tests/unit)
 
 # Integration Tests
-# add_subdirectory(tests/integration)
+add_subdirectory(tests/integration)
 
 # API Tests
 # add_subdirectory(tests/api)

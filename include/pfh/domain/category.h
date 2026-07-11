@@ -1,15 +1,14 @@
 // Personal Finance Hub - Category Entity
-// Version: 1.0
+// Version: 1.1
 // C++23
 //
-// Category organizes transactions into income/expense groups. Each category
-// belongs to a "board" (Income, Expense, or Adjustment), and transactions can
-// only use categories from the appropriate board.
+// Category organizes transactions into income/expense boards. Board values
+// match PostgreSQL category_board enum: 'income' | 'expense' only.
 //
-// Key rules:
+// Key rules (aligned with 02_Database_Design.md):
 // - Income transactions can only use Income board categories.
 // - Expense transactions can only use Expense board categories.
-// - Adjustment transactions can only use Adjustment board categories.
+// - Fee-like Adjustment transactions use Expense board categories.
 // - Transfer transactions do NOT use categories (transfer_group_id instead).
 
 #pragma once
@@ -24,18 +23,13 @@
 
 namespace pfh::domain {
 
-/// @brief Category board — determines which transaction types can use this category.
+/// @brief Category board — matches DB enum category_board (income/expense only).
 enum class CategoryBoard {
-    Income,     ///< For Income transactions (salary, interest, refunds).
-    Expense,    ///< For Expense transactions (rent, groceries, entertainment).
-    Adjustment  ///< For Adjustment transactions (fees, rebates, FX loss/gain).
+    Income,  ///< For Income transactions (salary, interest, refunds).
+    Expense  ///< For Expense and fee-like Adjustment transactions.
 };
 
 /// @brief Category entity — organizes transactions.
-///
-/// Categories are user-specific (each user has their own category tree) and
-/// belong to a fixed board (Income/Expense/Adjustment). The board determines
-/// which transaction types can reference the category.
 class Category {
 public:
     using TimePoint = std::chrono::system_clock::time_point;
@@ -71,37 +65,20 @@ public:
     [[nodiscard]] TimePoint created_at() const noexcept { return created_at_; }
 
     /// @brief Check if this category can be used by a given transaction type.
-    ///
-    /// Rules:
-    /// - Income transactions require Income board categories.
-    /// - Expense transactions require Expense board categories.
-    /// - Adjustment transactions require Adjustment board categories.
-    /// - Transfer transactions do NOT use categories (this check will fail).
-    ///
-    /// @param tx_type The transaction type attempting to use this category.
-    /// @return true if the category board matches the transaction type.
     [[nodiscard]] bool is_valid_for(TransactionType tx_type) const noexcept {
         switch (tx_type) {
         case TransactionType::Income:
             return board_ == CategoryBoard::Income;
         case TransactionType::Expense:
-            return board_ == CategoryBoard::Expense;
         case TransactionType::Adjustment:
-            return board_ == CategoryBoard::Adjustment;
+            return board_ == CategoryBoard::Expense;
         case TransactionType::Transfer:
-            return false;  // Transfers do not use categories.
+            return false;
         }
         return false;
     }
 
-    /// @brief Validate that a category can be assigned to a transaction.
-    ///
-    /// This is a domain validation rule enforced when creating or updating a
-    /// transaction with a category.
-    ///
-    /// @param tx_type The transaction type.
-    /// @param category_board The board of the category being assigned.
-    /// @return Success (empty) or DomainError if the board mismatch is detected.
+    /// @brief Validate that a category board can be assigned to a transaction type.
     [[nodiscard]] static DomainVoidResult validate_category_board(
         TransactionType tx_type,
         CategoryBoard category_board) {
@@ -112,12 +89,8 @@ public:
             category_board);
 
         if (!dummy_category.is_valid_for(tx_type)) {
-            std::string board_name;
-            switch (category_board) {
-            case CategoryBoard::Income: board_name = "Income"; break;
-            case CategoryBoard::Expense: board_name = "Expense"; break;
-            case CategoryBoard::Adjustment: board_name = "Adjustment"; break;
-            }
+            const std::string board_name =
+                (category_board == CategoryBoard::Income) ? "Income" : "Expense";
 
             std::string tx_type_name;
             switch (tx_type) {
@@ -128,7 +101,8 @@ public:
             }
 
             return std::unexpected(DomainError::invalid_operation(
-                tx_type_name + " transactions cannot use " + board_name + " board categories"));
+                tx_type_name + " transactions cannot use " + board_name +
+                " board categories"));
         }
 
         return {};

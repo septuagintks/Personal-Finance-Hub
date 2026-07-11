@@ -48,8 +48,17 @@ enum class TransactionType {
 /// - Transfer transactions are always created in pairs (outgoing + incoming),
 ///   linked by transfer_group_id, and both marked as TransactionType::Transfer.
 /// - Income/Expense/Adjustment are standalone.
-/// - Amount sign: always stored as positive magnitude; the TransactionType and
-///   account context determine the balance direction.
+/// - Amount sign conventions:
+///   * Domain construction (TransferDomainService) uses positive magnitudes and
+///     encodes direction via roles (outgoing/incoming).
+///   * Persistence (Repository) stores signed amounts matching PostgreSQL:
+///     income > 0, expense < 0, transfer outgoing < 0, transfer incoming > 0,
+///     adjustment signed by business meaning.
+///   * BalanceCalculationService:
+///     - Income: +amount (expects positive magnitude or positive signed)
+///     - Expense: -amount when magnitude positive
+///     - Transfer: use amount as signed (after repository mapping)
+///     - Adjustment: fee-default negate when positive
 /// - Soft deletion: deleted_at is set rather than removing the record.
 class Transaction {
 public:

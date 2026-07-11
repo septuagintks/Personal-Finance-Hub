@@ -32,7 +32,10 @@ Docs/
 ├── Development/                        # 开发过程管理
 │   ├── Phase_1_S01-S03_Delivery_Summary.md # Phase 1 S01-S03 工程骨架交付记录
 │   ├── Phase_1_S04_Delivery_Summary.md # Phase 1 S04 基础类型与错误模型交付记录
-│   ├── Phase_1_S05_Delivery_Summary.md # Phase 1 S05 金融原语交付记录（Decimal/Currency/Money/ExchangeRate/Conversion）
+│   ├── Phase_1_S05_Delivery_Summary.md # Phase 1 S05 金融原语交付记录
+│   ├── Phase_1_S06_Delivery_Summary.md # Phase 1 S06 领域模型与领域服务交付记录
+│   ├── Phase_1_S07_Delivery_Summary.md # Phase 1 S07 数据库迁移与持久化基础交付记录
+│   ├── Phase_1_S08_Delivery_Summary.md # Phase 1 S08 Repository 与 Unit of Work 交付记录
 │   └── Tasks.md                        # 待办任务跟踪
 │
 ├── Development_Plans/                  # 阶段性开发计划
@@ -46,6 +49,7 @@ Docs/
 ├── Guides/                             # 实时指南与操作说明
 │   ├── Directory_Guidance.md           # 当前文档目录结构指南
 │   ├── Dependency_Installation_Guide.md # 依赖安装说明
+│   ├── Database_Migration_Guide.md     # 数据库迁移操作指南（Flyway）
 │   ├── Linux_Development_Workflow.md   # Linux 编译、运行与测试工作流
 │   └── Quick_Reference.md              # 开发者快速参考（构建、测试、命令速查）
 │
