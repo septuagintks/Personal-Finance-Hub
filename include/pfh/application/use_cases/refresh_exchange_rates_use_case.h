@@ -1,0 +1,116 @@
+// Personal Finance Hub - RefreshExchangeRatesUseCase
+// Version: 1.0
+// C++23
+//
+// Pulls external rates (provider port), appends historical snapshots, and
+// degrades gracefully when provider fails (no throw; returns degraded result).
+
+#pragma once
+
+#include "pfh/application/dto.h"
+#include "pfh/application/error.h"
+#include "pfh/application/error_mapping.h"
+#include "pfh/application/persistence/i_unit_of_work.h"
+#include "pfh/application/ports/i_exchange_rate_provider.h"
+#include "pfh/domain/events/simple_domain_event.h"
+#include "pfh/domain/repositories/i_account_repository.h"
+#include "pfh/domain/repositories/i_exchange_rate_repository.h"
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace pfh::application {
+
+class RefreshExchangeRatesUseCase {
+public:
+    RefreshExchangeRatesUseCase(
+        domain::IAccountRepository& accounts,
+        domain::IExchangeRateRepository& rates,
+        IExchangeRateProvider& provider,
+        IUnitOfWork& uow)
+        : accounts_(accounts), rates_(rates), provider_(provider), uow_(uow) {}
+
+    [[nodiscard]] Result<RefreshExchangeRatesResultDto> execute(
+        const RefreshExchangeRatesCommand& cmd = {}) {
+        auto pivot = domain::Currency::create("USD");
+        if (!pivot) {
+            return err(from_domain(pivot.error()));
+        }
+
+        std::vector<domain::Currency> targets;
+        if (!cmd.target_currency_codes.empty()) {
+            for (const auto& code : cmd.target_currency_codes) {
+                auto c = domain::Currency::create(code);
+                if (!c) {
+                    return err(from_domain(c.error()));
+                }
+                if (!(*c == *pivot)) {
+                    targets.push_back(*c);
+                }
+            }
+        } else {
+            auto active = accounts_.find_active_currencies();
+            if (!active) {
+                return err(from_repository(active.error()));
+            }
+            for (const auto& c : *active) {
+                if (!(c == *pivot)) {
+                    targets.push_back(c);
+                }
+            }
+        }
+
+        if (targets.empty()) {
+            RefreshExchangeRatesResultDto dto;
+            dto.appended_count = 0;
+            dto.degraded = false;
+            dto.message = "No target currencies to refresh";
+            return dto;
+        }
+
+        auto fetched = provider_.fetch_latest(*pivot, targets);
+        if (!fetched) {
+            // Degrade: do not fail hard; leave historical rates in place.
+            RefreshExchangeRatesResultDto dto;
+            dto.appended_count = 0;
+            dto.degraded = true;
+            dto.message = "Provider unavailable; using historical rates";
+            return dto;
+        }
+
+        std::size_t appended = 0;
+        auto write = uow_.execute_in_transaction(
+            [&](domain::ITransactionContext& tx) -> domain::RepositoryVoidResult {
+                for (const auto& rate : *fetched) {
+                    auto id = rates_.append(tx, rate);
+                    if (!id) {
+                        return std::unexpected(id.error());
+                    }
+                    ++appended;
+                }
+                uow_.register_event(std::make_shared<domain::SimpleDomainEvent>(
+                    "ExchangeRateRefreshed",
+                    "ExchangeRate",
+                    "bulk",
+                    "{\"count\":" + std::to_string(appended) + "}"));
+                return {};
+            });
+        if (!write) {
+            return err(from_repository(write.error()));
+        }
+
+        RefreshExchangeRatesResultDto dto;
+        dto.appended_count = appended;
+        dto.degraded = false;
+        dto.message = "Refreshed " + std::to_string(appended) + " rates";
+        return dto;
+    }
+
+private:
+    domain::IAccountRepository& accounts_;
+    domain::IExchangeRateRepository& rates_;
+    IExchangeRateProvider& provider_;
+    IUnitOfWork& uow_;
+};
+
+} // namespace pfh::application

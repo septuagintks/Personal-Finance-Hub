@@ -1,0 +1,129 @@
+// Personal Finance Hub - Application DTOs
+// Version: 1.0
+// C++23
+//
+// API-facing DTOs. Amounts are always strings at the application boundary.
+
+#pragma once
+
+#include "pfh/domain/account.h"
+#include "pfh/domain/money.h"
+#include "pfh/domain/transaction.h"
+#include "pfh/domain/user.h"
+#include <chrono>
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <vector>
+
+namespace pfh::application {
+
+struct AccountDto {
+    domain::AccountId id;
+    domain::UserId owner;
+    std::string name;
+    domain::AccountType type;
+    std::string subtype;
+    domain::AccountCategory category;
+    std::string currency_code;
+    std::string description;
+    bool is_archived = false;
+    std::int32_t version = 1;
+};
+
+struct BalanceDto {
+    domain::AccountId account_id;
+    std::string currency_code;
+    std::string amount; // string, never float/double
+};
+
+struct TransactionDto {
+    domain::TransactionId id;
+    domain::UserId user_id;
+    domain::AccountId account_id;
+    std::string currency_code;
+    std::string amount; // signed string amount as stored
+    domain::TransactionType type;
+    std::string description;
+    std::optional<domain::CategoryId> category_id;
+    std::optional<domain::TransferGroupId> transfer_group_id;
+    std::chrono::system_clock::time_point occurred_at{};
+};
+
+struct CreateTransactionCommand {
+    domain::UserId user_id;
+    domain::AccountId account_id;
+    domain::TransactionType type = domain::TransactionType::Expense;
+    std::string amount; // string input
+    std::string currency_code;
+    std::string description;
+    std::optional<domain::CategoryId> category_id;
+    std::chrono::system_clock::time_point occurred_at{};
+};
+
+struct DeleteTransactionCommand {
+    domain::UserId user_id;
+    domain::TransactionId transaction_id;
+    std::chrono::system_clock::time_point deleted_at{};
+};
+
+enum class TransferInputMode {
+    OutgoingAndRate,
+    BothAmounts,
+    IncomingAndRate
+};
+
+struct CreateTransferCommand {
+    domain::UserId user_id;
+    domain::AccountId source_account_id;
+    domain::AccountId target_account_id;
+    TransferInputMode mode = TransferInputMode::BothAmounts;
+    std::string outgoing_amount; // optional depending on mode
+    std::string incoming_amount; // optional depending on mode
+    std::string rate;            // optional depending on mode
+    std::string description;
+    std::chrono::system_clock::time_point occurred_at{};
+};
+
+struct TransferResultDto {
+    domain::TransferGroupId transfer_group_id;
+    domain::TransactionId outgoing_transaction_id;
+    domain::TransactionId incoming_transaction_id;
+    std::string outgoing_amount;
+    std::string incoming_amount;
+    std::optional<std::string> rate;
+};
+
+struct CashFlowDto {
+    std::string currency_code;
+    std::string income_total;
+    std::string expense_total;
+    std::string net_total;
+};
+
+struct NetWorthDto {
+    std::string currency_code;
+    std::string total;
+};
+
+struct DashboardSummaryDto {
+    std::string currency_code;
+    std::string net_worth;
+    std::string income_total;
+    std::string expense_total;
+    std::string cash_flow_net;
+    std::size_t account_count = 0;
+};
+
+struct RefreshExchangeRatesCommand {
+    // Optional target currencies; empty => use active account currencies.
+    std::vector<std::string> target_currency_codes;
+};
+
+struct RefreshExchangeRatesResultDto {
+    std::size_t appended_count = 0;
+    bool degraded = false;
+    std::string message;
+};
+
+} // namespace pfh::application

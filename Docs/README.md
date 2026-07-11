@@ -36,6 +36,7 @@ Docs/
 │   ├── Phase_1_S06_Delivery_Summary.md # Phase 1 S06 领域模型与领域服务交付记录
 │   ├── Phase_1_S07_Delivery_Summary.md # Phase 1 S07 数据库迁移与持久化基础交付记录
 │   ├── Phase_1_S08_Delivery_Summary.md # Phase 1 S08 Repository 与 Unit of Work 交付记录
+│   ├── Phase_1_S09_Delivery_Summary.md # Phase 1 S09 Application Use Cases 交付记录
 │   └── Tasks.md                        # 待办任务跟踪
 │
 ├── Development_Plans/                  # 阶段性开发计划
