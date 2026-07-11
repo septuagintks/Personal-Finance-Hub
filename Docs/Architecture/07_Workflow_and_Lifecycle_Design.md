@@ -88,11 +88,10 @@ Architecture: Clean Architecture + Lightweight DDD
 6. [Use Case] 开启 uow->executeInTransaction():
 
 7.   [Repository/Infra] (事务内)
-     a. 生成 UUID 作为 transfer_group_id。
-     b. INSERT INTO transfer_groups (id, mode, rate) VALUES (uuid, 2, 7.18).
-     c. INSERT INTO transactions (..., type='transfer', amount=-1000, transfer_group_id=uuid).
-     d. INSERT INTO transactions (..., type='transfer', amount=7180, transfer_group_id=uuid).
-     e. INSERT INTO transactions (..., type='adjustment', amount=-10, category='FEE').
+     a. INSERT INTO transfer_groups (user_id, mode, rate) —— id 由 BIGSERIAL 序列分配为 gid。
+     b. INSERT INTO transactions (..., type='transfer', amount=-1000, transfer_group_id=gid).
+     c. INSERT INTO transactions (..., type='transfer', amount=7180, transfer_group_id=gid).
+     d. INSERT INTO transactions (..., type='adjustment', amount=-10, category='FEE').
    f. 将 TransferCompletedEvent 写入 `domain_events_outbox`（同一事务）。
    g. 更新 account_balance_cache (USD 扣 1010，CNY 增 7180) 或登记缓存失效事件。
 

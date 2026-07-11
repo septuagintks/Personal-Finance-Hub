@@ -1,7 +1,7 @@
 # Phase 1 S08 Repository 与 Unit of Work - 交付记录
 
-**完成日期**: 2026-07-12  
-**阶段**: P1-S08 Repository 与 Unit of Work  
+**完成日期**: 2026-07-12
+**阶段**: P1-S08 Repository 与 Unit of Work
 **状态**: ✅ 接口 + In-Memory 语义实现 + 集成测试通过；Drogon/PostgreSQL 适配器待接线
 
 ---

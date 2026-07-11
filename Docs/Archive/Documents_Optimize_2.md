@@ -1,8 +1,8 @@
 # Personal Finance Hub (PFH) 架构与设计文档优化方案
 
-Version: 1.0  
-Backend: C++23  
-Architecture: Clean Architecture + Lightweight DDD  
+Version: 1.0
+Backend: C++23
+Architecture: Clean Architecture + Lightweight DDD
 Status: Approved
 
 ---

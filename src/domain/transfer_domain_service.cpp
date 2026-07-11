@@ -29,11 +29,10 @@ namespace {
         transfer_group_id);
 }
 
-/// @brief Generate a unique TransactionId (placeholder; real impl uses DB sequence).
-[[nodiscard]] TransactionId generate_transaction_id() {
-    static std::int64_t counter = 1000;
-    return TransactionId(++counter);
-}
+// NOTE: The domain service must NOT generate persistence IDs. It builds
+// transactions with unassigned (invalid) ids; the repository / DB sequence
+// assigns the real TransactionId and TransferGroupId at save time. This avoids
+// non-atomic counters, restart resets, and collisions with existing sequences.
 
 } // namespace
 
@@ -61,7 +60,7 @@ DomainResult<TransferAggregate> TransferDomainService::build_from_outgoing_and_r
 
     // Build the two transaction sides.
     auto outgoing_tx = make_transfer_transaction(
-        generate_transaction_id(),
+        TransactionId{},  // unassigned; repository assigns real id
         user_id,
         source_account,
         outgoing_amount,
@@ -70,7 +69,7 @@ DomainResult<TransferAggregate> TransferDomainService::build_from_outgoing_and_r
         transfer_group_id);
 
     auto incoming_tx = make_transfer_transaction(
-        generate_transaction_id(),
+        TransactionId{},  // unassigned; repository assigns real id
         user_id,
         target_account,
         *incoming_result,
@@ -131,7 +130,7 @@ DomainResult<TransferAggregate> TransferDomainService::build_from_both_amounts(
 
     // Build the two transaction sides.
     auto outgoing_tx = make_transfer_transaction(
-        generate_transaction_id(),
+        TransactionId{},  // unassigned; repository assigns real id
         user_id,
         source_account,
         outgoing_amount,
@@ -140,7 +139,7 @@ DomainResult<TransferAggregate> TransferDomainService::build_from_both_amounts(
         transfer_group_id);
 
     auto incoming_tx = make_transfer_transaction(
-        generate_transaction_id(),
+        TransactionId{},  // unassigned; repository assigns real id
         user_id,
         target_account,
         incoming_amount,
@@ -199,7 +198,7 @@ DomainResult<TransferAggregate> TransferDomainService::build_from_incoming_and_r
 
     // Build the two transaction sides using the recomputed incoming amount.
     auto outgoing_tx = make_transfer_transaction(
-        generate_transaction_id(),
+        TransactionId{},  // unassigned; repository assigns real id
         user_id,
         source_account,
         *outgoing_result,
@@ -208,7 +207,7 @@ DomainResult<TransferAggregate> TransferDomainService::build_from_incoming_and_r
         transfer_group_id);
 
     auto incoming_tx = make_transfer_transaction(
-        generate_transaction_id(),
+        TransactionId{},  // unassigned; repository assigns real id
         user_id,
         target_account,
         *recomputed_incoming,  // Use recomputed amount for consistency

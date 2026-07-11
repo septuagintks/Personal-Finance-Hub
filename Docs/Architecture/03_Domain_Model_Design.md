@@ -1,7 +1,7 @@
 # Personal Finance Hub - Domain Model Design
 
-Version: 2.0  
-Backend: C++23  
+Version: 2.0
+Backend: C++23
 Architecture: Clean Architecture + Lightweight DDD
 
 ---
@@ -165,7 +165,7 @@ using AccountId       = StrongId<AccountIdTag>;
 using TransactionId   = StrongId<TransactionIdTag>;
 using CategoryId      = StrongId<CategoryIdTag>;
 using TagId           = StrongId<TagIdTag>;
-using TransferGroupId = StrongId<TransferGroupIdTag, Uuid>;
+using TransferGroupId = StrongId<TransferGroupIdTag>; // BIGINT, DB-assigned (not UUID)
 ```
 
 ### 4.2 Entities

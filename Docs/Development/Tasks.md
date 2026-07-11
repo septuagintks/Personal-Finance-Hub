@@ -157,12 +157,14 @@ Status: Active
 
 ## 5. 未来待解决任务 (Deferred / Follow-up)
 
-来源：S01–S09 全量设计一致性 review。以下为已识别但尚未落地的偏差与缺口，按优先级排列。已在本轮立即修复的项不在此列（分类 board 校验接入 CreateTransaction、`Account.version` 统一为 `int64_t`）。
+来源：S01–S09 全量设计一致性 review。以下为已识别但尚未落地的偏差与缺口，按优先级排列。已在本轮立即修复的项不在此列（分类 board 校验接入 CreateTransaction、`Account.version` 统一为 `int64_t`、迁移层多租户复合外键 + RLS、转账 ID 模型统一为 `BIGSERIAL` 并移除领域层静态 ID 生成器）。
 
 ### 5.1 高优先级（进入生产写路径前必须解决）
 
 - [ ] 接入真实持久化：实现 `DrogonUnitOfWork` 与 PostgreSQL 版 `*RepositoryImpl`，替换现有 In-Memory 实现；用同一批 integration scenarios 对真实测试库复跑 <!-- id: 46 -->
   - 说明：当前 S08 交付为「Domain 接口 + In-Memory 语义等价实现」，规则可测但未连库；#30–#33 的 Drogon 适配器部分尚未完成。
+  - RLS 依赖：真实仓储在鉴权后必须对数据库连接执行 `SET app.current_user_id = '<uid>'`（每请求/每事务），否则 fail-closed 策略会使查询返回空。连接池复用时须在归还前 `RESET`。
+  - In-Memory 模型仍缺 `transaction_tag_relations.user_id`、`account_balance_cache.user_id` 等新增列的对应；接 SQL 时以迁移 schema 为准。
 - [ ] 实现 `ICategoryRepository`，由仓储解析分类 board，替换 `CreateTransactionCommand.category_board` 的显式传入方式 <!-- id: 47 -->
   - 说明：本轮已用「命令显式携带 board + 用例校验」堵住规则缺口；长期应由 Category 持久化解析 board，避免依赖调用方传值。
 - [ ] 实现转账手续费 / 汇兑损益路径：`CreateTransferCommand` 支持 `FeeSource` 与手续费金额，用例构造独立 `Adjustment` 流水，并测试「手续费不误计入 income/expense」 <!-- id: 48 -->

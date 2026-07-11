@@ -1,8 +1,8 @@
 # Personal Finance Hub - Documents Optimize 1
 
-Version: 1.0  
-Backend: C++23  
-Architecture: Clean Architecture + Lightweight DDD  
+Version: 1.0
+Backend: C++23
+Architecture: Clean Architecture + Lightweight DDD
 Status: Approved
 
 ---

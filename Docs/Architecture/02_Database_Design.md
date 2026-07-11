@@ -1,8 +1,8 @@
 # Personal Finance Hub - Database Design
 
-Version: 1.0  
-Backend: C++23  
-Presentation: Drogon  
+Version: 1.0
+Backend: C++23
+Presentation: Drogon
 Database: PostgreSQL 16+
 
 ---
@@ -452,7 +452,7 @@ id BIGSERIAL PRIMARY KEY,
 
     description TEXT,
 
-    transfer_group_id UUID REFERENCES transfer_groups(id),
+    transfer_group_id BIGINT REFERENCES transfer_groups(id),
 
     deleted_at TIMESTAMPTZ,
 
@@ -518,7 +518,7 @@ Incoming Transaction:
 
 Bind using:
 
-transfer_group_id (UUID) REFERENCES transfer_groups(id)
+transfer_group_id (BIGINT) REFERENCES transfer_groups(id)
 
 转账两端都必须使用 `transfer`。
 不得用 `expense` 表示出账端，也不得用 `income` 表示入账端。
@@ -686,15 +686,19 @@ CHECK (precision >= 0 AND precision <= 12)
 
 ```sql
 CREATE TABLE transfer_groups (
-    id UUID PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id),
     created_at TIMESTAMPTZ NOT NULL,
     note TEXT,
     transfer_mode SMALLINT NOT NULL,
     exchange_rate NUMERIC(30,10),
     exchange_rate_provider VARCHAR(64),
-    exchange_rate_snapshot_time TIMESTAMPTZ
+    exchange_rate_snapshot_time TIMESTAMPTZ,
+    CONSTRAINT uq_transfer_groups_id_user UNIQUE (id, user_id)
 );
 ```
+
+> ID 模型说明：`transfer_groups.id` 使用 `BIGSERIAL`（与全代码库的 `TypedId<int64>` 一致），由 DB 序列在 save 时分配；领域层不生成持久化 ID。早期设计曾计划使用 UUID（客户端预生成），Phase 1 统一为 BIGSERIAL 以降低类型映射复杂度。
 
 transfer_mode:
 
@@ -1276,7 +1280,7 @@ CREATE TABLE transactions (
     amount NUMERIC(20,8) NOT NULL,
     currency_code VARCHAR(10) NOT NULL,
     description TEXT,
-    transfer_group_id UUID,
+    transfer_group_id BIGINT,
     deleted_at TIMESTAMPTZ,
     transaction_time TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

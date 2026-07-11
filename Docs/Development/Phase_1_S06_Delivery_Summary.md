@@ -1,7 +1,7 @@
 # Phase 1 S06 领域模型与领域服务 - 交付报告
 
-**阶段**: P1-S06 领域模型与领域服务  
-**状态**: ✅ 完成  
+**阶段**: P1-S06 领域模型与领域服务
+**状态**: ✅ 完成
 **完成日期**: 2026-07-09
 
 ---
@@ -74,14 +74,14 @@
 
 **三种构造模式**：
 
-1. **Mode 1: Outgoing + Rate => Incoming**  
+1. **Mode 1: Outgoing + Rate => Incoming**
    用户指定源金额和汇率，计算目标金额。
 
-2. **Mode 2: Outgoing + Incoming => Rate**  
+2. **Mode 2: Outgoing + Incoming => Rate**
    用户指定两端金额，推导隐含汇率（跨币种）或验证匹配（同币种）。
 
-3. **Mode 3: Incoming + Rate => Outgoing**  
-   用户指定目标金额和汇率，反向计算源金额。  
+3. **Mode 3: Incoming + Rate => Outgoing**
+   用户指定目标金额和汇率，反向计算源金额。
    **关键设计**：使用 inverse rate 计算 outgoing 后，重新用 forward rate 计算 incoming，消除往返舍入误差，确保验证通过。
 
 **验证规则**：
@@ -140,11 +140,13 @@
 
 **验证方式**：代码层面无 IRepository 参数，无事务 API 调用，无事件发布器依赖。
 
-### 4.3 TransferGroupId 占位设计
+### 4.3 TransferGroupId 类型
 
-**当前实现**：使用 `TypedId<TransferGroupIdTag>` (int64)，实际持久化时应为 UUID。
+**当前实现**：使用 `TypedId<TransferGroupIdTag>` (int64)。
 
-**原因**：Phase 1 聚焦领域逻辑，UUID 生成与序列化留待 S07（持久化层）引入。
+**后续决定（review 修订）**：`transfer_groups.id` 统一为 `BIGSERIAL`（与全代码库
+`TypedId<int64>` 一致），不再采用 UUID。DB 序列在 save 时分配 id，领域层不生成持久化 ID。
+架构文档 02/03/07 已同步。
 
 ### 4.4 BalanceCalculationService 的 Transfer 方向
 
@@ -209,7 +211,7 @@ pfh_domain:      独立静态库，不链接 spdlog/框架
 
 ### 8.1 待 S07/S08 补齐
 
-- **TransferGroupId UUID 实现**：当前使用 int64 占位，实际持久化需 UUID。
+- **TransferGroupId 类型**：已定为 `BIGSERIAL`（见 4.3），非 UUID。
 - **Transfer 方向标记**：BalanceCalculationService 依赖 Repository 提供已签名金额。
 - **Transaction ID 生成**：当前使用静态计数器占位，实际应由 Repository 从数据库序列获取。
 

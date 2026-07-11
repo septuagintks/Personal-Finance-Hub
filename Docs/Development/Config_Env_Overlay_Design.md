@@ -1,7 +1,7 @@
 # 配置环境变量 Overlay 设计
 
-**任务编号**: tasks.md #9f  
-**关联阶段**: P1-S04 配置加载补充  
+**任务编号**: tasks.md #9f
+**关联阶段**: P1-S04 配置加载补充
 **状态**: 待实现
 
 ---
@@ -81,12 +81,12 @@ void apply_env_overlay(AppConfig& config) {
     if (auto val = get_env("PFH_JWT_SECRET"); val) {
         config.jwt.secret = *val;
     }
-    
+
     // 数据库密码（强制覆盖）
     if (auto val = get_env("PFH_DB_PASSWORD"); val) {
         config.database.password = *val;
     }
-    
+
     // 数据库连接参数（可选覆盖）
     if (auto val = get_env("PFH_DB_HOST"); val) {
         config.database.host = *val;

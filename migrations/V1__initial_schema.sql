@@ -163,7 +163,9 @@ CREATE TABLE accounts (
     version BIGINT NOT NULL DEFAULT 1,
     CONSTRAINT chk_accounts_archived_at
         CHECK ((is_archived = FALSE AND archived_at IS NULL)
-            OR (is_archived = TRUE AND archived_at IS NOT NULL))
+            OR (is_archived = TRUE AND archived_at IS NOT NULL)),
+    -- Composite key so child tables can enforce same-tenant via composite FK.
+    CONSTRAINT uq_accounts_id_user UNIQUE (id, user_id)
 );
 
 CREATE INDEX idx_accounts_user_id ON accounts(user_id);
@@ -197,7 +199,7 @@ CREATE TABLE categories (
     id BIGSERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL REFERENCES users(id),
     name VARCHAR(128) NOT NULL,
-    parent_id BIGINT REFERENCES categories(id),
+    parent_id BIGINT,
     board category_board NOT NULL,
     source category_source NOT NULL DEFAULT 'user',
     template_id BIGINT REFERENCES system_category_templates(id),
@@ -205,7 +207,13 @@ CREATE TABLE categories (
     deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE NULLS NOT DISTINCT (user_id, board, parent_id, name)
+    UNIQUE NULLS NOT DISTINCT (user_id, board, parent_id, name),
+    -- Composite key so children (transactions, sub-categories) can bind tenant.
+    CONSTRAINT uq_categories_id_user UNIQUE (id, user_id),
+    -- Parent category must belong to the SAME user (MATCH SIMPLE: skipped when
+    -- parent_id IS NULL for top-level categories).
+    CONSTRAINT fk_categories_parent_same_user
+        FOREIGN KEY (parent_id, user_id) REFERENCES categories(id, user_id)
 );
 
 CREATE INDEX idx_categories_user_id ON categories(user_id);
@@ -219,7 +227,9 @@ CREATE INDEX idx_categories_template_id ON categories(template_id);
 -- =============================================================================
 
 CREATE TABLE transfer_groups (
-    id UUID PRIMARY KEY,
+    -- BIGSERIAL aligned with the int64 TypedId model; ids are assigned by the
+    -- DB sequence at save time (domain never generates persistence ids).
+    id BIGSERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL REFERENCES users(id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     note TEXT,
@@ -227,7 +237,8 @@ CREATE TABLE transfer_groups (
     exchange_rate NUMERIC(30, 10),
     exchange_rate_provider VARCHAR(64),
     exchange_rate_snapshot_time TIMESTAMPTZ,
-    CONSTRAINT chk_transfer_groups_mode CHECK (transfer_mode IN (1, 2, 3))
+    CONSTRAINT chk_transfer_groups_mode CHECK (transfer_mode IN (1, 2, 3)),
+    CONSTRAINT uq_transfer_groups_id_user UNIQUE (id, user_id)
 );
 
 CREATE INDEX idx_transfer_groups_user_id ON transfer_groups(user_id);
@@ -241,19 +252,30 @@ CREATE INDEX idx_transfer_groups_user_id ON transfer_groups(user_id);
 CREATE TABLE transactions (
     id BIGSERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL REFERENCES users(id),
-    account_id BIGINT NOT NULL REFERENCES accounts(id),
-    category_id BIGINT REFERENCES categories(id),
+    account_id BIGINT NOT NULL,
+    category_id BIGINT,
     type transaction_type NOT NULL,
     amount NUMERIC(20, 8) NOT NULL,
     currency_code VARCHAR(10) NOT NULL REFERENCES currencies(code),
     description TEXT,
-    transfer_group_id UUID REFERENCES transfer_groups(id),
+    transfer_group_id BIGINT,
     deleted_at TIMESTAMPTZ,
     transaction_time TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     version BIGINT NOT NULL DEFAULT 1,
-    CONSTRAINT chk_transactions_amount_not_nan CHECK (amount = amount)
+    CONSTRAINT chk_transactions_amount_not_nan CHECK (amount = amount),
+    -- Composite key so tag relations / balance cache can bind tenant.
+    CONSTRAINT uq_transactions_id_user UNIQUE (id, user_id),
+    -- Multi-tenant integrity: account, category and transfer group MUST belong
+    -- to the same user as the transaction. MATCH SIMPLE skips the check for the
+    -- nullable category_id / transfer_group_id when they are NULL.
+    CONSTRAINT fk_transactions_account_same_user
+        FOREIGN KEY (account_id, user_id) REFERENCES accounts(id, user_id),
+    CONSTRAINT fk_transactions_category_same_user
+        FOREIGN KEY (category_id, user_id) REFERENCES categories(id, user_id),
+    CONSTRAINT fk_transactions_transfer_group_same_user
+        FOREIGN KEY (transfer_group_id, user_id) REFERENCES transfer_groups(id, user_id)
 );
 
 CREATE INDEX idx_transactions_account_id ON transactions(account_id);
@@ -278,18 +300,27 @@ CREATE TABLE transaction_tags (
     deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_transaction_tags_user_name UNIQUE (user_id, name)
+    CONSTRAINT uq_transaction_tags_user_name UNIQUE (user_id, name),
+    CONSTRAINT uq_transaction_tags_id_user UNIQUE (id, user_id)
 );
 
 CREATE INDEX idx_transaction_tags_user_id ON transaction_tags(user_id);
 
+-- Denormalized user_id lets a single composite FK guarantee the transaction and
+-- the tag belong to the same user (no cross-tenant tagging).
 CREATE TABLE transaction_tag_relations (
-    transaction_id BIGINT NOT NULL REFERENCES transactions(id),
-    tag_id BIGINT NOT NULL REFERENCES transaction_tags(id),
-    PRIMARY KEY (transaction_id, tag_id)
+    transaction_id BIGINT NOT NULL,
+    tag_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL REFERENCES users(id),
+    PRIMARY KEY (transaction_id, tag_id),
+    CONSTRAINT fk_ttr_transaction_same_user
+        FOREIGN KEY (transaction_id, user_id) REFERENCES transactions(id, user_id),
+    CONSTRAINT fk_ttr_tag_same_user
+        FOREIGN KEY (tag_id, user_id) REFERENCES transaction_tags(id, user_id)
 );
 
 CREATE INDEX idx_transaction_tag_relations_tag ON transaction_tag_relations(tag_id);
+CREATE INDEX idx_transaction_tag_relations_user ON transaction_tag_relations(user_id);
 
 -- =============================================================================
 -- account_balance_cache
@@ -297,13 +328,22 @@ CREATE INDEX idx_transaction_tag_relations_tag ON transaction_tag_relations(tag_
 -- =============================================================================
 
 CREATE TABLE account_balance_cache (
-    account_id BIGINT PRIMARY KEY REFERENCES accounts(id),
+    account_id BIGINT PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id),
     balance NUMERIC(20, 8) NOT NULL,
-    last_transaction_id BIGINT REFERENCES transactions(id),
+    last_transaction_id BIGINT,
     source_version BIGINT NOT NULL DEFAULT 0,
     cache_version BIGINT NOT NULL DEFAULT 1,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- Cache row must belong to the same user as its account; the cached last
+    -- transaction (when set) must belong to the same user too.
+    CONSTRAINT fk_balance_cache_account_same_user
+        FOREIGN KEY (account_id, user_id) REFERENCES accounts(id, user_id),
+    CONSTRAINT fk_balance_cache_last_tx_same_user
+        FOREIGN KEY (last_transaction_id, user_id) REFERENCES transactions(id, user_id)
 );
+
+CREATE INDEX idx_account_balance_cache_user ON account_balance_cache(user_id);
 
 -- =============================================================================
 -- exchange_rates
@@ -431,3 +471,93 @@ CREATE INDEX idx_revoked_access_tokens_expires
 CREATE INDEX idx_revoked_access_tokens_session
     ON revoked_access_tokens(session_id)
     WHERE session_id IS NOT NULL;
+
+-- =============================================================================
+-- Row-Level Security (multi-tenant isolation, terminal defense)
+--
+-- Per 09_Reporting_and_Analytics_Design.md, tenant-scoped tables enforce RLS as
+-- the final defense against horizontal privilege escalation, on top of:
+--   1) API binding UserId from JWT (never from client params)
+--   2) Repository SQL always binding user_id = $1 (parameterized)
+--
+-- Mechanism:
+--   - The application MUST set the session GUC app.current_user_id after auth,
+--     e.g.  SET app.current_user_id = '42';  (per connection / per transaction)
+--   - Policies compare user_id against that GUC.
+--   - Fail-closed: when the GUC is unset/empty the tenant id resolves to NULL,
+--     so USING/WITH CHECK evaluate to NULL and NO rows are visible/writable.
+--   - FORCE ROW LEVEL SECURITY makes the policy apply even to the table owner
+--     (the application role is typically the owner).
+--
+-- Not covered here (by design):
+--   - Reference data: currencies, system_category_templates, exchange_rates
+--   - Auth flow tables: users, refresh_tokens, revoked_access_tokens
+--     (login resolves users by username before a user_id is known; these are
+--      guarded at the application layer)
+--   - Operational: domain_events_outbox, audit_logs (processed by trusted
+--     background roles, not per-tenant request connections)
+-- =============================================================================
+
+CREATE OR REPLACE FUNCTION pfh_current_user_id()
+RETURNS BIGINT
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT NULLIF(current_setting('app.current_user_id', TRUE), '')::BIGINT;
+$$;
+
+-- accounts
+ALTER TABLE accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE accounts FORCE ROW LEVEL SECURITY;
+CREATE POLICY rls_accounts ON accounts
+    USING (user_id = pfh_current_user_id())
+    WITH CHECK (user_id = pfh_current_user_id());
+
+-- categories
+ALTER TABLE categories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE categories FORCE ROW LEVEL SECURITY;
+CREATE POLICY rls_categories ON categories
+    USING (user_id = pfh_current_user_id())
+    WITH CHECK (user_id = pfh_current_user_id());
+
+-- transactions
+ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE transactions FORCE ROW LEVEL SECURITY;
+CREATE POLICY rls_transactions ON transactions
+    USING (user_id = pfh_current_user_id())
+    WITH CHECK (user_id = pfh_current_user_id());
+
+-- transfer_groups
+ALTER TABLE transfer_groups ENABLE ROW LEVEL SECURITY;
+ALTER TABLE transfer_groups FORCE ROW LEVEL SECURITY;
+CREATE POLICY rls_transfer_groups ON transfer_groups
+    USING (user_id = pfh_current_user_id())
+    WITH CHECK (user_id = pfh_current_user_id());
+
+-- transaction_tags
+ALTER TABLE transaction_tags ENABLE ROW LEVEL SECURITY;
+ALTER TABLE transaction_tags FORCE ROW LEVEL SECURITY;
+CREATE POLICY rls_transaction_tags ON transaction_tags
+    USING (user_id = pfh_current_user_id())
+    WITH CHECK (user_id = pfh_current_user_id());
+
+-- transaction_tag_relations
+ALTER TABLE transaction_tag_relations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE transaction_tag_relations FORCE ROW LEVEL SECURITY;
+CREATE POLICY rls_transaction_tag_relations ON transaction_tag_relations
+    USING (user_id = pfh_current_user_id())
+    WITH CHECK (user_id = pfh_current_user_id());
+
+-- account_balance_cache
+ALTER TABLE account_balance_cache ENABLE ROW LEVEL SECURITY;
+ALTER TABLE account_balance_cache FORCE ROW LEVEL SECURITY;
+CREATE POLICY rls_account_balance_cache ON account_balance_cache
+    USING (user_id = pfh_current_user_id())
+    WITH CHECK (user_id = pfh_current_user_id());
+
+-- user_preferences
+ALTER TABLE user_preferences ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_preferences FORCE ROW LEVEL SECURITY;
+CREATE POLICY rls_user_preferences ON user_preferences
+    USING (user_id = pfh_current_user_id())
+    WITH CHECK (user_id = pfh_current_user_id());

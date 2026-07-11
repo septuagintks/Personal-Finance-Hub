@@ -1,7 +1,7 @@
 # Phase 1 S07 数据库迁移与持久化基础 - 交付记录
 
-**完成日期**: 2026-07-12  
-**阶段**: P1-S07 数据库迁移与持久化基础  
+**完成日期**: 2026-07-12
+**阶段**: P1-S07 数据库迁移与持久化基础
 **状态**: ✅ 已完成
 
 ---
@@ -91,6 +91,47 @@ CREATE INDEX idx_accounts_user_id ON accounts(user_id);
 CREATE INDEX idx_transactions_user_time ON transactions(user_id, transaction_time);
 CREATE INDEX idx_categories_user_board ON categories(user_id, board);
 ```
+
+### 3.2.1 多租户复合外键（防跨用户关联）
+
+仅靠独立外键无法阻止「A 用户的流水引用 B 用户的账户/分类」。因此租户实体表提供
+`UNIQUE (id, user_id)` 复合键，子表用复合外键强制同租户：
+
+```sql
+-- accounts / categories / transfer_groups / transactions / transaction_tags
+ALTER TABLE ... ADD CONSTRAINT uq_..._id_user UNIQUE (id, user_id);
+
+-- transactions 的账户、分类、转账组必须同属一个 user
+CONSTRAINT fk_transactions_account_same_user
+    FOREIGN KEY (account_id, user_id) REFERENCES accounts(id, user_id);
+-- category_id / transfer_group_id 可空：MATCH SIMPLE 在为 NULL 时跳过校验。
+```
+
+补齐了此前缺 `user_id` 的 `transaction_tag_relations` 与 `account_balance_cache`，
+分类父子关系亦改为同租户复合外键。
+
+### 3.2.2 行级安全 (RLS)
+
+对租户表启用并 `FORCE` RLS，作为越权的终极防线（对齐
+`09_Reporting_and_Analytics_Design.md`）：
+
+```sql
+CREATE FUNCTION pfh_current_user_id() RETURNS BIGINT ...
+    SELECT NULLIF(current_setting('app.current_user_id', TRUE), '')::BIGINT;
+
+ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE transactions FORCE ROW LEVEL SECURITY;
+CREATE POLICY rls_transactions ON transactions
+    USING (user_id = pfh_current_user_id())
+    WITH CHECK (user_id = pfh_current_user_id());
+```
+
+- 应用在鉴权后必须 `SET app.current_user_id = '<uid>'`（每连接/每事务）。
+- Fail-closed：未设置 GUC → 租户 id 解析为 NULL → 无任何行可见/可写。
+- 覆盖：accounts、categories、transactions、transfer_groups、transaction_tags、
+  transaction_tag_relations、account_balance_cache、user_preferences。
+- 不覆盖：参考数据（currencies/templates/exchange_rates）、认证流表（users/tokens，
+  登录按 username 查、无 user_id 上下文）、运维表（outbox/audit_logs，受信后台角色处理）。
 
 ### 3.3 Outbox / Transfer 索引
 

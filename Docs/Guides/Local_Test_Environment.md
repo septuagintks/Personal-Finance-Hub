@@ -1,7 +1,7 @@
 # Personal Finance Hub - Local Test Environment
 
-**Version**: 1.0  
-**Last Updated**: 2026-07-09  
+**Version**: 1.0
+**Last Updated**: 2026-07-09
 **Scope**: Local Linux validation, Colima-based development checks, ignored local artifacts
 
 ---

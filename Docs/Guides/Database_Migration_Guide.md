@@ -1,8 +1,8 @@
 # Personal Finance Hub - Database Migration Guide
 
-Version: 1.0  
-Backend: C++23  
-Database: PostgreSQL 16+  
+Version: 1.0
+Backend: C++23
+Database: PostgreSQL 16+
 Migration Tool: Flyway
 
 ---

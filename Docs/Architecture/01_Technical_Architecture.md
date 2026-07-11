@@ -1,7 +1,7 @@
 # Personal Finance Hub - Technical Architecture Design
 
-Version: 1.0  
-Backend: C++23  
+Version: 1.0
+Backend: C++23
 Architecture: Clean Architecture
 
 ---

@@ -19,7 +19,7 @@
 
 namespace pfh::domain {
 
-/// @brief Tag for TransferGroupId strong typing (UUID-based).
+/// @brief Tag for TransferGroupId strong typing.
 struct TransferGroupIdTag {};
 
 /// @brief Strongly-typed transaction identifier.
@@ -30,9 +30,10 @@ using CategoryId = TypedId<CategoryIdTag>;
 
 /// @brief Strongly-typed transfer group identifier.
 ///
-/// Transfer groups link the outgoing and incoming sides of a transfer. In the
-/// database this is stored as a UUID; here we use int64_t for simplicity in
-/// Phase 1 (actual UUID support deferred to persistence layer).
+/// Transfer groups link the outgoing and incoming sides of a transfer. The
+/// database uses a BIGSERIAL sequence (aligned with the int64 TypedId model);
+/// the repository / DB sequence assigns the id at save time. Domain code never
+/// generates persistence ids itself.
 using TransferGroupId = TypedId<TransferGroupIdTag>;
 
 /// @brief Transaction type classification.
