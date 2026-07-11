@@ -174,6 +174,62 @@ TEST_F(UseCaseTest, CreateTransaction_WhenTransferType_ReturnsValidationError) {
     EXPECT_EQ(result.error().code, ErrorCode::ValidationError);
 }
 
+TEST_F(UseCaseTest, CreateTransaction_WhenCategoryBoardMismatch_ReturnsDomainRuleViolation) {
+    auto s = seed();
+    CreateTransactionUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionCommand cmd;
+    cmd.user_id = s.user;
+    cmd.account_id = s.cash;
+    cmd.type = TransactionType::Income;
+    cmd.amount = "100";
+    cmd.currency_code = "USD";
+    cmd.category_id = CategoryId(5);
+    cmd.category_board = CategoryBoard::Expense; // wrong board for Income
+    cmd.occurred_at = sample_time();
+
+    auto result = uc.execute(cmd);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::DomainRuleViolation);
+}
+
+TEST_F(UseCaseTest, CreateTransaction_WhenCategoryWithoutBoard_ReturnsValidationError) {
+    auto s = seed();
+    CreateTransactionUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionCommand cmd;
+    cmd.user_id = s.user;
+    cmd.account_id = s.cash;
+    cmd.type = TransactionType::Expense;
+    cmd.amount = "100";
+    cmd.currency_code = "USD";
+    cmd.category_id = CategoryId(5);
+    // category_board intentionally omitted
+    cmd.occurred_at = sample_time();
+
+    auto result = uc.execute(cmd);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::ValidationError);
+}
+
+TEST_F(UseCaseTest, CreateTransaction_WhenCategoryBoardMatches_Succeeds) {
+    auto s = seed();
+    CreateTransactionUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionCommand cmd;
+    cmd.user_id = s.user;
+    cmd.account_id = s.cash;
+    cmd.type = TransactionType::Expense;
+    cmd.amount = "40";
+    cmd.currency_code = "USD";
+    cmd.category_id = CategoryId(7);
+    cmd.category_board = CategoryBoard::Expense;
+    cmd.occurred_at = sample_time();
+
+    auto result = uc.execute(cmd);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    // Expense is stored with negative sign convention at the repository boundary.
+    EXPECT_EQ(result->amount, "-40");
+    EXPECT_EQ(result->type, TransactionType::Expense);
+}
+
 TEST_F(UseCaseTest, DeleteTransaction_WhenOwned_SoftDeletesAndEmitsOutbox) {
     auto s = seed();
     CreateTransactionUseCase create_uc(*account_repo_, *tx_repo_, *uow_);

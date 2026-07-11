@@ -61,7 +61,7 @@ public:
         std::optional<TimePoint> archived_at = std::nullopt,
         TimePoint created_at = std::chrono::system_clock::now(),
         TimePoint updated_at = std::chrono::system_clock::now(),
-        std::int32_t version = 1)
+        std::int64_t version = 1)
         : id_(id),
           owner_(owner),
           name_(std::move(name)),
@@ -86,7 +86,7 @@ public:
     [[nodiscard]] const std::optional<TimePoint>& archived_at() const noexcept { return archived_at_; }
     [[nodiscard]] TimePoint created_at() const noexcept { return created_at_; }
     [[nodiscard]] TimePoint updated_at() const noexcept { return updated_at_; }
-    [[nodiscard]] std::int32_t version() const noexcept { return version_; }
+    [[nodiscard]] std::int64_t version() const noexcept { return version_; }
 
     /// @brief Derive the account category from its type.
     ///
@@ -125,7 +125,7 @@ private:
     std::optional<TimePoint> archived_at_;
     TimePoint created_at_;
     TimePoint updated_at_;
-    std::int32_t version_;
+    std::int64_t version_;
 };
 
 } // namespace pfh::domain

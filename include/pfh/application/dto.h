@@ -7,6 +7,7 @@
 #pragma once
 
 #include "pfh/domain/account.h"
+#include "pfh/domain/category.h"
 #include "pfh/domain/money.h"
 #include "pfh/domain/transaction.h"
 #include "pfh/domain/user.h"
@@ -28,7 +29,7 @@ struct AccountDto {
     std::string currency_code;
     std::string description;
     bool is_archived = false;
-    std::int32_t version = 1;
+    std::int64_t version = 1;
 };
 
 struct BalanceDto {
@@ -58,6 +59,11 @@ struct CreateTransactionCommand {
     std::string currency_code;
     std::string description;
     std::optional<domain::CategoryId> category_id;
+    // When category_id is provided, category_board must also be provided so the
+    // use case can enforce the board rule (Income->income, Expense/Adjustment->
+    // expense). The presentation/persistence layer resolves the board from the
+    // category; until ICategoryRepository exists this is passed in explicitly.
+    std::optional<domain::CategoryBoard> category_board;
     std::chrono::system_clock::time_point occurred_at{};
 };
 

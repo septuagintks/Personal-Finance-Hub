@@ -152,3 +152,31 @@ Status: Active
 - 测试失败时能够定位到明确模块或行为。
 - 涉及数据库、API 或外部同步的测试应说明依赖环境和初始化方式。
 - 金融核心规则、事务回滚路径和错误映射优先于机械覆盖率。
+
+---
+
+## 5. 未来待解决任务 (Deferred / Follow-up)
+
+来源：S01–S09 全量设计一致性 review。以下为已识别但尚未落地的偏差与缺口，按优先级排列。已在本轮立即修复的项不在此列（分类 board 校验接入 CreateTransaction、`Account.version` 统一为 `int64_t`）。
+
+### 5.1 高优先级（进入生产写路径前必须解决）
+
+- [ ] 接入真实持久化：实现 `DrogonUnitOfWork` 与 PostgreSQL 版 `*RepositoryImpl`，替换现有 In-Memory 实现；用同一批 integration scenarios 对真实测试库复跑 <!-- id: 46 -->
+  - 说明：当前 S08 交付为「Domain 接口 + In-Memory 语义等价实现」，规则可测但未连库；#30–#33 的 Drogon 适配器部分尚未完成。
+- [ ] 实现 `ICategoryRepository`，由仓储解析分类 board，替换 `CreateTransactionCommand.category_board` 的显式传入方式 <!-- id: 47 -->
+  - 说明：本轮已用「命令显式携带 board + 用例校验」堵住规则缺口；长期应由 Category 持久化解析 board，避免依赖调用方传值。
+- [ ] 实现转账手续费 / 汇兑损益路径：`CreateTransferCommand` 支持 `FeeSource` 与手续费金额，用例构造独立 `Adjustment` 流水，并测试「手续费不误计入 income/expense」 <!-- id: 48 -->
+
+### 5.2 中优先级
+
+- [ ] 实现 `ITagRepository` 与 `IAuditLogRepository` 及对应用例，打通标签与审计闭环 <!-- id: 49 -->
+- [ ] 明确 `transactions` 并发更新策略：确认「流水仅软删除/追加、不做行级乐观锁」，或为 Domain `Transaction` 补 `version` 字段并接入乐观锁 <!-- id: 50 -->
+- [ ] PostgreSQL `AccountRepositoryImpl` 的余额缓存 `source_version` 必须严格对齐 schema 的 `version` 语义（`MAX(version)` 或等价），不得照搬 In-Memory 的「未删除流水条数」简化实现 <!-- id: 51 -->
+- [ ] 补充 `DeleteTransferUseCase`：支持删除整个转账聚合（两端 + 调整项），否则在 API 文档明确「暂不支持删除转账」 <!-- id: 52 -->
+
+### 5.3 低优先级 / 技术债
+
+- [ ] 落地 `pfh_application` / `pfh_infrastructure` / `pfh_presentation` CMake 库目标；随实现规模增长把 header-only 用例拆出 `.cpp` <!-- id: 53 -->
+- [ ] 报表命名对齐：在架构文档补注「Phase 1 以 `ReportQueryService` 承载最小报表读路径，替代 `GenerateMonthlyReportUseCase`」 <!-- id: 54 -->
+- [ ] DTO 金额符号说明：在 API 设计文档写清「业务展示的正数金额 vs 存储层带符号金额」的边界与转换规则 <!-- id: 55 -->
+- [ ] `TransferResultDto` 金额来源为 Domain 正数幅度，与持久化带符号存储不同；在表现层统一对外表示口径 <!-- id: 56 -->

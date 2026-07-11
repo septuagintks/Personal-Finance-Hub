@@ -60,6 +60,20 @@ public:
                 account->currency().code() + " != " + currency->code()));
         }
 
+        // Category board rule: if a category is attached, its board must match
+        // the transaction type (Income->income, Expense/Adjustment->expense).
+        if (cmd.category_id.has_value()) {
+            if (!cmd.category_board.has_value()) {
+                return err(Error::validation(
+                    "category_board is required when category_id is provided"));
+            }
+            auto board_check = domain::Category::validate_category_board(
+                cmd.type, *cmd.category_board);
+            if (!board_check) {
+                return err(from_domain(board_check.error()));
+            }
+        }
+
         domain::Money money(*amount_dec, *currency);
         domain::Transaction tx(
             domain::TransactionId{},
