@@ -47,11 +47,14 @@ enum class ReportPeriod {
 /// use case orchestration.
 class UserPreference {
 public:
+    // Defaults mirror the user_preferences table (V1 schema): locale 'zh-CN',
+    // timezone 'Asia/Shanghai'. Keeping domain and DB defaults identical means
+    // a preference composed in-memory matches a freshly INSERTed DB row.
     UserPreference(
         UserId user_id,
         Currency base_currency,
-        std::string locale = "en-US",
-        std::string timezone = "UTC",
+        std::string locale = "zh-CN",
+        std::string timezone = "Asia/Shanghai",
         std::string date_format = "YYYY-MM-DD",
         std::string number_format = "1,234.56",
         ThemeMode theme = ThemeMode::System,

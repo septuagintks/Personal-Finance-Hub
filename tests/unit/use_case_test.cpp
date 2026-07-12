@@ -988,6 +988,43 @@ TEST_F(UseCaseTest, Dashboard_AssetDistribution_AggregatesByAccountType) {
     EXPECT_EQ(savings_slices, 1);
 }
 
+// ---- Item 13: Account category override persists and drives net worth ----
+
+TEST_F(UseCaseTest, AccountCategoryOverride_PersistsAndOverridesDerivedCategory) {
+    auto s = seed();
+    AccountId invest;
+    auto add = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
+        // Investment normally derives to Asset; override it to Liability.
+        Account acct(
+            AccountId{}, s.user, "Managed Fund", AccountType::Investment, "fund",
+            ccy("USD"), "", false, std::nullopt,
+            std::chrono::system_clock::now(), std::chrono::system_clock::now(),
+            1, AccountCategory::Liability);
+        auto id = account_repo_->save(tx, acct);
+        if (!id) return std::unexpected(id.error());
+        invest = *id;
+        return {};
+    });
+    ASSERT_TRUE(add.has_value());
+
+    auto loaded = account_repo_->find_by_id(invest);
+    ASSERT_TRUE(loaded.has_value());
+    EXPECT_TRUE(loaded->has_category_override());
+    EXPECT_EQ(loaded->category(), AccountCategory::Liability);
+    // Without override, Investment would derive to Asset.
+    EXPECT_EQ(Account::default_category_for(AccountType::Investment),
+              AccountCategory::Asset);
+}
+
+TEST_F(UseCaseTest, AccountWithoutOverride_DerivesCategoryFromType) {
+    auto s = seed();
+    // The seed's Cash account has no override.
+    auto cash = account_repo_->find_by_id(s.cash);
+    ASSERT_TRUE(cash.has_value());
+    EXPECT_FALSE(cash->has_category_override());
+    EXPECT_EQ(cash->category(), AccountCategory::Asset);
+}
+
 // ---- Item 9: signed Adjustment semantics (reversal / refund / FX gain) ----
 
 TEST_F(UseCaseTest, Adjustment_PositiveIsInflow_NegativeIsOutflow) {

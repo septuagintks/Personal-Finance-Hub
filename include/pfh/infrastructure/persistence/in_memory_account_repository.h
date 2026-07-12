@@ -210,7 +210,10 @@ public:
                 account.archived_at(),
                 account.created_at(),
                 account.updated_at(),
-                1);
+                1,
+                account.has_category_override()
+                    ? std::optional<domain::AccountCategory>(account.category())
+                    : std::nullopt);
             store_.staged_accounts.emplace(id_value, std::move(created));
             return domain::AccountId(id_value);
         }
@@ -252,7 +255,10 @@ public:
             account.archived_at(),
             account.created_at(),
             account.updated_at(),
-            account.version() + 1);
+            account.version() + 1,
+            account.has_category_override()
+                ? std::optional<domain::AccountCategory>(account.category())
+                : std::nullopt);
         store_.staged_accounts.insert_or_assign(id, std::move(updated));
         return account.id();
     }

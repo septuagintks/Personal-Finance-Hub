@@ -489,7 +489,9 @@ TEST_F(RepositoryIntegrationTest, UserPreferenceRepository_WhenMissingRow_FallsB
     auto pref = pref_repo_->find_by_user(ids.user);
     ASSERT_TRUE(pref.has_value()) << pref.error().message;
     EXPECT_EQ(pref->base_currency().code(), "USD");
-    EXPECT_EQ(pref->locale(), "en-US");
+    // Defaults now match the DB schema (user_preferences.locale/timezone).
+    EXPECT_EQ(pref->locale(), "zh-CN");
+    EXPECT_EQ(pref->timezone(), "Asia/Shanghai");
 }
 
 } // namespace pfh::test

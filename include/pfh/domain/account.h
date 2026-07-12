@@ -61,7 +61,8 @@ public:
         std::optional<TimePoint> archived_at = std::nullopt,
         TimePoint created_at = std::chrono::system_clock::now(),
         TimePoint updated_at = std::chrono::system_clock::now(),
-        std::int64_t version = 1)
+        std::int64_t version = 1,
+        std::optional<AccountCategory> category_override = std::nullopt)
         : id_(id),
           owner_(owner),
           name_(std::move(name)),
@@ -73,7 +74,8 @@ public:
           archived_at_(archived_at),
           created_at_(created_at),
           updated_at_(updated_at),
-          version_(version) {}
+          version_(version),
+          category_override_(category_override) {}
 
     [[nodiscard]] AccountId id() const noexcept { return id_; }
     [[nodiscard]] UserId owner() const noexcept { return owner_; }
@@ -88,13 +90,29 @@ public:
     [[nodiscard]] TimePoint updated_at() const noexcept { return updated_at_; }
     [[nodiscard]] std::int64_t version() const noexcept { return version_; }
 
-    /// @brief Derive the account category from its type.
+    /// @brief The account's asset/liability category.
     ///
-    /// Credit defaults to Liability; all others default to Asset. This is a
-    /// domain rule, not persisted separately.
+    /// Returns the user-set override when present; otherwise derives from type
+    /// (Credit => Liability, everything else => Asset). The schema stores this
+    /// as a dedicated `account_category` column, so a user can e.g. classify an
+    /// Investment account as a Liability; the override is that persisted value.
     [[nodiscard]] AccountCategory category() const noexcept {
-        return (type_ == AccountType::Credit) ? AccountCategory::Liability
-                                                : AccountCategory::Asset;
+        if (category_override_.has_value()) {
+            return *category_override_;
+        }
+        return default_category_for(type_);
+    }
+
+    /// @brief The category derived purely from the account type (ignores any
+    /// override). Useful for computing the default to persist.
+    [[nodiscard]] static AccountCategory default_category_for(AccountType type) noexcept {
+        return (type == AccountType::Credit) ? AccountCategory::Liability
+                                             : AccountCategory::Asset;
+    }
+
+    /// @brief True if the category was explicitly overridden by the user.
+    [[nodiscard]] bool has_category_override() const noexcept {
+        return category_override_.has_value();
     }
 
     /// @brief Archive the account (soft-hide from active views).
@@ -131,6 +149,9 @@ private:
     TimePoint created_at_;
     TimePoint updated_at_;
     std::int64_t version_;
+    // User override of the asset/liability classification; nullopt => derive
+    // from type. Persisted as the account_category column.
+    std::optional<AccountCategory> category_override_;
 };
 
 } // namespace pfh::domain
