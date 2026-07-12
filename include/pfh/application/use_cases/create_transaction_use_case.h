@@ -12,6 +12,7 @@
 #include "pfh/domain/repositories/i_account_repository.h"
 #include "pfh/domain/repositories/i_transaction_repository.h"
 #include "pfh/domain/category.h"
+#include <chrono>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -91,13 +92,17 @@ public:
                         "currency mismatch"));
                 }
 
+                // Stamp current time when the caller omitted a business time,
+                // so a missing REST field never lands the record in 1970.
+                const auto occurred_at =
+                    cmd.occurred_at.value_or(std::chrono::system_clock::now());
                 domain::Transaction tx(
                     domain::TransactionId{},
                     cmd.user_id,
                     cmd.account_id,
                     money,
                     cmd.type,
-                    cmd.occurred_at,
+                    occurred_at,
                     cmd.description,
                     cmd.category_id);
 

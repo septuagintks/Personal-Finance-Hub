@@ -988,6 +988,53 @@ TEST_F(UseCaseTest, Dashboard_AssetDistribution_AggregatesByAccountType) {
     EXPECT_EQ(savings_slices, 1);
 }
 
+// ---- Item 11: commands without a business time stamp "now", never epoch 0 ----
+
+TEST_F(UseCaseTest, CreateTransaction_WhenNoOccurredAt_StampsRecentTime) {
+    auto s = seed();
+    const auto before = std::chrono::system_clock::now();
+    CreateTransactionUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionCommand income;
+    income.user_id = s.user;
+    income.account_id = s.cash;
+    income.type = TransactionType::Income;
+    income.amount = "100";
+    income.currency_code = "USD";
+    // occurred_at deliberately left unset (nullopt).
+    auto result = uc.execute(income);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    const auto after = std::chrono::system_clock::now();
+
+    auto stored = tx_repo_->find_by_id(result->id);
+    ASSERT_TRUE(stored.has_value());
+    // Must be "now", not the 1970 epoch.
+    EXPECT_GE(stored->occurred_at(), before);
+    EXPECT_LE(stored->occurred_at(), after);
+    EXPECT_GT(stored->occurred_at(), std::chrono::system_clock::from_time_t(1000000000));
+}
+
+TEST_F(UseCaseTest, CreateTransfer_WhenNoOccurredAt_StampsRecentTime) {
+    auto s = seed();
+    const auto before = std::chrono::system_clock::now();
+    CreateTransferUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransferCommand cmd;
+    cmd.user_id = s.user;
+    cmd.source_account_id = s.cash;
+    cmd.target_account_id = s.savings;
+    cmd.mode = TransferInputMode::BothAmounts;
+    cmd.outgoing_amount = "100";
+    cmd.incoming_amount = "100";
+    // occurred_at left unset.
+    auto result = uc.execute(cmd);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    const auto after = std::chrono::system_clock::now();
+
+    auto leg = tx_repo_->find_by_id(result->outgoing_transaction_id);
+    ASSERT_TRUE(leg.has_value());
+    EXPECT_GE(leg->occurred_at(), before);
+    EXPECT_LE(leg->occurred_at(), after);
+}
+
 // ---- Group A: report follow-ups (timezone month window + root-category rollup) ----
 
 // Dashboard month window honors the user's timezone: a transaction stamped at

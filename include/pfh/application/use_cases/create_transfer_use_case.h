@@ -12,6 +12,7 @@
 #include "pfh/domain/repositories/i_account_repository.h"
 #include "pfh/domain/repositories/i_transaction_repository.h"
 #include "pfh/domain/transfer_domain_service.h"
+#include <chrono>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -120,6 +121,11 @@ private:
         const domain::Account& target) const {
         using domain::TransferDomainService;
 
+        // Stamp current time when the caller omitted a business time, so a
+        // missing REST field never lands the transfer legs in 1970.
+        const auto occurred_at =
+            cmd.occurred_at.value_or(std::chrono::system_clock::now());
+
         auto parse_money = [](const std::string& amount,
                               const domain::Currency& currency)
             -> Result<domain::Money> {
@@ -150,7 +156,7 @@ private:
                 source.currency(),
                 target.currency(),
                 *rate_dec,
-                cmd.occurred_at,
+                occurred_at,
                 "Manual");
             if (!rate) {
                 return err(from_domain(rate.error()));
@@ -161,7 +167,7 @@ private:
                 target.id(),
                 *rate,
                 cmd.user_id,
-                cmd.occurred_at,
+                occurred_at,
                 cmd.description,
                 domain::TransferGroupId{}));
         }
@@ -180,7 +186,7 @@ private:
                 source.id(),
                 target.id(),
                 cmd.user_id,
-                cmd.occurred_at,
+                occurred_at,
                 cmd.description,
                 domain::TransferGroupId{}));
         }
@@ -197,7 +203,7 @@ private:
                 source.currency(),
                 target.currency(),
                 *rate_dec,
-                cmd.occurred_at,
+                occurred_at,
                 "Manual");
             if (!rate) {
                 return err(from_domain(rate.error()));
@@ -208,7 +214,7 @@ private:
                 target.id(),
                 *rate,
                 cmd.user_id,
-                cmd.occurred_at,
+                occurred_at,
                 cmd.description,
                 domain::TransferGroupId{}));
         }

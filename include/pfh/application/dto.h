@@ -69,13 +69,17 @@ struct CreateTransactionCommand {
     // expense). The presentation/persistence layer resolves the board from the
     // category; until ICategoryRepository exists this is passed in explicitly.
     std::optional<domain::CategoryBoard> category_board;
-    std::chrono::system_clock::time_point occurred_at{};
+    // Business time. nullopt => the use case stamps the current time. Never
+    // default to epoch 0 (1970), which would corrupt current-month reports and
+    // point-in-time historical rate selection.
+    std::optional<std::chrono::system_clock::time_point> occurred_at;
 };
 
 struct DeleteTransactionCommand {
     domain::UserId user_id;
     domain::TransactionId transaction_id;
-    std::chrono::system_clock::time_point deleted_at{};
+    // nullopt => the use case stamps the current time as the soft-delete time.
+    std::optional<std::chrono::system_clock::time_point> deleted_at;
 };
 
 enum class TransferInputMode {
@@ -93,7 +97,8 @@ struct CreateTransferCommand {
     std::string incoming_amount; // optional depending on mode
     std::string rate;            // optional depending on mode
     std::string description;
-    std::chrono::system_clock::time_point occurred_at{};
+    // nullopt => the use case stamps the current time. Never epoch 0.
+    std::optional<std::chrono::system_clock::time_point> occurred_at;
 };
 
 struct TransferResultDto {

@@ -10,6 +10,7 @@
 #include "pfh/application/persistence/i_unit_of_work.h"
 #include "pfh/domain/events/simple_domain_event.h"
 #include "pfh/domain/repositories/i_transaction_repository.h"
+#include <chrono>
 #include <memory>
 #include <optional>
 
@@ -49,8 +50,10 @@ public:
                     return std::unexpected(domain::RepositoryError::validation("transfer leg"));
                 }
 
+                const auto deleted_at =
+                    cmd.deleted_at.value_or(std::chrono::system_clock::now());
                 auto deleted = transactions_.soft_delete(
-                    tx_ctx, cmd.transaction_id, cmd.user_id, cmd.deleted_at);
+                    tx_ctx, cmd.transaction_id, cmd.user_id, deleted_at);
                 if (!deleted) {
                     return deleted;
                 }
