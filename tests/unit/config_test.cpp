@@ -256,26 +256,74 @@ TEST(JsonConfigLoader, WhenEnvVarNotSet_UsesJsonValue) {
     EXPECT_EQ(r->database.host, "db");          // From JSON
 }
 
-TEST(JsonConfigLoader, WhenDbPortEnvInvalid_KeepsJsonValue) {
+TEST(JsonConfigLoader, WhenDbPortEnvInvalid_FailsLoudly) {
     TempConfig cfg(kValidConfig);
 
-    // Set invalid port
+    // An invalid deployment value must fail loudly rather than silently reverting
+    // to the JSON/default (which could point the app at the wrong database).
     #ifdef _WIN32
-    _putenv_s("DB_PORT", "not-a-number");
+    _putenv_s("PFH_DB_PORT", "not-a-number");
     #else
-    setenv("DB_PORT", "not-a-number", 1);
+    setenv("PFH_DB_PORT", "not-a-number", 1);
     #endif
 
     JsonConfigLoader loader(cfg.path());
     auto r = loader.load();
-    ASSERT_TRUE(r.has_value());
-    EXPECT_EQ(r->database.port, 6543);  // From JSON (env ignored)
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, application::ErrorCode::ConfigurationError);
 
     // Clean up
     #ifdef _WIN32
-    _putenv_s("DB_PORT", "");
+    _putenv_s("PFH_DB_PORT", "");
     #else
-    unsetenv("DB_PORT");
+    unsetenv("PFH_DB_PORT");
+    #endif
+}
+
+TEST(JsonConfigLoader, WhenDbPortEnvOutOfRange_FailsLoudly) {
+    TempConfig cfg(kValidConfig);
+
+    #ifdef _WIN32
+    _putenv_s("PFH_DB_PORT", "99999");
+    #else
+    setenv("PFH_DB_PORT", "99999", 1);
+    #endif
+
+    JsonConfigLoader loader(cfg.path());
+    auto r = loader.load();
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, application::ErrorCode::ConfigurationError);
+
+    #ifdef _WIN32
+    _putenv_s("PFH_DB_PORT", "");
+    #else
+    unsetenv("PFH_DB_PORT");
+    #endif
+}
+
+TEST(JsonConfigLoader, WhenEnvironmentAndApiKeyEnvSet_Overrides) {
+    TempConfig cfg(kValidConfig);
+
+    #ifdef _WIN32
+    _putenv_s("PFH_ENVIRONMENT", "production");
+    _putenv_s("PFH_EXCHANGE_RATE_API_KEY", "secret-key-xyz");
+    #else
+    setenv("PFH_ENVIRONMENT", "production", 1);
+    setenv("PFH_EXCHANGE_RATE_API_KEY", "secret-key-xyz", 1);
+    #endif
+
+    JsonConfigLoader loader(cfg.path());
+    auto r = loader.load();
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+    EXPECT_EQ(r->environment, "production");
+    EXPECT_EQ(r->exchange_rate.api_key, "secret-key-xyz");
+
+    #ifdef _WIN32
+    _putenv_s("PFH_ENVIRONMENT", "");
+    _putenv_s("PFH_EXCHANGE_RATE_API_KEY", "");
+    #else
+    unsetenv("PFH_ENVIRONMENT");
+    unsetenv("PFH_EXCHANGE_RATE_API_KEY");
     #endif
 }
 

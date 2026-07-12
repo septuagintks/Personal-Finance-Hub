@@ -198,4 +198,46 @@ private:
     std::chrono::system_clock::time_point fetched_at_;
 };
 
+/// @brief ExchangeRateRefreshFailed: emitted when the provider is unavailable
+/// and the refresh degrades to existing historical rates. Carries whether any
+/// usable historical rate exists so an alert handler can escalate a hard outage
+/// (degraded AND no fallback) differently from a soft one.
+class ExchangeRateRefreshFailedEvent final : public IDomainEvent {
+public:
+    ExchangeRateRefreshFailedEvent(
+        std::string provider, std::string base_currency,
+        bool historical_available, std::string reason,
+        std::chrono::system_clock::time_point occurred_at)
+        : provider_(std::move(provider)),
+          base_currency_(std::move(base_currency)),
+          historical_available_(historical_available),
+          reason_(std::move(reason)),
+          occurred_at_(occurred_at) {}
+
+    [[nodiscard]] std::string event_name() const override {
+        return "ExchangeRateRefreshFailed";
+    }
+    [[nodiscard]] std::chrono::system_clock::time_point occurred_at() const override {
+        return occurred_at_;
+    }
+    [[nodiscard]] std::string aggregate_type() const override { return "ExchangeRate"; }
+    [[nodiscard]] std::string aggregate_id() const override { return base_currency_; }
+    [[nodiscard]] std::string payload_json() const override {
+        return "{\"provider\":\"" + provider_ + "\"" +
+               ",\"baseCurrency\":\"" + base_currency_ + "\"" +
+               ",\"historicalAvailable\":" +
+               (historical_available_ ? "true" : "false") +
+               ",\"reason\":\"" + reason_ + "\"" +
+               ",\"occurredAt\":" +
+               std::to_string(event_detail::epoch_seconds(occurred_at_)) + "}";
+    }
+
+private:
+    std::string provider_;
+    std::string base_currency_;
+    bool historical_available_;
+    std::string reason_;
+    std::chrono::system_clock::time_point occurred_at_;
+};
+
 } // namespace pfh::domain

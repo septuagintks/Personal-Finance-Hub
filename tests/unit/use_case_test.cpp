@@ -443,8 +443,37 @@ TEST_F(UseCaseTest, RefreshExchangeRates_WhenProviderFails_DegradesWithoutWrite)
     ASSERT_TRUE(result.has_value());
     EXPECT_TRUE(result->degraded);
     EXPECT_EQ(result->appended_count, 0u);
+    // No rate rows are written on degradation.
     EXPECT_TRUE(store_->exchange_rates.empty());
-    EXPECT_TRUE(store_->outbox.empty());
+    // A degradation/alert event IS recorded (no historical rate seeded => the
+    // event flags the hard-outage case).
+    ASSERT_EQ(store_->outbox.size(), 1u);
+    const auto& rec = store_->outbox.front();
+    EXPECT_EQ(rec.event_name, "ExchangeRateRefreshFailed");
+    EXPECT_NE(rec.payload_json.find("\"historicalAvailable\":false"), std::string::npos);
+}
+
+TEST_F(UseCaseTest, RefreshExchangeRates_WhenProviderFailsButHistoryExists_FlagsFallback) {
+    auto s = seed();
+    (void)s; // accounts seed the active-currency set (CNY) used as refresh targets
+    // Seed a historical USD->CNY rate so the degradation has a usable fallback.
+    auto rw = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
+        auto r = rate_repo_->append(tx, rate("USD", "CNY", "7", 1000, "ECB"));
+        if (!r) return std::unexpected(r.error());
+        return {};
+    });
+    ASSERT_TRUE(rw.has_value());
+    const auto outbox_before = store_->outbox.size();
+
+    provider_->set_fail(true);
+    RefreshExchangeRatesUseCase uc(*account_repo_, *rate_repo_, *provider_, *uow_);
+    auto result = uc.execute(RefreshExchangeRatesCommand{});
+    ASSERT_TRUE(result.has_value());
+    EXPECT_TRUE(result->degraded);
+    ASSERT_EQ(store_->outbox.size(), outbox_before + 1);
+    const auto& rec = store_->outbox.back();
+    EXPECT_EQ(rec.event_name, "ExchangeRateRefreshFailed");
+    EXPECT_NE(rec.payload_json.find("\"historicalAvailable\":true"), std::string::npos);
 }
 
 TEST_F(UseCaseTest, RefreshExchangeRates_WhenProviderOk_AppendsRatesAndOutbox) {

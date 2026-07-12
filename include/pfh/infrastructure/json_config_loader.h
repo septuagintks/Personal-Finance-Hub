@@ -112,8 +112,11 @@ public:
                 config.exchange_rate.api_key = exchange_rate.value("api_key", std::string(""));
             }
 
-            // Apply environment variable overrides (higher priority than JSON)
-            apply_env_overrides(config);
+            // Apply environment variable overrides (higher priority than JSON).
+            // A malformed override (e.g. bad port) fails loudly.
+            if (auto overlay = apply_env_overrides(config); !overlay) {
+                return std::unexpected(overlay.error());
+            }
 
             // Validate required fields
             if (config.jwt.secret.empty()) {
@@ -164,15 +167,22 @@ private:
     ///
     /// Supported environment variables (PFH_ prefix preferred; unprefixed kept
     /// for backward compatibility with earlier tests/docs):
+    /// - PFH_ENVIRONMENT / ENVIRONMENT
     /// - PFH_JWT_SECRET / JWT_SECRET
     /// - PFH_DB_HOST / DB_HOST
     /// - PFH_DB_PORT / DB_PORT
     /// - PFH_DB_NAME / DB_NAME
     /// - PFH_DB_USER / DB_USER
     /// - PFH_DB_PASSWORD / DB_PASSWORD
+    /// - PFH_EXCHANGE_RATE_API_KEY / EXCHANGE_RATE_API_KEY
     ///
     /// @param config Configuration to apply overrides to (modified in-place).
-    static void apply_env_overrides(AppConfig& config) {
+    /// @return empty on success; a ConfigurationError when a provided value is
+    ///         malformed (e.g. a non-numeric or out-of-range PFH_DB_PORT). An
+    ///         invalid deployment value must fail loudly, not be silently
+    ///         dropped back to the JSON/default.
+    [[nodiscard]] static application::VoidResult apply_env_overrides(AppConfig& config) {
+        using application::Error;
         auto env_or = [](const char* preferred, const char* fallback) -> const char* {
             if (const char* v = std::getenv(preferred); v != nullptr && v[0] != '\0') {
                 return v;
@@ -183,6 +193,9 @@ private:
             return nullptr;
         };
 
+        if (const char* v = env_or("PFH_ENVIRONMENT", "ENVIRONMENT")) {
+            config.environment = v;
+        }
         if (const char* v = env_or("PFH_JWT_SECRET", "JWT_SECRET")) {
             config.jwt.secret = v;
         }
@@ -190,11 +203,22 @@ private:
             config.database.host = v;
         }
         if (const char* v = env_or("PFH_DB_PORT", "DB_PORT")) {
+            // A bad port must be a hard error: silently keeping the default
+            // would send the app to the wrong database in production.
+            const std::string port_str = v;
+            std::size_t consumed = 0;
+            long parsed = 0;
             try {
-                config.database.port = static_cast<std::uint16_t>(std::stoi(v));
-            } catch (...) {
-                // Ignore invalid port; keep JSON/default value
+                parsed = std::stol(port_str, &consumed);
+            } catch (const std::exception&) {
+                return std::unexpected(Error(application::ErrorCode::ConfigurationError,
+                    "PFH_DB_PORT is not a valid integer", port_str));
             }
+            if (consumed != port_str.size() || parsed < 1 || parsed > 65535) {
+                return std::unexpected(Error(application::ErrorCode::ConfigurationError,
+                    "PFH_DB_PORT out of range (1-65535)", port_str));
+            }
+            config.database.port = static_cast<std::uint16_t>(parsed);
         }
         if (const char* v = env_or("PFH_DB_NAME", "DB_NAME")) {
             config.database.name = v;
@@ -205,6 +229,10 @@ private:
         if (const char* v = env_or("PFH_DB_PASSWORD", "DB_PASSWORD")) {
             config.database.password = v;
         }
+        if (const char* v = env_or("PFH_EXCHANGE_RATE_API_KEY", "EXCHANGE_RATE_API_KEY")) {
+            config.exchange_rate.api_key = v;
+        }
+        return {};
     }
 };
 

@@ -70,11 +70,49 @@ public:
 
         auto fetched = provider_.fetch_latest(*pivot, targets);
         if (!fetched) {
-            // Degrade: do not fail hard; leave historical rates in place.
+            // Degrade: do not fail hard; leave historical rates in place. But
+            // record a degradation/alert event and verify a fallback actually
+            // exists, so "degraded with no usable historical rate" is
+            // distinguishable from a soft, recoverable outage.
+            bool historical_available = false;
+            for (const auto& target : targets) {
+                auto latest = rates_.find_latest(*pivot, target);
+                if (latest) {
+                    historical_available = true;
+                    break;
+                }
+                // A NotFound just means no rate for this pair; any other status
+                // is a real repository error and should surface.
+                if (latest.error().status != domain::RepositoryStatus::NotFound) {
+                    return err(from_repository(latest.error()));
+                }
+            }
+
+            const std::string reason =
+                fetched.error().status == domain::RepositoryStatus::DatabaseError
+                    ? "provider unavailable"
+                    : "provider error";
+            auto alert = uow_.execute_in_transaction(
+                [&](domain::ITransactionContext& /*tx*/) -> domain::RepositoryVoidResult {
+                    uow_.register_event(
+                        std::make_shared<domain::ExchangeRateRefreshFailedEvent>(
+                            "exchange-rate-provider",
+                            pivot->code(),
+                            historical_available,
+                            reason,
+                            std::chrono::system_clock::now()));
+                    return {};
+                });
+            if (!alert) {
+                return err(from_repository(alert.error()));
+            }
+
             RefreshExchangeRatesResultDto dto;
             dto.appended_count = 0;
             dto.degraded = true;
-            dto.message = "Provider unavailable; using historical rates";
+            dto.message = historical_available
+                              ? "Provider unavailable; using historical rates"
+                              : "Provider unavailable; NO historical rates available";
             return dto;
         }
 
