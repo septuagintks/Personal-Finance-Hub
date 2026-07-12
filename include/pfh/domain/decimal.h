@@ -82,6 +82,18 @@ public:
     /// @brief Raw scaled 128-bit value (for persistence / testing).
     [[nodiscard]] constexpr StorageType raw_value() const noexcept { return value_; }
 
+    /// @brief True if this value fits the DB amount column NUMERIC(20, 8):
+    /// at most 8 fractional digits and total significant digits <= 20 (so the
+    /// integer part is <= 12 digits). Decimal's internal scale (10) and 128-bit
+    /// range are wider than the database, so the persistence layer must reject
+    /// values that would silently round or overflow on write. This is the
+    /// single definition of the amount boundary, shared by any repository.
+    [[nodiscard]] bool fits_numeric_20_8() const noexcept;
+
+    /// @brief True if this value fits a rate column NUMERIC(20, 10): at most 10
+    /// fractional digits and total significant digits <= 20.
+    [[nodiscard]] bool fits_numeric_20_10() const noexcept;
+
 private:
     explicit constexpr Decimal(StorageType scaled) noexcept : value_(scaled) {}
 

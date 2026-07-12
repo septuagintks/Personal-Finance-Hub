@@ -377,4 +377,55 @@ DomainResult<Decimal> Decimal::divide(const Decimal& other) const {
     return Decimal(negative ? -signed_result : signed_result);
 }
 
+namespace {
+
+// Count trailing decimal zeros of a non-negative scaled magnitude, capped at
+// kScale. Used to work out how many fractional digits the value actually uses.
+[[nodiscard]] std::int32_t fractional_digits_used(UStorage scaled_magnitude) noexcept {
+    if (scaled_magnitude == 0) {
+        return 0;
+    }
+    std::int32_t trailing_zeros = 0;
+    UStorage v = scaled_magnitude;
+    while (trailing_zeros < Decimal::kScale && (v % 10) == 0) {
+        v /= 10;
+        ++trailing_zeros;
+    }
+    return Decimal::kScale - trailing_zeros;
+}
+
+// True if |value| fits NUMERIC(precision, scale): at most `scale` fractional
+// digits and at most `precision - scale` integer digits.
+[[nodiscard]] bool fits_numeric(Storage value, std::int32_t precision,
+                                std::int32_t scale) noexcept {
+    const UStorage magnitude = (value < 0)
+        ? static_cast<UStorage>(-value)
+        : static_cast<UStorage>(value);
+
+    // Reject more fractional digits than the column allows (would round on write).
+    if (fractional_digits_used(magnitude) > scale) {
+        return false;
+    }
+
+    // Integer part = magnitude / 10^kScale must fit (precision - scale) digits.
+    const UStorage scale_factor = static_cast<UStorage>(Decimal::kScaleFactor);
+    UStorage integer_part = magnitude / scale_factor;
+    const std::int32_t max_integer_digits = precision - scale;
+    UStorage limit = 1;
+    for (std::int32_t i = 0; i < max_integer_digits; ++i) {
+        limit *= 10;
+    }
+    return integer_part < limit;
+}
+
+} // namespace
+
+bool Decimal::fits_numeric_20_8() const noexcept {
+    return fits_numeric(value_, 20, 8);
+}
+
+bool Decimal::fits_numeric_20_10() const noexcept {
+    return fits_numeric(value_, 20, 10);
+}
+
 } // namespace pfh::domain

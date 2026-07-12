@@ -335,4 +335,32 @@ TEST(Decimal, WhenMultiplyIntermediateOverflows_ReturnsError) {
     EXPECT_EQ(r.error().code, DomainErrorCode::Overflow);
 }
 
+// ---- Item 10: DB NUMERIC(20,8) / NUMERIC(20,10) boundary ----
+
+TEST(Decimal, FitsNumeric208_AcceptsInRangeValue) {
+    // 12 integer digits + 8 fractional digits is the maximum for NUMERIC(20,8).
+    EXPECT_TRUE(make("999999999999.99999999").fits_numeric_20_8());
+    EXPECT_TRUE(make("0").fits_numeric_20_8());
+    EXPECT_TRUE(make("-100.5").fits_numeric_20_8());
+    EXPECT_TRUE(make("12345.678").fits_numeric_20_8());
+}
+
+TEST(Decimal, FitsNumeric208_RejectsTooManyFractionalDigits) {
+    // 9 fractional digits exceeds scale 8 (would round on write).
+    EXPECT_FALSE(make("0.000000001").fits_numeric_20_8());
+    EXPECT_FALSE(make("1.123456789").fits_numeric_20_8());
+}
+
+TEST(Decimal, FitsNumeric208_RejectsIntegerPartTooLarge) {
+    // 13 integer digits exceeds precision-scale = 12.
+    EXPECT_FALSE(make("1000000000000").fits_numeric_20_8());
+    EXPECT_FALSE(make("-1000000000000.5").fits_numeric_20_8());
+}
+
+TEST(Decimal, FitsNumeric2010_AllowsTenFractionalDigits) {
+    // Rate column keeps 10 fractional digits.
+    EXPECT_TRUE(make("7.1800000001").fits_numeric_20_10());
+    EXPECT_FALSE(make("0.000000001").fits_numeric_20_8()); // but not for amount
+}
+
 } // namespace pfh::test

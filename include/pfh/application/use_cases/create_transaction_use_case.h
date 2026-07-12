@@ -51,6 +51,12 @@ public:
         } else if (!amount_dec->is_positive()) {
             return err(Error::validation("amount must be a positive decimal string"));
         }
+        // Reject amounts the DB amount column NUMERIC(20,8) cannot hold, so a
+        // value is never silently rounded or overflowed on write.
+        if (!amount_dec->fits_numeric_20_8()) {
+            return err(Error::validation(
+                "amount exceeds supported precision/range (NUMERIC(20,8))"));
+        }
 
         auto currency = domain::Currency::create(cmd.currency_code);
         if (!currency) {

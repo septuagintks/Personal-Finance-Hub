@@ -127,4 +127,24 @@ TEST(Currency, PivotCode_IsUSD) {
     EXPECT_EQ(Currency::pivot_code(), "USD");
 }
 
+// ---- Item 10: domain whitelist stays in sync with the V2 currency seed ----
+
+TEST(Currency, AcceptsV2SeededFiatAndCrypto) {
+    // Fiat and crypto codes that are seeded by V2 must be accepted by the domain.
+    for (const char* code : {"BRL", "MXN", "NOK", "RUB", "SEK"}) {
+        EXPECT_TRUE(Currency::create(code).has_value()) << code;
+    }
+    for (const char* code : {"BNB", "XRP", "ADA", "DOGE", "SOL", "TRX", "MATIC", "DOT"}) {
+        EXPECT_TRUE(Currency::create(code).has_value()) << code;
+    }
+}
+
+TEST(Currency, RejectsCodesNotInV2Seed) {
+    // These fiat codes are NOT seeded by V2, so the domain must reject them; an
+    // account in such a currency could not be persisted (FK to currencies).
+    for (const char* code : {"IDR", "MYR", "PHP", "THB", "VND"}) {
+        EXPECT_FALSE(Currency::create(code).has_value()) << code;
+    }
+}
+
 } // namespace pfh::test

@@ -12,10 +12,18 @@ namespace pfh::domain {
 namespace {
 
 // Controlled crypto whitelist (non ISO-4217). Crypto tickers are commonly
-// 3-5 uppercase letters (BTC, ETH, USDT, USDC, WBTC), so they are NOT subject
-// to the strict 3-letter ISO-4217 shape rule; they only need to appear here.
-constexpr std::array<std::string_view, 5> kCryptoWhitelist = {
-    "BTC", "ETH", "USDT", "USDC", "WBTC"
+// 3-5 uppercase letters, so they are NOT subject to the strict 3-letter
+// ISO-4217 shape rule; they only need to appear here.
+//
+// IMPORTANT: this list MUST stay in sync with the currencies seeded by
+// migrations/V2__seed_initial_currencies.sql. Domain and database share one
+// supported-currency set; a code accepted here but absent from the DB (or vice
+// versa) would let an account be created that cannot be persisted, or a stored
+// currency the domain rejects on read. When adding a currency, update BOTH.
+constexpr std::array<std::string_view, 13> kCryptoWhitelist = {
+    "ADA", "BNB", "BTC", "DOGE", "DOT",
+    "ETH", "MATIC", "SOL", "TRX", "USDC",
+    "USDT", "WBTC", "XRP"
 };
 
 // Bounds for a crypto ticker's letter count.
@@ -23,13 +31,13 @@ constexpr std::size_t kCryptoMinLen = 3;
 constexpr std::size_t kCryptoMaxLen = 5;
 
 // A pragmatic subset of ISO-4217 fiat codes relevant to the project. This is
-// not the full ISO table; it covers the currencies the system supports today
-// and can be extended as needed. Kept sorted for readability.
+// not the full ISO table; it is the exact set seeded by V2 (see the sync note
+// above). Kept sorted for readability.
 constexpr std::array<std::string_view, 20> kFiatCodes = {
-    "AUD", "CAD", "CHF", "CNY", "EUR",
-    "GBP", "HKD", "IDR", "INR", "JPY",
-    "KRW", "MYR", "NZD", "PHP", "SGD",
-    "THB", "TWD", "USD", "VND", "ZAR"
+    "AUD", "BRL", "CAD", "CHF", "CNY",
+    "EUR", "GBP", "HKD", "INR", "JPY",
+    "KRW", "MXN", "NOK", "NZD", "RUB",
+    "SEK", "SGD", "TWD", "USD", "ZAR"
 };
 
 [[nodiscard]] bool is_in(const auto& table, std::string_view code) {

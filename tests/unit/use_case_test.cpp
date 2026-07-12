@@ -1017,6 +1017,37 @@ TEST_F(UseCaseTest, Dashboard_AssetDistribution_AggregatesByAccountType) {
     EXPECT_EQ(savings_slices, 1);
 }
 
+// ---- Item 10: amount exceeding DB NUMERIC(20,8) is rejected before write ----
+
+TEST_F(UseCaseTest, CreateTransaction_WhenAmountExceedsDbPrecision_Rejected) {
+    auto s = seed();
+    CreateTransactionUseCase uc(*account_repo_, *tx_repo_, *uow_);
+
+    // 13 integer digits: beyond NUMERIC(20,8)'s 12-digit integer part.
+    CreateTransactionCommand too_big;
+    too_big.user_id = s.user;
+    too_big.account_id = s.cash;
+    too_big.type = TransactionType::Income;
+    too_big.amount = "1000000000000"; // 1e12
+    too_big.currency_code = "USD";
+    too_big.occurred_at = sample_time();
+    auto r1 = uc.execute(too_big);
+    ASSERT_FALSE(r1.has_value());
+    EXPECT_EQ(r1.error().code, ErrorCode::ValidationError);
+
+    // 9 fractional digits: beyond scale 8 (would round on write).
+    CreateTransactionCommand too_precise;
+    too_precise.user_id = s.user;
+    too_precise.account_id = s.cash;
+    too_precise.type = TransactionType::Income;
+    too_precise.amount = "1.123456789";
+    too_precise.currency_code = "USD";
+    too_precise.occurred_at = sample_time();
+    auto r2 = uc.execute(too_precise);
+    ASSERT_FALSE(r2.has_value());
+    EXPECT_EQ(r2.error().code, ErrorCode::ValidationError);
+}
+
 // ---- Item 14: in-memory repos provide read-your-writes within a transaction ----
 
 TEST_F(UseCaseTest, UserRepository_ReadYourWrites_WithinTransaction) {
