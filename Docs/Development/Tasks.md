@@ -1,6 +1,6 @@
 # Personal Finance Hub (PFH) - Phase 1 待办任务跟踪
 
-Version: 1.3
+Version: 1.4
 Backend: C++23
 Architecture: Clean Architecture + Lightweight DDD
 Status: Active
@@ -13,6 +13,7 @@ Status: Active
 
 - `[ ]` 表示未开始或未完成。
 - `[x]` 表示已经完成，并且相关文档、代码或验证结果已经落地。
+- `[~]` 表示部分完成：接口/规则已交付并被测试覆盖，但仍有明确的剩余验证或实现（通常是真实 DB 连库或后台接线），在同一任务下用子项注明剩余范围与归属任务。
 - 任务 ID 按本文档当前顺序连续编号；调整任务顺序后应同步刷新 ID。
 
 ### 1.2 更新规则
@@ -74,7 +75,8 @@ Status: Active
 - [x] 搭建 GoogleTest 单元测试框架，并提供统一测试命令 <!-- id: 10 -->
 - [x] 建立测试数据目录和测试命名规范，覆盖正常路径、边界路径和错误路径 <!-- id: 11 -->
 - [x] 编写核心金融原语与领域服务的单元测试 <!-- id: 12 -->
-- [x] 编写 Repository 集成测试，覆盖 PostgreSQL、事务和 outbox 落库行为 <!-- id: 13 -->
+- [~] 编写 Repository 集成测试，覆盖事务和 outbox 落库行为 <!-- id: 13 -->
+  - 更正（S09 review item 16）：集成测试当前运行在 In-Memory 语义等价实现上，**尚未对真实 PostgreSQL 执行**。事务、outbox 同事务落库、用户隔离、乐观锁、余额缓存、历史汇率、转账聚合级联删除等规则已被 12 个集成用例覆盖，但连库验证归入 #46，S12 用同一批 scenarios 对真实测试库复跑后方可标记为 `[x]`。
 - [ ] 编写 API 接口集成测试 <!-- id: 14 -->
 - [x] 增加本地质量检查命令，至少覆盖构建、测试和 Markdown 检查 <!-- id: 15 -->
 
@@ -92,33 +94,38 @@ Status: Active
 - [x] 实现 `Account` 与 `Transaction` 领域实体基础，覆盖账户类型、币种、归档状态、流水类型、负余额和版本字段 <!-- id: 22 -->
 - [x] 补充 `Transaction` 业务分类规则，区分收入、支出、调整和转账派生流水 <!-- id: 23 -->
 - [x] 实现 `TransferAggregate` 聚合根，支持三种构造模式、手续费来源和汇兑损益记录 <!-- id: 24 -->
+  - 澄清（S09 review item 16）：本任务交付的是**聚合结构**——三种构造模式、`FeeSource` 枚举、以及承载手续费/汇兑损益的 `adjustments` 集合，并由领域测试覆盖。**从 `CreateTransferCommand` 解析手续费并构造独立 `Adjustment` 流水的应用层路径属于 #48**，两者不冲突：#24 是领域能力，#48 是用例接线。
 - [x] 实现 `TransferDomainService`，只负责纯领域规则，不访问 Repository 或发布事件 <!-- id: 25 -->
 - [x] 实现 `BalanceCalculationService`，覆盖余额重建、转账排除和调整流水处理 <!-- id: 26 -->
 - [x] 实现分类 board 校验规则，确保收入、支出和调整类型不能误用分类 <!-- id: 27 -->
 
 ### 3.6 持久化与事务 (Repository & Persistence)
 
-- [x] 配置 PostgreSQL 16+ 数据库连接与 Flyway 迁移脚本 <!-- id: 28 -->
+- [~] 配置 PostgreSQL 16+ 数据库连接与 Flyway 迁移脚本 <!-- id: 28 -->
+  - 更正（S09 review item 16）：Flyway 迁移脚本（V1–V3）与连接**配置**（`DatabaseConfig` + env overlay，含 `PFH_DB_*` 与端口合法性校验）已交付；但运行期真实 Drogon `DbClient` 连接池接线未完成，随 #46 一并落地。
 - [x] 编写 Phase 1 初始迁移，覆盖用户、偏好、账户、分类、流水、汇率、余额缓存和 outbox 表 <!-- id: 29 -->
-- [x] 实现 `DrogonUnitOfWork`，确保业务写入和 outbox 写入使用同一数据库事务上下文 <!-- id: 30 -->
-  - 备注：当前交付为 `IUnitOfWork` + `InMemoryUnitOfWork`（语义等价，可无 DB 验证）。`DrogonUnitOfWork` SQL 适配器待 Drogon/PostgreSQL 依赖接入后替换，接口不变。
-- [x] 实现 `UserRepository` 与 `UserPreferenceRepository` <!-- id: 31 -->
-  - 备注：Domain 接口 + In-Memory 实现已完成；PostgreSQL 实现待接线。
-- [x] 实现 `AccountRepository` 与 `TransactionRepository`，覆盖用户隔离、乐观锁和余额缓存更新 <!-- id: 32 -->
-  - 备注：同上，规则已由 integration tests 覆盖。
-- [x] 实现 `ExchangeRateRepository`，保证汇率 append-only 和历史时间点查询 <!-- id: 33 -->
-  - 备注：同上。
+- [~] 实现 `DrogonUnitOfWork`，确保业务写入和 outbox 写入使用同一数据库事务上下文 <!-- id: 30 -->
+  - 更正（S09 review item 16）：当前交付为 `IUnitOfWork` + `InMemoryUnitOfWork`（语义等价，业务写入与 outbox 同事务提交/回滚，事件 occurred_at 落库），可在无 DB 环境验证。**`DrogonUnitOfWork` SQL 适配器尚未实现**，随 #46 落地，接口不变。
+- [~] 实现 `UserRepository` 与 `UserPreferenceRepository` <!-- id: 31 -->
+  - 更正（S09 review item 16）：Domain 接口 + In-Memory 实现已完成（含事务内 read-your-writes、偏好默认值对齐 schema）；**PostgreSQL 实现待接线（#46）**。
+- [~] 实现 `AccountRepository` 与 `TransactionRepository`，覆盖用户隔离、乐观锁和余额缓存更新 <!-- id: 32 -->
+  - 更正（S09 review item 16）：Domain 接口 + In-Memory 实现已完成，规则由集成测试覆盖（用户隔离、乐观锁、余额缓存、FOR UPDATE 锁定读入口、转账聚合级联删除）；**PostgreSQL 实现待接线（#46）**。
+- [~] 实现 `ExchangeRateRepository`，保证汇率 append-only 和历史时间点查询 <!-- id: 33 -->
+  - 更正（S09 review item 16）：Domain 接口 + In-Memory 实现已完成；**PostgreSQL 实现待接线（#46）**。
+- [x] 实现 `ICategoryRepository`（Domain 接口 + In-Memory 实现），供报表按一级分类聚合并解析分类名 <!-- id: 33a -->
+  - 说明（S09 review）：本轮新增，堵住 #47 的报表依赖；PostgreSQL 实现随 #46/#47 落地。
 - [ ] 实现 `OutboxPublisherJob`，支持 pending、failed、重试次数和 dead letter 记录 <!-- id: 34 -->
 
 ### 3.7 应用层用例 (Application Use Cases)
 
 - [x] 实现 `CreateTransactionUseCase` 与 `DeleteTransactionUseCase`，包含权限校验、事务边界和领域错误映射 <!-- id: 35 -->
 - [x] 实现 `CreateTransferUseCase`，串联账户读取、转账聚合构造、余额更新和 outbox 写入 <!-- id: 36 -->
-- [x] 实现 `RefreshExchangeRatesUseCase`，负责外部汇率拉取、降级、告警事件和非阻塞调度入口 <!-- id: 37 -->
-  - 备注：Provider 端口 + 降级路径已实现；真实 HTTP Provider 与后台调度入口在 S10/S11 接线。
+- [~] 实现 `RefreshExchangeRatesUseCase`，负责外部汇率拉取、降级、告警事件和非阻塞调度入口 <!-- id: 37 -->
+  - 更正（S09 review item 15/16）：Provider 端口 + 降级路径 + 降级告警事件（`ExchangeRateRefreshFailedEvent`，含历史汇率可用性标记）已实现；**真实 HTTP Provider 与后台非阻塞调度入口（Drogon event loop）尚未接线**，在 S10/S11 完成后方可标记 `[x]`。
 - [x] 实现账户查询与余额查询用例，提供 API 所需 DTO，不暴露持久化模型 <!-- id: 38 -->
 - [x] 实现报表 QueryService，支持 net worth、cash flow 和 dashboard summary 的最小查询 <!-- id: 39 -->
-  - 备注：cash flow 显式排除 Transfer；跨币种折算走汇率仓储，缺失汇率报错。
+  - 备注：cash flow 显式排除 Transfer；跨币种折算走汇率仓储（直接/反向/USD 三角），缺失汇率报错、DB 故障映射为 InfrastructureFailure（不吞错）。
+  - S09 review 增强：月窗按 `UserPreference.timezone` 计算（半开区间 `[start, end)`）；净资产按余额正负拆分资产/负债、资产分布按 `AccountType` 聚合；top-expense 支持按一级分类回溯聚合（依赖 `ICategoryRepository`，未提供时回退按原始 category_id）；signed Adjustment 正数计入收入、负数计入支出。
 
 ### 3.8 表现层与 API (Presentation & APIs)
 
@@ -165,8 +172,9 @@ Status: Active
   - 说明：当前 S08 交付为「Domain 接口 + In-Memory 语义等价实现」，规则可测但未连库；#30–#33 的 Drogon 适配器部分尚未完成。
   - RLS 依赖：真实仓储在鉴权后必须对数据库连接执行 `SET app.current_user_id = '<uid>'`（每请求/每事务），否则 fail-closed 策略会使查询返回空。连接池复用时须在归还前 `RESET`。
   - In-Memory 模型仍缺 `transaction_tag_relations.user_id`、`account_balance_cache.user_id` 等新增列的对应；接 SQL 时以迁移 schema 为准。
-- [ ] 实现 `ICategoryRepository`，由仓储解析分类 board，替换 `CreateTransactionCommand.category_board` 的显式传入方式 <!-- id: 47 -->
-  - 说明：本轮已用「命令显式携带 board + 用例校验」堵住规则缺口；长期应由 Category 持久化解析 board，避免依赖调用方传值。
+- [~] 实现 `ICategoryRepository`，由仓储解析分类 board，替换 `CreateTransactionCommand.category_board` 的显式传入方式 <!-- id: 47 -->
+  - 进展（S09 review 本轮）：已交付 `ICategoryRepository` 接口 + In-Memory 实现（含 `resolve_root_id_for_user` 一级分类回溯），并接入报表 top-expense 按一级分类聚合（见 #33a、#39）。
+  - 剩余：让 `CreateTransactionUseCase` 通过仓储解析 board、移除 `CreateTransactionCommand.category_board` 的显式传入；以及 PostgreSQL 实现（随 #46）。
 - [ ] 实现转账手续费 / 汇兑损益路径：`CreateTransferCommand` 支持 `FeeSource` 与手续费金额，用例构造独立 `Adjustment` 流水，并测试「手续费不误计入 income/expense」 <!-- id: 48 -->
 
 ### 5.2 中优先级
@@ -182,3 +190,32 @@ Status: Active
 - [ ] 报表命名对齐：在架构文档补注「Phase 1 以 `ReportQueryService` 承载最小报表读路径，替代 `GenerateMonthlyReportUseCase`」 <!-- id: 54 -->
 - [ ] DTO 金额符号说明：在 API 设计文档写清「业务展示的正数金额 vs 存储层带符号金额」的边界与转换规则 <!-- id: 55 -->
 - [ ] `TransferResultDto` 金额来源为 Domain 正数幅度，与持久化带符号存储不同；在表现层统一对外表示口径 <!-- id: 56 -->
+
+---
+
+## 6. S09 收尾 review 本轮修复记录
+
+来源：S09 交付后第二、三轮一致性 review。以下为本轮**已落地并有测试覆盖**的修复，按临时清单编号归档。测试基线：229 单元 + 12 集成全部通过。
+
+### 6.1 报表收尾（S10 Report API 前）
+
+- 报表月窗按 `UserPreference.timezone` 计算，半开区间 `[month_start, next_month_start)`；月初/月末附近流水不再因 UTC 偏移归错月份。（对应用户点名的报表时区项）
+- top-expense 分类按**一级（root）分类**回溯聚合并解析分类名；无 `ICategoryRepository` 时回退按原始 category_id。（对应用户点名的占位实现项 + #47 部分）
+
+### 6.2 领域 / 应用语义
+
+- **item 9 金额符号 / Adjustment 语义**：Adjustment 改为带符号——正数=流入（返利/补贴/FX Gain），负数=流出（手续费/更正/FX Loss）；余额、cash flow、支出分类三处一致；零额 Adjustment 拒绝。
+- **item 11 命令默认时间**：`CreateTransaction/Transfer/DeleteTransaction` 命令时间改为可选，用例缺省补 `now()`，杜绝落到 1970 epoch。
+- **item 13 Domain/schema 漂移**：`Account` 增加可选 `category_override`（默认从 type 派生，可持久化覆盖）；`Category` 字段对齐 schema（`source`/`template_id`/`sort_order`/`deleted_at`，移除 color/icon）；`UserPreference` 默认值改为 `zh-CN`/`Asia/Shanghai` 对齐 DB。
+
+### 6.3 事件 / 事务 / 配置
+
+- **item 12 事件契约**：新增强类型领域事件（`TransactionCreated`/`TransactionDeleted`/`TransferCompleted`/`AccountDangerouslyDeleted`/`ExchangeRateRefreshed`/`ExchangeRateRefreshFailed`），payload 携带 `userId`/`occurredAt` 等必备字段；outbox 记录 `occurred_at`。生产用例不再使用测试性 `SimpleDomainEvent`。
+- **item 14 In-Memory 事务语义**：User/Preference 仓储改为 staged 优先（事务内 read-your-writes）。剩余「仓储忽略传入事务上下文」归入 #46 真实 PostgreSQL 实现。
+- **item 15 Config / 汇率降级**：config overlay 补 `PFH_ENVIRONMENT`、`PFH_EXCHANGE_RATE_API_KEY`，非法端口改为报错而非静默回退；汇率降级发 `ExchangeRateRefreshFailedEvent` 并校验历史汇率可用性。
+- **item 10 Currency / Decimal 与 DB 边界**：Domain 币种白名单与 V2 种子统一（20 法币 + 13 加密）；`Decimal::fits_numeric_20_8/20_10` 定义 DB 数值边界，`CreateTransaction` 拒绝超界金额。真实连库范围/舍入校验随 #46、S12 验证。
+
+### 6.4 仍需在 S12 收尾核对（item 16）
+
+- #13/#28/#30/#31/#32/#33/#37 已从 `[x]` 更正为 `[~]`，注明「In-Memory 语义等价已交付、真实 PostgreSQL/Drogon 连库与后台接线属 #46/S10/S11」。S12 终审需对真实测试库复跑同批 scenarios 后再定稿。
+- item 14 的事务上下文真实性、item 10 的连库数值边界，均需 S12 在真实 PostgreSQL 上验证。
