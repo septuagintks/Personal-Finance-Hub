@@ -86,6 +86,7 @@ public:
             rec.payload_json = event->payload_json();
             rec.status = "pending";
             rec.retry_count = 0;
+            rec.occurred_at = event->occurred_at();
             store_.staged_outbox.push_back(std::move(rec));
         }
 

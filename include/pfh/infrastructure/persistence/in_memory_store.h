@@ -17,6 +17,7 @@
 #include "pfh/domain/transaction.h"
 #include "pfh/domain/user.h"
 #include "pfh/domain/user_preference.h"
+#include <chrono>
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -34,6 +35,9 @@ struct OutboxRecord {
     std::string payload_json;
     std::string status; // pending | published | failed | dead_letter
     int retry_count = 0;
+    // When the event fact occurred. Consumers (audit, cache invalidation) rely
+    // on this; the domain_events_outbox table has an occurred_at column.
+    std::chrono::system_clock::time_point occurred_at{};
 };
 
 struct InMemoryUserRecord {

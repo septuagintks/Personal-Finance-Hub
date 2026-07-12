@@ -8,7 +8,7 @@
 #include "pfh/application/error.h"
 #include "pfh/application/error_mapping.h"
 #include "pfh/application/persistence/i_unit_of_work.h"
-#include "pfh/domain/events/simple_domain_event.h"
+#include "pfh/domain/events/domain_events.h"
 #include "pfh/domain/repositories/i_transaction_repository.h"
 #include <chrono>
 #include <memory>
@@ -57,11 +57,11 @@ public:
                 if (!deleted) {
                     return deleted;
                 }
-                uow_.register_event(std::make_shared<domain::SimpleDomainEvent>(
-                    "TransactionDeleted",
-                    "Transaction",
-                    cmd.transaction_id.to_string(),
-                    "{\"account_id\":" + existing->account_id().to_string() + "}"));
+                uow_.register_event(std::make_shared<domain::TransactionDeletedEvent>(
+                    cmd.user_id,
+                    cmd.transaction_id,
+                    existing->account_id(),
+                    deleted_at));
                 return {};
             });
         if (!write) {

@@ -8,7 +8,7 @@
 #include "pfh/application/error.h"
 #include "pfh/application/error_mapping.h"
 #include "pfh/application/persistence/i_unit_of_work.h"
-#include "pfh/domain/events/simple_domain_event.h"
+#include "pfh/domain/events/domain_events.h"
 #include "pfh/domain/repositories/i_account_repository.h"
 #include "pfh/domain/repositories/i_transaction_repository.h"
 #include "pfh/domain/transfer_domain_service.h"
@@ -87,12 +87,12 @@ public:
                 }
                 persisted = *saved;
 
-                uow_.register_event(std::make_shared<domain::SimpleDomainEvent>(
-                    "TransferCompleted",
-                    "TransferGroup",
-                    persisted.group_id.to_string(),
-                    "{\"source\":" + cmd.source_account_id.to_string() +
-                        ",\"target\":" + cmd.target_account_id.to_string() + "}"));
+                uow_.register_event(std::make_shared<domain::TransferCompletedEvent>(
+                    cmd.user_id,
+                    persisted.group_id,
+                    cmd.source_account_id,
+                    cmd.target_account_id,
+                    aggregate->outgoing().occurred_at()));
                 return {};
             });
         if (!write) {

@@ -12,7 +12,7 @@
 #include "pfh/application/error_mapping.h"
 #include "pfh/application/persistence/i_unit_of_work.h"
 #include "pfh/application/ports/i_exchange_rate_provider.h"
-#include "pfh/domain/events/simple_domain_event.h"
+#include "pfh/domain/events/domain_events.h"
 #include "pfh/domain/repositories/i_account_repository.h"
 #include "pfh/domain/repositories/i_exchange_rate_repository.h"
 #include <memory>
@@ -88,11 +88,15 @@ public:
                     }
                     ++appended;
                 }
-                uow_.register_event(std::make_shared<domain::SimpleDomainEvent>(
-                    "ExchangeRateRefreshed",
-                    "ExchangeRate",
-                    "bulk",
-                    "{\"count\":" + std::to_string(appended) + "}"));
+                // Provider identity is not threaded into this use case yet; the
+                // IExchangeRateProvider port is abstract. Emit the pivot (USD)
+                // as baseCurrency and a neutral provider label until the real
+                // HTTP provider is wired in S10/S11.
+                uow_.register_event(std::make_shared<domain::ExchangeRateRefreshedEvent>(
+                    "exchange-rate-provider",
+                    pivot->code(),
+                    appended,
+                    std::chrono::system_clock::now()));
                 return {};
             });
         if (!write) {

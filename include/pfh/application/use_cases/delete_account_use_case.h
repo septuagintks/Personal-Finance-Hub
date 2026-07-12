@@ -12,9 +12,10 @@
 #include "pfh/application/error.h"
 #include "pfh/application/error_mapping.h"
 #include "pfh/application/persistence/i_unit_of_work.h"
-#include "pfh/domain/events/simple_domain_event.h"
+#include "pfh/domain/events/domain_events.h"
 #include "pfh/domain/repositories/i_account_repository.h"
 #include "pfh/domain/repositories/i_transaction_repository.h"
+#include <chrono>
 #include <memory>
 #include <optional>
 
@@ -77,13 +78,13 @@ public:
                     return std::unexpected(r.error());
                 }
 
-                // Event name must match the S11 event contract (14_Event_Design
-                // §2.3) so AuditLogHandler / SecurityNotificationHandler receive it.
-                uow_.register_event(std::make_shared<domain::SimpleDomainEvent>(
-                    "AccountDangerouslyDeleted",
-                    "Account",
-                    cmd.account_id.to_string(),
-                    "{\"user_id\":" + cmd.user_id.to_string() + "}"));
+                // Strongly-typed event matching the S11 contract (14_Event_Design
+                // §2.3) so AuditLogHandler / SecurityNotificationHandler receive
+                // the required userId/accountId/occurredAt fields.
+                uow_.register_event(std::make_shared<domain::AccountDangerouslyDeletedEvent>(
+                    cmd.user_id,
+                    cmd.account_id,
+                    std::chrono::system_clock::now()));
                 return {};
             });
         if (!write) {

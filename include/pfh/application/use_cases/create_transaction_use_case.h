@@ -8,7 +8,7 @@
 #include "pfh/application/error.h"
 #include "pfh/application/error_mapping.h"
 #include "pfh/application/persistence/i_unit_of_work.h"
-#include "pfh/domain/events/simple_domain_event.h"
+#include "pfh/domain/events/domain_events.h"
 #include "pfh/domain/repositories/i_account_repository.h"
 #include "pfh/domain/repositories/i_transaction_repository.h"
 #include "pfh/domain/category.h"
@@ -123,11 +123,11 @@ public:
                     return std::unexpected(saved.error());
                 }
                 persisted = std::move(*saved);
-                uow_.register_event(std::make_shared<domain::SimpleDomainEvent>(
-                    "TransactionCreated",
-                    "Transaction",
-                    persisted->id().to_string(),
-                    "{\"account_id\":" + cmd.account_id.to_string() + "}"));
+                uow_.register_event(std::make_shared<domain::TransactionCreatedEvent>(
+                    cmd.user_id,
+                    persisted->id(),
+                    cmd.account_id,
+                    occurred_at));
                 return {};
             });
         if (!write) {

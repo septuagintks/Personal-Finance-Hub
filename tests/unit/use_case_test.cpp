@@ -988,6 +988,61 @@ TEST_F(UseCaseTest, Dashboard_AssetDistribution_AggregatesByAccountType) {
     EXPECT_EQ(savings_slices, 1);
 }
 
+// ---- Item 12: strongly-typed events carry userId/occurredAt; outbox stores time ----
+
+TEST_F(UseCaseTest, TransactionCreatedEvent_CarriesRequiredFieldsAndOutboxTime) {
+    auto s = seed();
+    CreateTransactionUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionCommand income;
+    income.user_id = s.user;
+    income.account_id = s.cash;
+    income.type = TransactionType::Income;
+    income.amount = "100";
+    income.currency_code = "USD";
+    income.occurred_at = sample_time();
+    auto result = uc.execute(income);
+    ASSERT_TRUE(result.has_value());
+
+    ASSERT_EQ(store_->outbox.size(), 1u);
+    const auto& rec = store_->outbox.front();
+    EXPECT_EQ(rec.event_name, "TransactionCreated");
+    EXPECT_EQ(rec.aggregate_type, "Transaction");
+    // Payload carries the contract fields.
+    EXPECT_NE(rec.payload_json.find("\"userId\":" + std::to_string(s.user.value())),
+              std::string::npos);
+    EXPECT_NE(rec.payload_json.find("\"accountId\":" + std::to_string(s.cash.value())),
+              std::string::npos);
+    EXPECT_NE(rec.payload_json.find("\"occurredAt\":"), std::string::npos);
+    // Outbox row records the event time (== the transaction's occurred_at).
+    EXPECT_EQ(rec.occurred_at, sample_time());
+}
+
+TEST_F(UseCaseTest, TransferCompletedEvent_CarriesSourceTargetAndUser) {
+    auto s = seed();
+    CreateTransferUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransferCommand cmd;
+    cmd.user_id = s.user;
+    cmd.source_account_id = s.cash;
+    cmd.target_account_id = s.savings;
+    cmd.mode = TransferInputMode::BothAmounts;
+    cmd.outgoing_amount = "100";
+    cmd.incoming_amount = "100";
+    cmd.occurred_at = sample_time();
+    ASSERT_TRUE(uc.execute(cmd).has_value());
+
+    ASSERT_EQ(store_->outbox.size(), 1u);
+    const auto& rec = store_->outbox.front();
+    EXPECT_EQ(rec.event_name, "TransferCompleted");
+    EXPECT_NE(rec.payload_json.find("\"sourceAccountId\":" +
+                                    std::to_string(s.cash.value())),
+              std::string::npos);
+    EXPECT_NE(rec.payload_json.find("\"targetAccountId\":" +
+                                    std::to_string(s.savings.value())),
+              std::string::npos);
+    EXPECT_NE(rec.payload_json.find("\"userId\":"), std::string::npos);
+    EXPECT_EQ(rec.occurred_at, sample_time());
+}
+
 // ---- Item 13: Account category override persists and drives net worth ----
 
 TEST_F(UseCaseTest, AccountCategoryOverride_PersistsAndOverridesDerivedCategory) {
