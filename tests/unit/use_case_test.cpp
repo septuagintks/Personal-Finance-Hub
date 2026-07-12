@@ -988,6 +988,45 @@ TEST_F(UseCaseTest, Dashboard_AssetDistribution_AggregatesByAccountType) {
     EXPECT_EQ(savings_slices, 1);
 }
 
+// ---- Item 14: in-memory repos provide read-your-writes within a transaction ----
+
+TEST_F(UseCaseTest, UserRepository_ReadYourWrites_WithinTransaction) {
+    auto s = seed();
+    // Save a preference change and re-read it in the SAME transaction; the
+    // updated value must be visible (staged shadows committed).
+    auto ok = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
+        UserPreference updated(s.user, ccy("EUR"), "de-DE", "Europe/Berlin");
+        if (auto r = pref_repo_->save(tx, updated); !r) return std::unexpected(r.error());
+        // Read-your-writes: must see EUR / Berlin, not the seeded USD default.
+        auto reread = pref_repo_->find_by_user(s.user);
+        if (!reread) return std::unexpected(reread.error());
+        EXPECT_EQ(reread->base_currency().code(), "EUR");
+        EXPECT_EQ(reread->timezone(), "Europe/Berlin");
+        return {};
+    });
+    ASSERT_TRUE(ok.has_value()) << ok.error().message;
+
+    // After commit the change persists.
+    auto after = pref_repo_->find_by_user(s.user);
+    ASSERT_TRUE(after.has_value());
+    EXPECT_EQ(after->base_currency().code(), "EUR");
+}
+
+TEST_F(UseCaseTest, UserRepository_ReadYourWrites_FindByUsername) {
+    UserId uid;
+    auto ok = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
+        auto created = user_repo_->create(tx, "dave", "hash", ccy("USD"));
+        if (!created) return std::unexpected(created.error());
+        uid = *created;
+        // The just-created (staged, uncommitted) user must be findable by name.
+        auto found = user_repo_->find_by_username("dave");
+        if (!found) return std::unexpected(found.error());
+        EXPECT_EQ(found->id().value(), uid.value());
+        return {};
+    });
+    ASSERT_TRUE(ok.has_value()) << ok.error().message;
+}
+
 // ---- Item 12: strongly-typed events carry userId/occurredAt; outbox stores time ----
 
 TEST_F(UseCaseTest, TransactionCreatedEvent_CarriesRequiredFieldsAndOutboxTime) {

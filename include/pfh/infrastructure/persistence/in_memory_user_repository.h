@@ -17,14 +17,16 @@ public:
 
     [[nodiscard]] domain::RepositoryResult<domain::User> find_by_id(
         domain::UserId id) override {
-        if (auto it = store_.users.find(id.value()); it != store_.users.end()) {
-            return it->second.user;
-        }
+        // Read-your-writes: staged (uncommitted) rows shadow committed ones, so
+        // a user updated earlier in this transaction reads back its new value.
         if (store_.in_transaction) {
             if (auto it = store_.staged_users.find(id.value());
                 it != store_.staged_users.end()) {
                 return it->second.user;
             }
+        }
+        if (auto it = store_.users.find(id.value()); it != store_.users.end()) {
+            return it->second.user;
         }
         return std::unexpected(domain::RepositoryError::not_found(
             "User not found: " + id.to_string()));
@@ -32,16 +34,22 @@ public:
 
     [[nodiscard]] domain::RepositoryResult<domain::User> find_by_username(
         const std::string& username) override {
-        for (const auto& [_, rec] : store_.users) {
-            if (rec.user.username() == username) {
-                return rec.user;
-            }
-        }
+        // Staged rows take precedence over committed for read-your-writes.
         if (store_.in_transaction) {
             for (const auto& [_, rec] : store_.staged_users) {
                 if (rec.user.username() == username) {
                     return rec.user;
                 }
+            }
+        }
+        for (const auto& [id, rec] : store_.users) {
+            // Skip a committed row that has been re-staged (updated) this
+            // transaction; the staged loop above already returned the fresh copy.
+            if (store_.in_transaction && store_.staged_users.contains(id)) {
+                continue;
+            }
+            if (rec.user.username() == username) {
+                return rec.user;
             }
         }
         return std::unexpected(domain::RepositoryError::not_found(
@@ -109,26 +117,29 @@ public:
 
     [[nodiscard]] domain::RepositoryResult<domain::UserPreference> find_by_user(
         domain::UserId user_id) override {
-        if (auto it = store_.preferences.find(user_id.value());
-            it != store_.preferences.end()) {
-            return it->second;
-        }
+        // Read-your-writes: a preference saved earlier in this transaction wins
+        // over the committed row.
         if (store_.in_transaction) {
             if (auto it = store_.staged_preferences.find(user_id.value());
                 it != store_.staged_preferences.end()) {
                 return it->second;
             }
         }
-
-        // Fallback: compose defaults from users.base_currency_code.
-        if (auto uit = store_.users.find(user_id.value()); uit != store_.users.end()) {
-            return domain::UserPreference(user_id, uit->second.base_currency);
+        if (auto it = store_.preferences.find(user_id.value());
+            it != store_.preferences.end()) {
+            return it->second;
         }
+
+        // Fallback: compose defaults from users.base_currency_code. Staged user
+        // rows shadow committed ones here too.
         if (store_.in_transaction) {
             if (auto uit = store_.staged_users.find(user_id.value());
                 uit != store_.staged_users.end()) {
                 return domain::UserPreference(user_id, uit->second.base_currency);
             }
+        }
+        if (auto uit = store_.users.find(user_id.value()); uit != store_.users.end()) {
+            return domain::UserPreference(user_id, uit->second.base_currency);
         }
         return std::unexpected(domain::RepositoryError::not_found(
             "User preference not found for user: " + user_id.to_string()));
