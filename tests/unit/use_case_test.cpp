@@ -9,6 +9,7 @@
 #include "pfh/application/use_cases/delete_transaction_use_case.h"
 #include "pfh/application/use_cases/refresh_exchange_rates_use_case.h"
 #include "pfh/infrastructure/persistence/in_memory_account_repository.h"
+#include "pfh/infrastructure/persistence/in_memory_category_repository.h"
 #include "pfh/infrastructure/persistence/in_memory_exchange_rate_repository.h"
 #include "pfh/infrastructure/persistence/in_memory_store.h"
 #include "pfh/infrastructure/persistence/in_memory_transaction_repository.h"
@@ -59,6 +60,7 @@ protected:
         tx_repo_ = std::make_unique<InMemoryTransactionRepository>(*store_);
         account_repo_ = std::make_unique<InMemoryAccountRepository>(*store_, *tx_repo_);
         rate_repo_ = std::make_unique<InMemoryExchangeRateRepository>(*store_);
+        category_repo_ = std::make_unique<InMemoryCategoryRepository>(*store_);
         provider_ = std::make_unique<MockExchangeRateProvider>();
     }
 
@@ -106,6 +108,7 @@ protected:
     std::unique_ptr<ITransactionRepository> tx_repo_;
     std::unique_ptr<IAccountRepository> account_repo_;
     std::unique_ptr<IExchangeRateRepository> rate_repo_;
+    std::unique_ptr<ICategoryRepository> category_repo_;
     std::unique_ptr<MockExchangeRateProvider> provider_;
 };
 
@@ -983,6 +986,106 @@ TEST_F(UseCaseTest, Dashboard_AssetDistribution_AggregatesByAccountType) {
         }
     }
     EXPECT_EQ(savings_slices, 1);
+}
+
+// ---- Group A: report follow-ups (timezone month window + root-category rollup) ----
+
+// Dashboard month window honors the user's timezone: a transaction stamped at
+// 2025-07-31 18:00 UTC is Aug 1 02:00 in Asia/Shanghai (UTC+8), so with a
+// Shanghai preference it belongs to AUGUST, not July.
+TEST_F(UseCaseTest, Dashboard_UsesUserTimezoneForMonthWindow) {
+    auto s = seed();
+    auto setup = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
+        // Shanghai timezone preference.
+        UserPreference pref(s.user, ccy("USD"), "zh-CN", "Asia/Shanghai");
+        if (auto r = pref_repo_->save(tx, pref); !r) return std::unexpected(r.error());
+        if (auto r = rate_repo_->append(tx, rate("USD", "CNY", "7", 1000, "ECB")); !r) {
+            return std::unexpected(r.error());
+        }
+        return {};
+    });
+    ASSERT_TRUE(setup.has_value());
+
+    CreateTransactionUseCase create_uc(*account_repo_, *tx_repo_, *uow_);
+    // 2025-07-31 18:00 UTC == 2025-08-01 02:00 Shanghai.
+    const auto july31_evening_utc = std::chrono::system_clock::from_time_t(1753984800);
+    CreateTransactionCommand income;
+    income.user_id = s.user;
+    income.account_id = s.cash;
+    income.type = TransactionType::Income;
+    income.amount = "600";
+    income.currency_code = "USD";
+    income.occurred_at = july31_evening_utc;
+    ASSERT_TRUE(create_uc.execute(income).has_value());
+
+    ReportQueryService reports(*account_repo_, *tx_repo_, *rate_repo_, *pref_repo_);
+    // "now" = 2025-08-05 in Shanghai => August window; the txn falls IN August.
+    const auto now_aug = std::chrono::system_clock::from_time_t(1754352000); // 2025-08-05 00:00 UTC
+    auto dash_aug = reports.dashboard_summary(s.user, now_aug);
+    ASSERT_TRUE(dash_aug.has_value()) << dash_aug.error().message;
+    EXPECT_EQ(dash_aug->income_total, "600");
+
+    // "now" = 2025-07-15 in Shanghai => July window; the txn is NOT in July.
+    const auto now_jul = std::chrono::system_clock::from_time_t(1752537600); // 2025-07-15 00:00 UTC
+    auto dash_jul = reports.dashboard_summary(s.user, now_jul);
+    ASSERT_TRUE(dash_jul.has_value()) << dash_jul.error().message;
+    EXPECT_EQ(dash_jul->income_total, "0");
+}
+
+// Top expense categories roll sub-categories up to their first-level parent
+// when a category repository is supplied, and use the root's human name.
+TEST_F(UseCaseTest, TopExpenseCategories_RollUpToRootCategory) {
+    auto s = seed();
+    CategoryId food_root;
+    CategoryId food_dining; // child of food_root
+    auto setup = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
+        // Rate so the seed's zero-balance CNY wallet can convert into USD base.
+        if (auto r = rate_repo_->append(tx, rate("USD", "CNY", "7", 1000, "ECB")); !r) {
+            return std::unexpected(r.error());
+        }
+        Category root(CategoryId{}, s.user, "Food", CategoryBoard::Expense);
+        auto rid = category_repo_->save(tx, root);
+        if (!rid) return std::unexpected(rid.error());
+        food_root = *rid;
+
+        Category child(CategoryId{}, s.user, "Dining", CategoryBoard::Expense, food_root);
+        auto cid = category_repo_->save(tx, child);
+        if (!cid) return std::unexpected(cid.error());
+        food_dining = *cid;
+        return {};
+    });
+    ASSERT_TRUE(setup.has_value()) << setup.error().message;
+
+    CreateTransactionUseCase create_uc(*account_repo_, *tx_repo_, *uow_);
+    // Two expenses: one on the child, one on the root — both roll to "Food".
+    for (auto [cat, amt] : std::vector<std::pair<CategoryId, std::string>>{
+             {food_dining, "30"}, {food_root, "20"}}) {
+        CreateTransactionCommand e;
+        e.user_id = s.user;
+        e.account_id = s.cash;
+        e.type = TransactionType::Expense;
+        e.amount = amt;
+        e.currency_code = "USD";
+        e.category_id = cat;
+        e.category_board = CategoryBoard::Expense;
+        e.occurred_at = sample_time();
+        ASSERT_TRUE(create_uc.execute(e).has_value());
+    }
+
+    ReportQueryService reports(
+        *account_repo_, *tx_repo_, *rate_repo_, *pref_repo_, category_repo_.get());
+    // sample_time() is 2024-06-25; use a matching "now" so the window covers it.
+    const auto now = std::chrono::system_clock::from_time_t(1719400000); // 2024-06-26
+    auto dash = reports.dashboard_summary(s.user, now);
+    ASSERT_TRUE(dash.has_value()) << dash.error().message;
+
+    // A single "Food" slice aggregating 30 + 20 = 50.
+    ASSERT_EQ(dash->top_expense_categories.size(), 1u);
+    const auto& slice = dash->top_expense_categories.front();
+    EXPECT_EQ(slice.category_name, "Food");
+    EXPECT_EQ(slice.amount, "50");
+    ASSERT_TRUE(slice.category_id.has_value());
+    EXPECT_EQ(slice.category_id->value(), food_root.value());
 }
 
 } // namespace pfh::test

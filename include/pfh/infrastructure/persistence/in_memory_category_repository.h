@@ -1,0 +1,156 @@
+// Personal Finance Hub - In-Memory Category Repository
+// Version: 1.0
+// C++23
+//
+// Models the `categories` table for repository/report tests without a DB.
+// Read-your-writes: staged (uncommitted) rows shadow committed ones so a
+// category saved earlier in the same transaction is visible to later reads.
+
+#pragma once
+
+#include "pfh/domain/repositories/i_category_repository.h"
+#include "pfh/infrastructure/persistence/in_memory_store.h"
+#include <optional>
+#include <utility>
+#include <vector>
+
+namespace pfh::infrastructure {
+
+class InMemoryCategoryRepository final : public domain::ICategoryRepository {
+public:
+    explicit InMemoryCategoryRepository(InMemoryStore& store) : store_(store) {}
+
+    [[nodiscard]] domain::RepositoryResult<domain::Category> find_by_id_for_user(
+        domain::CategoryId id,
+        domain::UserId user_id) override {
+        auto cat = lookup(id.value());
+        if (!cat.has_value()) {
+            return std::unexpected(domain::RepositoryError::not_found(
+                "Category not found: " + id.to_string()));
+        }
+        if (cat->owner() != user_id || cat->is_deleted()) {
+            // Do not leak existence across users; deleted rows read as absent.
+            return std::unexpected(domain::RepositoryError::not_found(
+                "Category not found for user"));
+        }
+        return *cat;
+    }
+
+    [[nodiscard]] domain::RepositoryResult<std::vector<domain::Category>> find_by_board(
+        domain::UserId user_id,
+        domain::CategoryBoard board) override {
+        std::vector<domain::Category> result;
+        for (const auto& [_, cat] : merged()) {
+            if (cat.owner() == user_id && !cat.is_deleted() && cat.board() == board) {
+                result.push_back(cat);
+            }
+        }
+        return result;
+    }
+
+    [[nodiscard]] domain::RepositoryResult<std::vector<domain::Category>> find_all_for_user(
+        domain::UserId user_id) override {
+        std::vector<domain::Category> result;
+        for (const auto& [_, cat] : merged()) {
+            if (cat.owner() == user_id && !cat.is_deleted()) {
+                result.push_back(cat);
+            }
+        }
+        return result;
+    }
+
+    [[nodiscard]] domain::RepositoryResult<domain::CategoryId> resolve_root_id_for_user(
+        domain::CategoryId id,
+        domain::UserId user_id) override {
+        auto current = find_by_id_for_user(id, user_id);
+        if (!current) {
+            return std::unexpected(current.error());
+        }
+        // Walk parents to the root, guarding against cycles / broken chains with
+        // a bound (a user cannot realistically have this many nesting levels).
+        constexpr int kMaxDepth = 64;
+        domain::Category node = *current;
+        for (int depth = 0; depth < kMaxDepth; ++depth) {
+            if (node.is_root()) {
+                return node.id();
+            }
+            auto parent = find_by_id_for_user(*node.parent_id(), user_id);
+            if (!parent) {
+                return std::unexpected(domain::RepositoryError::database(
+                    "Broken category parent chain for " + id.to_string()));
+            }
+            node = *parent;
+        }
+        return std::unexpected(domain::RepositoryError::database(
+            "Category parent chain too deep (possible cycle) for " + id.to_string()));
+    }
+
+    [[nodiscard]] domain::RepositoryResult<domain::CategoryId> save(
+        domain::ITransactionContext& /*tx*/,
+        const domain::Category& category) override {
+        if (!store_.in_transaction) {
+            return std::unexpected(domain::RepositoryError::database(
+                "save requires an active transaction"));
+        }
+
+        // Create path: invalid id => assign a new one.
+        if (!category.id().is_valid()) {
+            const auto id_value = store_.next_category_id++;
+            domain::Category created(
+                domain::CategoryId(id_value),
+                category.owner(),
+                category.name(),
+                category.board(),
+                category.parent_id(),
+                category.source(),
+                category.template_id(),
+                category.sort_order(),
+                category.deleted_at(),
+                category.created_at());
+            store_.staged_categories.emplace(id_value, std::move(created));
+            return domain::CategoryId(id_value);
+        }
+
+        // Update path: category must already exist (committed or staged).
+        const auto id = category.id().value();
+        if (!lookup(id).has_value()) {
+            return std::unexpected(domain::RepositoryError::not_found(
+                "Cannot update unknown category: " + category.id().to_string()));
+        }
+        store_.staged_categories.insert_or_assign(id, category);
+        return category.id();
+    }
+
+private:
+    // Committed rows overlaid with staged inserts/updates and staged deletes,
+    // so reads within an active transaction see this transaction's own writes.
+    [[nodiscard]] std::map<std::int64_t, domain::Category> merged() const {
+        std::map<std::int64_t, domain::Category> m = store_.categories;
+        if (store_.in_transaction) {
+            for (const auto& [id, cat] : store_.staged_categories) {
+                m.insert_or_assign(id, cat);
+            }
+            for (const auto id : store_.staged_deleted_categories) {
+                m.erase(id);
+            }
+        }
+        return m;
+    }
+
+    [[nodiscard]] std::optional<domain::Category> lookup(std::int64_t id) const {
+        if (store_.in_transaction) {
+            if (auto it = store_.staged_categories.find(id);
+                it != store_.staged_categories.end()) {
+                return it->second;
+            }
+        }
+        if (auto it = store_.categories.find(id); it != store_.categories.end()) {
+            return it->second;
+        }
+        return std::nullopt;
+    }
+
+    InMemoryStore& store_;
+};
+
+} // namespace pfh::infrastructure

@@ -41,6 +41,7 @@ public:
         store_.staged_preferences.clear();
         store_.staged_accounts.clear();
         store_.staged_transactions.clear();
+        store_.staged_categories.clear();
         store_.staged_transfer_groups.clear();
         store_.staged_balance_cache.clear();
         store_.staged_exchange_rates.clear();
@@ -49,6 +50,7 @@ public:
         store_.staged_deleted_transactions.clear();
         store_.staged_deleted_balance_cache.clear();
         store_.staged_deleted_transfer_groups.clear();
+        store_.staged_deleted_categories.clear();
 
         InMemoryTransactionContext tx(store_.next_tx_context_id++);
         auto result = action(tx);
@@ -60,6 +62,7 @@ public:
             store_.staged_preferences.clear();
             store_.staged_accounts.clear();
             store_.staged_transactions.clear();
+            store_.staged_categories.clear();
             store_.staged_transfer_groups.clear();
             store_.staged_balance_cache.clear();
             store_.staged_exchange_rates.clear();
@@ -68,6 +71,7 @@ public:
             store_.staged_deleted_transactions.clear();
             store_.staged_deleted_balance_cache.clear();
             store_.staged_deleted_transfer_groups.clear();
+            store_.staged_deleted_categories.clear();
             pending_events_.clear();
             return result;
         }
@@ -98,6 +102,9 @@ public:
         for (auto& [id, tx_rec] : store_.staged_transactions) {
             store_.transactions.insert_or_assign(id, std::move(tx_rec));
         }
+        for (auto& [id, cat] : store_.staged_categories) {
+            store_.categories.insert_or_assign(id, std::move(cat));
+        }
         for (auto& [id, tg] : store_.staged_transfer_groups) {
             store_.transfer_groups.insert_or_assign(id, std::move(tg));
         }
@@ -122,12 +129,16 @@ public:
         for (const auto id : store_.staged_deleted_transfer_groups) {
             store_.transfer_groups.erase(id);
         }
+        for (const auto id : store_.staged_deleted_categories) {
+            store_.categories.erase(id);
+        }
 
         store_.in_transaction = false;
         store_.staged_users.clear();
         store_.staged_preferences.clear();
         store_.staged_accounts.clear();
         store_.staged_transactions.clear();
+        store_.staged_categories.clear();
         store_.staged_transfer_groups.clear();
         store_.staged_balance_cache.clear();
         store_.staged_exchange_rates.clear();
@@ -136,6 +147,7 @@ public:
         store_.staged_deleted_transactions.clear();
         store_.staged_deleted_balance_cache.clear();
         store_.staged_deleted_transfer_groups.clear();
+        store_.staged_deleted_categories.clear();
         pending_events_.clear();
         return {};
     }

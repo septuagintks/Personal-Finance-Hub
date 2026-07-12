@@ -12,6 +12,7 @@
 #pragma once
 
 #include "pfh/domain/account.h"
+#include "pfh/domain/category.h"
 #include "pfh/domain/exchange_rate.h"
 #include "pfh/domain/transaction.h"
 #include "pfh/domain/user.h"
@@ -96,10 +97,13 @@ struct InMemoryStore {
     std::uint64_t next_tx_context_id = 1;
     std::int64_t next_outbox_id = 1;
 
+    std::int64_t next_category_id = 1;
+
     std::map<std::int64_t, InMemoryUserRecord> users;
     std::map<std::int64_t, domain::UserPreference> preferences;
     std::map<std::int64_t, domain::Account> accounts;
     std::map<std::int64_t, domain::Transaction> transactions;
+    std::map<std::int64_t, domain::Category> categories;
     std::map<std::int64_t, InMemoryTransferGroup> transfer_groups;
     std::map<std::int64_t, InMemoryBalanceCache> balance_cache;
     // Append-only: key is exchange_rate id, order of insertion preserved by map id.
@@ -113,6 +117,7 @@ struct InMemoryStore {
     std::map<std::int64_t, domain::UserPreference> staged_preferences;
     std::map<std::int64_t, domain::Account> staged_accounts;
     std::map<std::int64_t, domain::Transaction> staged_transactions;
+    std::map<std::int64_t, domain::Category> staged_categories;
     std::map<std::int64_t, InMemoryTransferGroup> staged_transfer_groups;
     std::map<std::int64_t, InMemoryBalanceCache> staged_balance_cache;
     std::map<std::int64_t, domain::ExchangeRate> staged_exchange_rates;
@@ -121,6 +126,7 @@ struct InMemoryStore {
     std::vector<std::int64_t> staged_deleted_transactions;
     std::vector<std::int64_t> staged_deleted_balance_cache;
     std::vector<std::int64_t> staged_deleted_transfer_groups;
+    std::vector<std::int64_t> staged_deleted_categories;
 };
 
 } // namespace pfh::infrastructure

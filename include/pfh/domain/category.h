@@ -18,6 +18,7 @@
 #include "pfh/domain/typed_id.h"
 #include "pfh/domain/user.h"
 #include <chrono>
+#include <cstdint>
 #include <optional>
 #include <string>
 
@@ -29,7 +30,18 @@ enum class CategoryBoard {
     Expense  ///< For Expense and fee-like Adjustment transactions.
 };
 
+/// @brief Category origin — matches DB enum category_source.
+enum class CategorySource {
+    System, ///< Materialized from a system_category_templates row.
+    User    ///< Created directly by the user.
+};
+
 /// @brief Category entity — organizes transactions.
+///
+/// Fields mirror the `categories` table (02_Database_Design / V1 schema):
+/// board, source, template_id, sort_order, deleted_at. Presentation-only
+/// attributes such as colour/icon are NOT persisted here; the UI derives or
+/// stores them separately, so they are intentionally absent from the entity.
 class Category {
 public:
     using TimePoint = std::chrono::system_clock::time_point;
@@ -40,18 +52,20 @@ public:
         std::string name,
         CategoryBoard board,
         std::optional<CategoryId> parent_id = std::nullopt,
-        std::string color = "#808080",
-        std::string icon = "default",
-        bool is_archived = false,
+        CategorySource source = CategorySource::User,
+        std::optional<std::int64_t> template_id = std::nullopt,
+        int sort_order = 0,
+        std::optional<TimePoint> deleted_at = std::nullopt,
         TimePoint created_at = std::chrono::system_clock::now())
         : id_(id),
           owner_(owner),
           name_(std::move(name)),
           board_(board),
           parent_id_(parent_id),
-          color_(std::move(color)),
-          icon_(std::move(icon)),
-          is_archived_(is_archived),
+          source_(source),
+          template_id_(template_id),
+          sort_order_(sort_order),
+          deleted_at_(deleted_at),
           created_at_(created_at) {}
 
     [[nodiscard]] CategoryId id() const noexcept { return id_; }
@@ -59,10 +73,15 @@ public:
     [[nodiscard]] const std::string& name() const noexcept { return name_; }
     [[nodiscard]] CategoryBoard board() const noexcept { return board_; }
     [[nodiscard]] const std::optional<CategoryId>& parent_id() const noexcept { return parent_id_; }
-    [[nodiscard]] const std::string& color() const noexcept { return color_; }
-    [[nodiscard]] const std::string& icon() const noexcept { return icon_; }
-    [[nodiscard]] bool is_archived() const noexcept { return is_archived_; }
+    [[nodiscard]] CategorySource source() const noexcept { return source_; }
+    [[nodiscard]] const std::optional<std::int64_t>& template_id() const noexcept { return template_id_; }
+    [[nodiscard]] int sort_order() const noexcept { return sort_order_; }
+    [[nodiscard]] const std::optional<TimePoint>& deleted_at() const noexcept { return deleted_at_; }
+    [[nodiscard]] bool is_deleted() const noexcept { return deleted_at_.has_value(); }
     [[nodiscard]] TimePoint created_at() const noexcept { return created_at_; }
+
+    /// @brief True if this is a top-level (first-level) category.
+    [[nodiscard]] bool is_root() const noexcept { return !parent_id_.has_value(); }
 
     /// @brief Check if this category can be used by a given transaction type.
     [[nodiscard]] bool is_valid_for(TransactionType tx_type) const noexcept {
@@ -114,9 +133,10 @@ private:
     std::string name_;
     CategoryBoard board_;
     std::optional<CategoryId> parent_id_;
-    std::string color_;
-    std::string icon_;
-    bool is_archived_;
+    CategorySource source_;
+    std::optional<std::int64_t> template_id_;
+    int sort_order_;
+    std::optional<TimePoint> deleted_at_;
     TimePoint created_at_;
 };
 

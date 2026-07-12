@@ -14,6 +14,7 @@
 #include "pfh/application/error_mapping.h"
 #include "pfh/domain/currency_conversion_service.h"
 #include "pfh/domain/repositories/i_account_repository.h"
+#include "pfh/domain/repositories/i_category_repository.h"
 #include "pfh/domain/repositories/i_exchange_rate_repository.h"
 #include "pfh/domain/repositories/i_transaction_repository.h"
 #include "pfh/domain/repositories/i_user_preference_repository.h"
@@ -32,11 +33,13 @@ public:
         domain::IAccountRepository& accounts,
         domain::ITransactionRepository& transactions,
         domain::IExchangeRateRepository& rates,
-        domain::IUserPreferenceRepository& preferences)
+        domain::IUserPreferenceRepository& preferences,
+        domain::ICategoryRepository* categories = nullptr)
         : accounts_(accounts),
           transactions_(transactions),
           rates_(rates),
-          preferences_(preferences) {}
+          preferences_(preferences),
+          categories_(categories) {}
 
     // Window is half-open [from, to): `from` inclusive, `to` EXCLUSIVE. This
     // matches the documented month window [month_start, next_month_start) so a
@@ -179,7 +182,15 @@ public:
     [[nodiscard]] Result<DashboardSummaryDto> dashboard_summary(
         domain::UserId user_id,
         std::chrono::system_clock::time_point now = std::chrono::system_clock::now()) {
-        const auto [period_start, period_end] = current_month_window(now);
+        // Month boundaries are computed in the user's own timezone so a
+        // transaction near local midnight on the 1st/last of the month is filed
+        // in the correct calendar month, not shifted by the UTC offset.
+        auto pref_for_tz = preferences_.find_by_user(user_id);
+        if (!pref_for_tz) {
+            return err(from_repository(pref_for_tz.error()));
+        }
+        const auto [period_start, period_end] =
+            current_month_window(now, pref_for_tz->timezone());
 
         auto nw = net_worth(user_id);
         if (!nw) {
@@ -228,33 +239,54 @@ public:
 private:
     using TimePoint = std::chrono::system_clock::time_point;
 
-    // Compute [first day of month 00:00 UTC, first day of next month 00:00 UTC)
-    // for the calendar month containing `now`. Uses std::chrono calendar types
-    // so it is correct across month/year boundaries without external libs.
-    //
-    // KNOWN LIMITATION: the month boundary is computed in UTC and does not yet
-    // honor UserPreference.timezone. For users far from UTC this can misfile
-    // transactions near midnight on the first/last day of the month. Applying
-    // the user's timezone offset here is deferred to the timezone-aware
-    // reporting work (needs a tz database); tracked as follow-up, not silently
-    // ignored.
+    // Compute the half-open UTC window [month_start, next_month_start) for the
+    // calendar month that contains `now` AS OBSERVED IN `tz_name`. The month
+    // boundary is a local-time concept (local midnight on the 1st), so we:
+    //   1. convert `now` to the user's local date,
+    //   2. take local midnight of the 1st of this and next month,
+    //   3. convert those local instants back to UTC sys_time.
+    // The returned bounds are UTC time_points, directly comparable to a
+    // transaction's stored (UTC) occurred_at. Falls back to UTC if the zone
+    // name is unknown, so a bad preference never throws out of a report.
     [[nodiscard]] static std::pair<TimePoint, TimePoint> current_month_window(
-        TimePoint now) {
+        TimePoint now, const std::string& tz_name) {
         namespace ch = std::chrono;
-        const auto day_point = ch::floor<ch::days>(now);
-        const ch::year_month_day ymd{day_point};
-        // Add months via year_month (calendar-correct); adding months directly
-        // to sys_days would yield a meaningless fixed-length duration.
+
+        const ch::time_zone* zone = nullptr;
+        try {
+            zone = ch::locate_zone(tz_name.empty() ? "UTC" : tz_name);
+        } catch (const std::exception&) {
+            zone = nullptr; // unknown zone -> UTC fallback below
+        }
+
+        // Local calendar date of `now`.
+        ch::local_time<ch::days> local_days_point;
+        if (zone != nullptr) {
+            const auto local = zone->to_local(now);
+            local_days_point = ch::floor<ch::days>(local);
+        } else {
+            // UTC fallback: reinterpret the UTC day as a local day.
+            local_days_point =
+                ch::local_time<ch::days>{ch::floor<ch::days>(now).time_since_epoch()};
+        }
+
+        const ch::year_month_day ymd{local_days_point};
         const ch::year_month this_month{ymd.year(), ymd.month()};
         const ch::year_month next_month = this_month + ch::months{1};
-        const ch::year_month_day first{
-            this_month.year(), this_month.month(), ch::day{1}};
-        const ch::year_month_day next{
-            next_month.year(), next_month.month(), ch::day{1}};
-        const auto start = ch::sys_days{first};
-        const auto end = ch::sys_days{next};
-        return {TimePoint{start.time_since_epoch()},
-                TimePoint{end.time_since_epoch()}};
+        const ch::local_days first_local{
+            ch::year_month_day{this_month.year(), this_month.month(), ch::day{1}}};
+        const ch::local_days next_local{
+            ch::year_month_day{next_month.year(), next_month.month(), ch::day{1}}};
+
+        // Convert the two local midnights back to UTC instants.
+        if (zone != nullptr) {
+            const auto start = zone->to_sys(first_local);
+            const auto end = zone->to_sys(next_local);
+            return {TimePoint{start.time_since_epoch()},
+                    TimePoint{end.time_since_epoch()}};
+        }
+        return {TimePoint{first_local.time_since_epoch()},
+                TimePoint{next_local.time_since_epoch()}};
     }
 
     // Format `part / whole` as a one-decimal percentage string like "68.0%".
@@ -391,10 +423,12 @@ private:
         return result;
     }
 
-    // Aggregate expense transactions by category over [from, to), largest first.
-    // Until ICategoryRepository exists the category name is the id string (the
-    // presentation layer resolves the human name); uncategorized expenses are
-    // grouped under an empty category id.
+    // Aggregate expense over [from, to) by FIRST-LEVEL (root) category, largest
+    // first (09 §2.4 rule 8). When a category repository is available, every
+    // transaction's category is rolled up to its top-level parent and the slice
+    // carries that root's human name; without one, we fall back to grouping by
+    // the raw category id (id string as name). Uncategorized expenses group
+    // under an empty category id.
     [[nodiscard]] Result<std::vector<CategoryBreakdownDto>> top_expense_categories(
         domain::UserId user_id,
         TimePoint from,
@@ -415,9 +449,11 @@ private:
             return err(from_domain(zero.error()));
         }
 
-        // Preserve first-seen order for determinism, keyed by optional category.
+        // Preserve first-seen order for determinism, keyed by the ROLLED-UP
+        // (root) category id value, or -1 for uncategorized.
         std::vector<std::optional<domain::CategoryId>> order;
-        std::map<std::int64_t, domain::Decimal> by_cat; // key: id value, -1 = none
+        std::map<std::int64_t, domain::Decimal> by_cat;
+        std::map<std::int64_t, std::string> name_of;
         domain::Decimal expense_total = *zero;
 
         auto key_of = [](const std::optional<domain::CategoryId>& c) -> std::int64_t {
@@ -439,10 +475,33 @@ private:
             auto abs_amt =
                 converted->is_negative() ? converted->negated() : *converted;
 
-            const auto k = key_of(tx.category_id());
+            // Roll the transaction's category up to its first-level parent.
+            std::optional<domain::CategoryId> bucket = tx.category_id();
+            std::string bucket_name;
+            if (categories_ != nullptr && tx.category_id().has_value()) {
+                auto root = categories_->resolve_root_id_for_user(
+                    *tx.category_id(), user_id);
+                if (!root) {
+                    // A real repository failure must surface, not be swallowed.
+                    if (root.error().status == domain::RepositoryStatus::DatabaseError) {
+                        return err(from_repository(root.error()));
+                    }
+                    // NotFound (e.g. category deleted): treat as uncategorized.
+                    bucket = std::nullopt;
+                } else {
+                    bucket = *root;
+                    auto root_cat = categories_->find_by_id_for_user(*root, user_id);
+                    if (root_cat) {
+                        bucket_name = root_cat->name();
+                    }
+                }
+            }
+
+            const auto k = key_of(bucket);
             if (by_cat.find(k) == by_cat.end()) {
                 by_cat.emplace(k, *zero);
-                order.push_back(tx.category_id());
+                order.push_back(bucket);
+                name_of.emplace(k, bucket_name);
             }
             auto sum = by_cat.at(k).add(abs_amt.amount());
             if (!sum) {
@@ -460,14 +519,19 @@ private:
         std::vector<CategoryBreakdownDto> result;
         result.reserve(order.size());
         for (const auto& cat : order) {
-            const auto amount = by_cat.at(key_of(cat));
+            const auto k = key_of(cat);
+            const auto amount = by_cat.at(k);
             auto pct = format_percentage(amount, expense_total);
             if (!pct) {
                 return err(pct.error());
             }
             CategoryBreakdownDto dto;
             dto.category_id = cat;
-            dto.category_name = cat.has_value() ? cat->to_string() : "";
+            // Prefer the resolved root name; fall back to the id string.
+            const auto& resolved = name_of.at(k);
+            dto.category_name =
+                !resolved.empty() ? resolved
+                                  : (cat.has_value() ? cat->to_string() : "");
             dto.amount = amount.to_string();
             dto.percentage = *pct;
             result.push_back(std::move(dto));
@@ -585,6 +649,10 @@ private:
     domain::ITransactionRepository& transactions_;
     domain::IExchangeRateRepository& rates_;
     domain::IUserPreferenceRepository& preferences_;
+    // Optional: when present, expense breakdown rolls sub-categories up to their
+    // first-level parent and resolves human names. When null, falls back to
+    // grouping by the raw category id (id string as name).
+    domain::ICategoryRepository* categories_ = nullptr;
 };
 
 } // namespace pfh::application

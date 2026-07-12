@@ -89,9 +89,23 @@ TEST(Category, WhenConstructedWithDefaults_HasExpectedProperties) {
     EXPECT_EQ(cat.name(), "Test Category");
     EXPECT_EQ(cat.board(), CategoryBoard::Income);
     EXPECT_FALSE(cat.parent_id().has_value());
-    EXPECT_EQ(cat.color(), "#808080");
-    EXPECT_EQ(cat.icon(), "default");
-    EXPECT_FALSE(cat.is_archived());
+    // Aligned with schema: source/template_id/sort_order/deleted_at, no color/icon.
+    EXPECT_EQ(cat.source(), CategorySource::User);
+    EXPECT_FALSE(cat.template_id().has_value());
+    EXPECT_EQ(cat.sort_order(), 0);
+    EXPECT_FALSE(cat.is_deleted());
+    EXPECT_TRUE(cat.is_root());
+}
+
+TEST(Category, WhenSystemSourced_ExposesTemplateAndSource) {
+    Category cat(
+        CategoryId(5), UserId(100), "\xe9\xa4\x90\xe9\xa5\xae", CategoryBoard::Expense,
+        std::nullopt, CategorySource::System, std::int64_t{42}, 3);
+    EXPECT_EQ(cat.source(), CategorySource::System);
+    ASSERT_TRUE(cat.template_id().has_value());
+    EXPECT_EQ(*cat.template_id(), 42);
+    EXPECT_EQ(cat.sort_order(), 3);
+    EXPECT_TRUE(cat.is_root());
 }
 
 TEST(Category, WhenConstructedWithParent_HasParentId) {
