@@ -85,6 +85,7 @@ public:
             }
 
             if (tx.type() == domain::TransactionType::Income) {
+                // Income is a magnitude; count it as inflow.
                 auto sum = income.add(converted->is_negative()
                                           ? converted->negated()
                                           : *converted);
@@ -92,15 +93,33 @@ public:
                     return err(from_domain(sum.error()));
                 }
                 income = *sum;
-            } else if (tx.type() == domain::TransactionType::Expense ||
-                       tx.type() == domain::TransactionType::Adjustment) {
-                // Expense/fee adjustments contribute to expense total as positive outflow.
+            } else if (tx.type() == domain::TransactionType::Expense) {
+                // Expense is a magnitude; count it as outflow.
                 auto abs_amt = converted->is_negative() ? converted->negated() : *converted;
                 auto sum = expense.add(abs_amt);
                 if (!sum) {
                     return err(from_domain(sum.error()));
                 }
                 expense = *sum;
+            } else if (tx.type() == domain::TransactionType::Adjustment) {
+                // Adjustments are SIGNED: a positive adjustment (refund/subsidy/
+                // FX gain) is an inflow and joins income; a negative one (fee/
+                // correction/FX loss) is an outflow and joins expense as a
+                // positive magnitude. This lets reports represent both, instead
+                // of forcing every adjustment into expense.
+                if (converted->is_negative()) {
+                    auto sum = expense.add(converted->negated());
+                    if (!sum) {
+                        return err(from_domain(sum.error()));
+                    }
+                    expense = *sum;
+                } else {
+                    auto sum = income.add(*converted);
+                    if (!sum) {
+                        return err(from_domain(sum.error()));
+                    }
+                    income = *sum;
+                }
             }
         }
 
@@ -461,9 +480,15 @@ private:
         };
 
         for (const auto& tx : *txs) {
-            if (tx.type() != domain::TransactionType::Expense &&
-                tx.type() != domain::TransactionType::Adjustment) {
-                continue; // income & transfers excluded from expense breakdown
+            // Expense breakdown counts outflows only: every Expense, and
+            // NEGATIVE adjustments (fees/corrections). A positive adjustment is
+            // an inflow and does not belong in a spend breakdown. Income and
+            // transfers are excluded.
+            const bool is_expense = tx.type() == domain::TransactionType::Expense;
+            const bool is_outflow_adjustment =
+                tx.type() == domain::TransactionType::Adjustment;
+            if (!is_expense && !is_outflow_adjustment) {
+                continue;
             }
             if (tx.occurred_at() < from || tx.occurred_at() >= to) {
                 continue;
@@ -471,6 +496,11 @@ private:
             auto converted = convert_to_base(tx.amount(), base, tx.occurred_at());
             if (!converted) {
                 return err(converted.error());
+            }
+            // Skip positive (inflow) adjustments; they are not spend.
+            if (tx.type() == domain::TransactionType::Adjustment &&
+                !converted->is_negative()) {
+                continue;
             }
             auto abs_amt =
                 converted->is_negative() ? converted->negated() : *converted;

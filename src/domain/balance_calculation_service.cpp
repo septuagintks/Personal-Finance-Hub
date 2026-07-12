@@ -107,8 +107,13 @@ DomainResult<Money> BalanceCalculationService::apply_transaction(
         return tx.amount();
 
     case TransactionType::Adjustment:
-        // Prefer signed storage. Positive magnitude defaults to fee (outflow).
-        return tx.amount().is_negative() ? tx.amount() : tx.amount().negated();
+        // Adjustments are SIGNED and applied verbatim: a positive adjustment
+        // (refund, subsidy, FX gain) increases the balance; a negative one
+        // (fee, correction, FX loss) decreases it. Do NOT force the sign — that
+        // would make positive adjustments behave like fees and lose the ability
+        // to represent inflows (design 04 §3.4 rule 5: negatives are allowed
+        // precisely because reversals and corrections exist).
+        return tx.amount();
     }
 
     return std::unexpected(DomainError::invalid_operation("Unknown transaction type"));

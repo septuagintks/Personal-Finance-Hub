@@ -40,7 +40,15 @@ public:
         if (!amount_dec) {
             return err(from_domain(amount_dec.error()));
         }
-        if (!amount_dec->is_positive()) {
+        // Income and Expense are magnitudes and must be strictly positive; the
+        // stored sign is derived from the type. Adjustment is SIGNED and may be
+        // positive (refund/subsidy/FX gain) or negative (fee/correction/FX
+        // loss), but never zero (a no-op adjustment is meaningless).
+        if (cmd.type == domain::TransactionType::Adjustment) {
+            if (amount_dec->is_zero()) {
+                return err(Error::validation("adjustment amount must be non-zero"));
+            }
+        } else if (!amount_dec->is_positive()) {
             return err(Error::validation("amount must be a positive decimal string"));
         }
 

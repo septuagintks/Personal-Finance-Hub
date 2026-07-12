@@ -988,6 +988,96 @@ TEST_F(UseCaseTest, Dashboard_AssetDistribution_AggregatesByAccountType) {
     EXPECT_EQ(savings_slices, 1);
 }
 
+// ---- Item 9: signed Adjustment semantics (reversal / refund / FX gain) ----
+
+TEST_F(UseCaseTest, Adjustment_PositiveIsInflow_NegativeIsOutflow) {
+    auto s = seed();
+    CreateTransactionUseCase uc(*account_repo_, *tx_repo_, *uow_);
+
+    // Baseline income 1000.
+    CreateTransactionCommand income;
+    income.user_id = s.user;
+    income.account_id = s.cash;
+    income.type = TransactionType::Income;
+    income.amount = "1000";
+    income.currency_code = "USD";
+    income.occurred_at = sample_time();
+    ASSERT_TRUE(uc.execute(income).has_value());
+
+    // Positive adjustment (e.g. refund/subsidy) increases balance.
+    CreateTransactionCommand pos_adj;
+    pos_adj.user_id = s.user;
+    pos_adj.account_id = s.cash;
+    pos_adj.type = TransactionType::Adjustment;
+    pos_adj.amount = "50";
+    pos_adj.currency_code = "USD";
+    pos_adj.occurred_at = sample_time();
+    ASSERT_TRUE(uc.execute(pos_adj).has_value());
+
+    // Negative adjustment (e.g. fee/correction) decreases balance.
+    CreateTransactionCommand neg_adj;
+    neg_adj.user_id = s.user;
+    neg_adj.account_id = s.cash;
+    neg_adj.type = TransactionType::Adjustment;
+    neg_adj.amount = "-30";
+    neg_adj.currency_code = "USD";
+    neg_adj.occurred_at = sample_time();
+    ASSERT_TRUE(uc.execute(neg_adj).has_value());
+
+    GetAccountBalanceUseCase balance_uc(*account_repo_);
+    auto bal = balance_uc.execute(s.user, s.cash);
+    ASSERT_TRUE(bal.has_value());
+    // 1000 + 50 - 30 = 1020.
+    EXPECT_EQ(bal->amount, "1020");
+}
+
+TEST_F(UseCaseTest, Adjustment_ZeroAmount_Rejected) {
+    auto s = seed();
+    CreateTransactionUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionCommand adj;
+    adj.user_id = s.user;
+    adj.account_id = s.cash;
+    adj.type = TransactionType::Adjustment;
+    adj.amount = "0";
+    adj.currency_code = "USD";
+    adj.occurred_at = sample_time();
+    auto result = uc.execute(adj);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::ValidationError);
+}
+
+TEST_F(UseCaseTest, CashFlow_SignedAdjustments_SplitAcrossIncomeAndExpense) {
+    auto s = seed();
+    CreateTransactionUseCase uc(*account_repo_, *tx_repo_, *uow_);
+
+    // Positive adjustment => inflow (income side).
+    CreateTransactionCommand pos_adj;
+    pos_adj.user_id = s.user;
+    pos_adj.account_id = s.cash;
+    pos_adj.type = TransactionType::Adjustment;
+    pos_adj.amount = "40";
+    pos_adj.currency_code = "USD";
+    pos_adj.occurred_at = sample_time();
+    ASSERT_TRUE(uc.execute(pos_adj).has_value());
+
+    // Negative adjustment => outflow (expense side).
+    CreateTransactionCommand neg_adj;
+    neg_adj.user_id = s.user;
+    neg_adj.account_id = s.cash;
+    neg_adj.type = TransactionType::Adjustment;
+    neg_adj.amount = "-15";
+    neg_adj.currency_code = "USD";
+    neg_adj.occurred_at = sample_time();
+    ASSERT_TRUE(uc.execute(neg_adj).has_value());
+
+    ReportQueryService reports(*account_repo_, *tx_repo_, *rate_repo_, *pref_repo_);
+    auto cf = reports.cash_flow(s.user);
+    ASSERT_TRUE(cf.has_value()) << cf.error().message;
+    EXPECT_EQ(cf->income_total, "40");
+    EXPECT_EQ(cf->expense_total, "15");
+    EXPECT_EQ(cf->net_total, "25");
+}
+
 // ---- Item 11: commands without a business time stamp "now", never epoch 0 ----
 
 TEST_F(UseCaseTest, CreateTransaction_WhenNoOccurredAt_StampsRecentTime) {
