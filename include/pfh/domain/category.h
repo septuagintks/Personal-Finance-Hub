@@ -56,7 +56,8 @@ public:
         std::optional<std::int64_t> template_id = std::nullopt,
         int sort_order = 0,
         std::optional<TimePoint> deleted_at = std::nullopt,
-        TimePoint created_at = std::chrono::system_clock::now())
+        TimePoint created_at = std::chrono::system_clock::now(),
+        TimePoint updated_at = std::chrono::system_clock::now())
         : id_(id),
           owner_(owner),
           name_(std::move(name)),
@@ -66,7 +67,8 @@ public:
           template_id_(template_id),
           sort_order_(sort_order),
           deleted_at_(deleted_at),
-          created_at_(created_at) {}
+          created_at_(created_at),
+          updated_at_(updated_at) {}
 
     [[nodiscard]] CategoryId id() const noexcept { return id_; }
     [[nodiscard]] UserId owner() const noexcept { return owner_; }
@@ -79,6 +81,7 @@ public:
     [[nodiscard]] const std::optional<TimePoint>& deleted_at() const noexcept { return deleted_at_; }
     [[nodiscard]] bool is_deleted() const noexcept { return deleted_at_.has_value(); }
     [[nodiscard]] TimePoint created_at() const noexcept { return created_at_; }
+    [[nodiscard]] TimePoint updated_at() const noexcept { return updated_at_; }
 
     /// @brief True if this is a top-level (first-level) category.
     [[nodiscard]] bool is_root() const noexcept { return !parent_id_.has_value(); }
@@ -138,6 +141,7 @@ private:
     int sort_order_;
     std::optional<TimePoint> deleted_at_;
     TimePoint created_at_;
+    TimePoint updated_at_;
 };
 
 } // namespace pfh::domain

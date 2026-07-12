@@ -64,11 +64,6 @@ struct CreateTransactionCommand {
     std::string currency_code;
     std::string description;
     std::optional<domain::CategoryId> category_id;
-    // When category_id is provided, category_board must also be provided so the
-    // use case can enforce the board rule (Income->income, Expense/Adjustment->
-    // expense). The presentation/persistence layer resolves the board from the
-    // category; until ICategoryRepository exists this is passed in explicitly.
-    std::optional<domain::CategoryBoard> category_board;
     // Business time. nullopt => the use case stamps the current time. Never
     // default to epoch 0 (1970), which would corrupt current-month reports and
     // point-in-time historical rate selection.

@@ -25,6 +25,13 @@ public:
         CategoryId id,
         UserId user_id) = 0;
 
+    /// @brief Load an owned category in the active write transaction and lock
+    /// it against concurrent soft deletion or board changes.
+    [[nodiscard]] virtual RepositoryResult<Category> find_by_id_for_user_for_update(
+        ITransactionContext& tx,
+        CategoryId id,
+        UserId user_id) = 0;
+
     /// @brief All non-deleted categories on a board for the user.
     [[nodiscard]] virtual RepositoryResult<std::vector<Category>> find_by_board(
         UserId user_id,

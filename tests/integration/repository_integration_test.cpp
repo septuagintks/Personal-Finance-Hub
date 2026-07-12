@@ -323,6 +323,31 @@ TEST_F(RepositoryIntegrationTest, AccountRepository_WhenBalanceCacheMiss_Rebuild
     EXPECT_TRUE(store_->balance_cache.contains(ids.cash.value()));
 }
 
+TEST_F(RepositoryIntegrationTest, TransactionRepository_WhenAmountExceedsNumericScale_RejectsWrite) {
+    auto ids = seed_user_with_accounts();
+
+    auto write = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            Transaction too_precise(
+                TransactionId{},
+                ids.user,
+                ids.cash,
+                money("1.123456789", "USD"),
+                TransactionType::Income,
+                sample_time(),
+                "Direct repository boundary test");
+            auto saved = tx_repo_->save_single(tx, too_precise);
+            if (!saved) {
+                return std::unexpected(saved.error());
+            }
+            return {};
+        });
+
+    ASSERT_FALSE(write.has_value());
+    EXPECT_EQ(write.error().status, RepositoryStatus::ValidationError);
+    EXPECT_TRUE(store_->transactions.empty());
+}
+
 // ---- Transfer aggregate atomic write ----
 
 TEST_F(RepositoryIntegrationTest, TransactionRepository_WhenSavingTransfer_PersistsGroupAndBothSides) {

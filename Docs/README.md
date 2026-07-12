@@ -52,12 +52,14 @@ Docs/
 │   ├── Dependency_Installation_Guide.md # 依赖安装说明
 │   ├── Database_Migration_Guide.md     # 数据库迁移操作指南（Flyway）
 │   ├── Linux_Development_Workflow.md   # Linux 编译、运行与测试工作流
+│   ├── Local_Test_Environment.md       # 历史 Linux 测试环境与当前复核状态
 │   └── Quick_Reference.md              # 开发者快速参考（构建、测试、命令速查）
 │
 ├── Standards/                          # 团队与文档规范
 │   └── Documents_Format_Standard.md    # 文档格式与排版标准
 │
 └── Archive/                            # 已完成的优化记录与交付归档
+    ├── Config_Env_Overlay_Design.md    # 配置环境变量覆盖设计与实现记录
     ├── Documents_Optimize_1.md         # 优化记录 1 (安全、多币种、I18n、异常、迁移)
     ├── Documents_Optimize_2.md         # 优化记录 2 (偏好存储、服务命名、手续费、事件、报表)
     └── Documents_Optimize_3.md         # 优化记录 3 (文档治理、任务清单、计划归档)
@@ -75,6 +77,8 @@ Docs/
 4. **轻量级 CQRS**：写路径通过 Domain 实体和 Repository 保证强一致性；读路径（报表）绕过 Domain 实体，直接执行 SQL 聚合，并在 C++ 内存中进行汇率折算，针对大数据量提供 SQL 端提前折算优化。
 5. **事务后事件派发 (Post-Commit Dispatch)**：在 `DrogonUnitOfWork` 物理 Commit 成功后才派发领域事件，防止事务回滚导致事件错误派发。
 6. **全局异常拦截**：通过 Drogon 全局异常处理器捕获非预期异常，生成唯一 `TraceId`，在保障生产环境安全（不泄露敏感信息）的同时提供完整的服务端日志追溯。
+
+当前进度（2026-07-13）：P1-S01 至 P1-S09 已完成，正在进入 P1-S10。Windows GCC 16 的 253 个现有测试已通过；Drogon/PostgreSQL 生产接线、REST API、后台任务和 P1-S12 真实环境验收尚未完成。Linux、Docker、PostgreSQL 16+、Debug/Release 与真实运行时测试将在另一台机器执行，结果回写前不得视为 Phase 1 已完成。
 
 ---
 
@@ -95,4 +99,4 @@ Docs/
 1. **阅读顺序推荐**：先看 [Architecture/01_Technical_Architecture.md](Architecture/01_Technical_Architecture.md) 和 [Architecture/07_Workflow_and_Lifecycle_Design.md](Architecture/07_Workflow_and_Lifecycle_Design.md)，再看 [Architecture/04_Money_Currency_System_Design.md](Architecture/04_Money_Currency_System_Design.md)、[Architecture/06_Service_and_Use_Case_Design.md](Architecture/06_Service_and_Use_Case_Design.md)、[Architecture/08_Exchange_Rate_System_Design.md](Architecture/08_Exchange_Rate_System_Design.md)，最后补齐 [Architecture/02_Database_Design.md](Architecture/02_Database_Design.md) 与 [Architecture/05_Repository_and_Persistence_Design.md](Architecture/05_Repository_and_Persistence_Design.md)。
 2. **阶段计划**：进入代码实现前，先阅读 [Development_Plans/Overall_Development_Plan.md](Development_Plans/Overall_Development_Plan.md) 与对应 Phase 开发计划，并以 [Development/Tasks.md](Development/Tasks.md) 跟踪进度。
 3. **开发规范**：新文档或修改文档时，请遵守 [Standards/Documents_Format_Standard.md](Standards/Documents_Format_Standard.md)；目录树变更时，请同步更新 [Guides/Directory_Guidance.md](Guides/Directory_Guidance.md)。
-4. **Linux 工作流**：最终部署目标为 Linux，建议在进入 PostgreSQL、Repository 和 API 阶段前，按 [Guides/Linux_Development_Workflow.md](Guides/Linux_Development_Workflow.md) 建立并持续验证 Linux 构建与测试环境。
+4. **Linux 工作流**：最终部署目标为 Linux；P1-S10 开发期间按 [Guides/Linux_Development_Workflow.md](Guides/Linux_Development_Workflow.md) 保持可复现命令，并在 P1-S12 由另一台机器完成 Linux、Docker 与真实 PostgreSQL 阻断门禁。

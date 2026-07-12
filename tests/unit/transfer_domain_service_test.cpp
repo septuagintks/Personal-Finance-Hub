@@ -149,6 +149,7 @@ TEST(TransferDomainService, WhenBuildFromIncomingAndRate_PreservesUserIncomingUn
 
     ASSERT_TRUE(transfer.has_value()) << transfer.error().message;
     EXPECT_EQ(transfer->incoming().amount().to_string(), "7170 CNY");
+    EXPECT_EQ(transfer->outgoing().amount().to_string(), "998.60724234 USD");
     EXPECT_EQ(transfer->mode(), TransferMode::IncomingAndRate);
 }
 

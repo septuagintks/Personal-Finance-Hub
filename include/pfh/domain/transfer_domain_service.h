@@ -115,11 +115,10 @@ public:
     [[nodiscard]] static DomainVoidResult validate(const TransferAggregate& aggregate);
 
 private:
-    // Rounding tolerance for cross-currency validation: we allow a 1-unit
-    // difference due to Decimal rounding (scale 10). In practice, incoming
-    // computed from outgoing * rate should match exactly, but this guards
-    // against edge cases.
-    static constexpr const char* kRoundingTolerance = "0.0000000001";
+    // Persisted amounts use scale 8 and rates use scale 10. Validation accounts
+    // for both explicit amount rounding and rate-derivation rounding.
+    static constexpr const char* kAmountRoundingUnit = "0.00000001";
+    static constexpr const char* kRateRoundingUnit = "0.0000000001";
 };
 
 } // namespace pfh::domain

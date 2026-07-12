@@ -132,7 +132,7 @@ private:
             if (amount.empty()) {
                 return err(Error::validation("amount is required"));
             }
-            auto d = domain::Decimal::parse(amount);
+            auto d = domain::Decimal::parse_numeric_20_8(amount);
             if (!d) {
                 return err(from_domain(d.error()));
             }
@@ -148,7 +148,7 @@ private:
             if (!out) {
                 return err(out.error());
             }
-            auto rate_dec = domain::Decimal::parse(cmd.rate);
+            auto rate_dec = domain::Decimal::parse_numeric_20_10(cmd.rate);
             if (!rate_dec) {
                 return err(from_domain(rate_dec.error()));
             }
@@ -195,7 +195,7 @@ private:
             if (!in) {
                 return err(in.error());
             }
-            auto rate_dec = domain::Decimal::parse(cmd.rate);
+            auto rate_dec = domain::Decimal::parse_numeric_20_10(cmd.rate);
             if (!rate_dec) {
                 return err(from_domain(rate_dec.error()));
             }

@@ -1,8 +1,8 @@
 # Personal Finance Hub - Local Test Environment
 
-**Version**: 1.0
-**Last Updated**: 2026-07-09
-**Scope**: Local Linux validation, Colima-based development checks, ignored local artifacts
+**Version**: 1.1
+**Last Updated**: 2026-07-13
+**Scope**: Historical Colima validation and pending current-head external Linux/Docker/PostgreSQL sign-off
 
 ---
 
@@ -11,6 +11,8 @@
 This document records the local test environment used to validate the PFH backend on Linux.
 
 The project targets Linux deployment, so local feature work should periodically be checked with a Linux toolchain even when the primary development machine is macOS or Windows.
+
+The GCC 13 / 142-test result below is a historical run. It predates the current timezone-aware reporting and S09 review changes and is not a sign-off for the current HEAD. P1-S12 will run the current Linux, Docker, PostgreSQL 16+, Debug/Release, API and background-job gates on another machine; that task remains open until its evidence is recorded.
 
 ---
 
@@ -183,7 +185,12 @@ Initialization complete (application logic pending)
 
 ## 8. Follow-Up Notes
 
+- The recorded GCC 13 / 142-test run predates the timezone-aware reporting
+  implementation. Current HEAD requires the CMake chrono-tzdb probe to pass and
+  must be revalidated on Linux with `tzdata`; this historical result is not a
+  current-head Linux sign-off.
 - Keep `build/` and `config/config.local.json` local.
 - Run Linux validation before phase delivery or before merging phase work back to `main`.
-- Re-run PostgreSQL integration checks after P1-S07 / P1-S08 introduces repository and database integration work.
-- Re-run API smoke tests after P1-S10 introduces the Drogon API surface.
+- Implement PostgreSQL/Drogon production adapters in P1-S10, then re-run the shared repository scenarios against PostgreSQL 16+ on the external P1-S12 machine.
+- Run API smoke tests after P1-S10 introduces the Drogon API surface.
+- Record the current commit hash, environment versions, Debug/Release commands, Docker startup/health result, migration result, PostgreSQL tests, API tests and Outbox/Scheduler tests before Phase 1 sign-off.

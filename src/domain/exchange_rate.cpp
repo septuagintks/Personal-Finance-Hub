@@ -22,6 +22,10 @@ DomainResult<ExchangeRate> ExchangeRate::create(
         return std::unexpected(DomainError::invalid_exchange_rate(
             "rate must be positive, got " + rate.to_string()));
     }
+    if (!rate.fits_numeric_20_10()) {
+        return std::unexpected(DomainError::invalid_exchange_rate(
+            "rate does not fit NUMERIC(20,10): " + rate.to_string()));
+    }
     return ExchangeRate(std::move(base), std::move(target), rate,
                         fetched_at, std::move(source));
 }

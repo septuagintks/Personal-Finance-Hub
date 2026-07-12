@@ -1,6 +1,6 @@
 # Personal Finance Hub - REST API Design
 
-Version: 1.0
+Version: 1.1
 
 Backend: C++23
 
@@ -21,7 +21,7 @@ Architecture: Clean Architecture (Presentation Layer)
 3. **统一 JSON 响应结构**：
 
 - 成功响应：直接返回数据对象（对象或数组）。
-- 失败响应：统一采用标准错误格式：`{"error_code": "STRING", "message": "Readable description"}`。
+- 失败响应：统一采用标准错误格式：`{"error_code": "STRING", "message": "Readable description", "trace_id": "STRING"}`。
 
 ### 1.2 C++23 std::expected 与 HTTP 状态码映射矩阵
 
@@ -38,6 +38,17 @@ Architecture: Clean Architecture (Presentation Layer)
 | **违反金融业务规则 (DomainRuleViolation)**   | `422 Unprocessable Entity`  | 账户已归档、跨币种金额不平衡、汇率非法   |
 | **外部服务失败 (ExternalServiceError)**      | `502 Bad Gateway`           | 汇率 API 或同步 Provider 不可用          |
 | **系统级故障 (InfrastructureFailure)**       | `500 Internal Server Error` | 数据库死锁、连接超时，前端提示“系统繁忙” |
+
+### 1.3 金额与符号边界
+
+REST、Application、Domain 与 PostgreSQL 必须按以下边界转换，禁止把数据库符号约定直接泄漏给调用方：
+
+1. 所有金额和汇率 JSON 字段都必须是十进制字符串；JSON number 一律返回 `400 Bad Request`。
+2. Income/Expense 创建请求使用正数 magnitude，交易方向由 `type` 表达；Presentation 映射到 Application 后，由用例/Domain 生成存储符号。
+3. Adjustment 创建请求使用 signed amount：正数表示流入（返利、补贴、FX Gain），负数表示流出（手续费、更正、FX Loss），零值拒绝。
+4. Transaction 响应使用业务 magnitude，方向仍由 `type` 表达；不得直接返回 `TransactionDto` 中的存储层带符号金额。
+5. Transfer 的 `outgoingAmount`、`incomingAmount`、`feeAmount` 以及响应金额均为正数 magnitude；数据库 outgoing leg 和费用 Adjustment 的负号只属于持久化/领域内部。
+6. 汇率使用正数十进制字符串，并满足 `NUMERIC(20,10)`；普通金额满足 `NUMERIC(20,8)`。
 
 ---
 
@@ -96,6 +107,33 @@ Architecture: Clean Architecture (Presentation Layer)
 - 成功：`204 No Content`
 - 确认数不足：`400 Bad Request` `{"error_code":"BAD_REQUEST","message":"Dangerous action requires 3 confirmations"}`
 
+### 2.4 创建账户
+
+- **HTTP 方法**：`POST`
+- **路径**：`/api/v1/accounts`
+- **请求负载**：
+
+```json
+{
+  "name": "日常储蓄卡",
+  "type": "savings",
+  "subtype": "debit_card",
+  "currencyCode": "CNY",
+  "description": "工资与日常支出"
+}
+```
+
+- `userId` 只来自认证上下文，不接受客户端传入。
+- `currencyCode` 必须位于 Domain 白名单；账户初始版本为 1，初始余额由流水计算，不接受请求直接写余额。
+- **响应负载**：`201 Created`，返回 Account DTO。
+
+### 2.5 归档账户
+
+- **HTTP 方法**：`POST`
+- **路径**：`/api/v1/accounts/{id}/archive`
+- **响应负载**：`204 No Content`
+- 归档后禁止新增流水或参与转账，历史流水和报表读取规则保持不变。
+
 ---
 
 ## 3. 账务流水与转账接口 (Transaction & Transfer APIs)
@@ -112,35 +150,76 @@ Architecture: Clean Architecture (Presentation Layer)
   "type": "expense",
   "amount": "45.00",
   "currencyCode": "CNY",
-  "categoryCode": "FOOD",
-  "description": "午餐打卡"
+  "categoryId": 12,
+  "description": "午餐打卡",
+  "occurredAt": "2026-07-13T12:30:00+08:00"
 }
 ```
 
-- **响应负载 (201 Created)**：`{"status": "success"}`
+- `occurredAt` 可省略；省略时由 Use Case 写入当前时间，不得默认成 Unix epoch。
+- Income/Expense 的 `amount` 必须为正数 magnitude；Adjustment 按 1.3 节使用 signed amount。
+- **响应负载 (201 Created)**：
+
+```json
+{
+  "id": 4522,
+  "accountId": 1,
+  "type": "expense",
+  "amount": "45.00",
+  "currencyCode": "CNY",
+  "categoryId": 12,
+  "occurredAt": "2026-07-13T12:30:00+08:00"
+}
+```
 
 ### 3.2 创建跨账户/跨币种转账 (Transfer)
 
 - **HTTP 方法**：`POST`
 - **路径** : `/api/v1/transfers`
-- **请求负载 (对应 06 文档的 TransferInputDTO)**：
+- **请求负载 (对应 `CreateTransferCommand`)**：
 
 ```json
 {
   "sourceAccountId": 2,
   "targetAccountId": 1,
-  "mode": "OutgoingAndIncoming",
-  "sourceAmount": { "amount": "100.00", "currency": "USD" },
-  "targetAmount": { "amount": "718.00", "currency": "CNY" },
-  "exchangeRate": null,
-  "feeAmount": { "amount": "2.00", "currency": "USD" },
+  "mode": "BothAmounts",
+  "outgoingAmount": "100.00",
+  "incomingAmount": "718.00",
+  "rate": null,
+  "feeAmount": "2.00",
   "feeSource": "SourceAccount",
   "feeAccountId": null,
-  "description": "资金回国"
+  "description": "资金回国",
+  "occurredAt": "2026-07-13T12:40:00+08:00"
 }
 ```
 
-- **响应负载 (201 Created)**：`{"status": "success"}`
+模式与必填字段：
+
+| `mode`             | 必填输入                              | 派生字段         |
+| ------------------ | ------------------------------------- | ---------------- |
+| `OutgoingAndRate`  | `outgoingAmount` + `rate`             | `incomingAmount` |
+| `BothAmounts`      | `outgoingAmount` + `incomingAmount`   | `rate`           |
+| `IncomingAndRate`  | `incomingAmount` + `rate`             | `outgoingAmount` |
+
+- 账户币种由 `sourceAccountId` 和 `targetAccountId` 解析，请求不重复接受可伪造的币种字段。
+- `feeAmount` 为可选正数 magnitude；提供时必须同时提供 `feeSource`。`ThirdParty` 必须提供属于当前用户的 `feeAccountId`。
+- 手续费必须在 P1-S10 完成 Application 接线后才允许对外开放；Controller 不得自行拼接 Adjustment。
+- **响应负载 (201 Created)**：
+
+```json
+{
+  "transferGroupId": 88,
+  "outgoingTransactionId": 4523,
+  "incomingTransactionId": 4524,
+  "outgoingAmount": "100.00",
+  "incomingAmount": "718.00",
+  "rate": "7.1800000000",
+  "feeAmount": "2.00"
+}
+```
+
+Phase 1 只开放创建与查询转账，不注册 `DELETE /api/v1/transfers/{id}`。只有 `DeleteTransferUseCase` 能在同一事务删除两端流水与全部 Adjustment 并通过聚合级联测试后，才允许增加删除路由。
 
 ---
 
@@ -383,9 +462,37 @@ MoneyDTO:
       minLength: 3
       maxLength: 8
 
+CreateTransactionRequest:
+  type: object
+  required: [accountId, type, amount, currencyCode]
+  properties:
+    accountId: { type: integer, format: int64 }
+    type: { type: string, enum: [income, expense, adjustment] }
+    amount: { type: string, pattern: "^-?[0-9]+(\\.[0-9]+)?$" }
+    currencyCode: { type: string, minLength: 3, maxLength: 8 }
+    categoryId: { type: integer, format: int64, nullable: true }
+    description: { type: string }
+    occurredAt: { type: string, format: date-time, nullable: true }
+
+CreateTransferRequest:
+  type: object
+  required: [sourceAccountId, targetAccountId, mode]
+  properties:
+    sourceAccountId: { type: integer, format: int64 }
+    targetAccountId: { type: integer, format: int64 }
+    mode: { type: string, enum: [OutgoingAndRate, BothAmounts, IncomingAndRate] }
+    outgoingAmount: { type: string, pattern: "^[0-9]+(\\.[0-9]+)?$", nullable: true }
+    incomingAmount: { type: string, pattern: "^[0-9]+(\\.[0-9]+)?$", nullable: true }
+    rate: { type: string, pattern: "^[0-9]+(\\.[0-9]+)?$", nullable: true }
+    feeAmount: { type: string, pattern: "^[0-9]+(\\.[0-9]+)?$", nullable: true }
+    feeSource: { type: string, enum: [SourceAccount, TargetAccount, ThirdParty], nullable: true }
+    feeAccountId: { type: integer, format: int64, nullable: true }
+    description: { type: string }
+    occurredAt: { type: string, format: date-time, nullable: true }
+
 ErrorResponse:
   type: object
-  required: [error_code, message]
+  required: [error_code, message, trace_id]
   properties:
     error_code:
       type: string
@@ -424,135 +531,38 @@ OpenAPI 文档必须作为前后端共同契约；新增接口时，先补 Schem
 
 ---
 
-## 5. Drogon HttpController 落地代码实现
+## 5. Drogon HttpController 落地边界
 
-在 Drogon 中，通过继承 `drogon::HttpController`，结合宏路由和 `std::expected` 组合优雅的控制流。
-
-### 5.1 转账控制器接口与路由声明
+Controller 只负责 HTTP 协议适配，不直接构造 Domain 对象、访问 Repository 或打开事务。统一执行顺序如下：
 
 ```cpp
-// presentation/controllers/TransferController.hpp
-#pragma once
-#include <drogon/HttpController.h>
-#include "application/use_cases/CreateTransferUseCase.hpp"
-
-class TransferController : public drogon::HttpController<TransferController> {
-private:
-    std::shared_ptr<CreateTransferUseCase> createTransferUseCase_;
-
-public:
-    METHOD_LIST_BEGIN
-        // 绑定路由：POST /api/v1/transfers，挂载 JWTFilter 进行鉴权
-        ADD_METHOD_TO(TransferController::createTransfer, "/api/v1/transfers", drogon::Post, "JwtFilter");
-    METHOD_LIST_END
-
-    TransferController(std::shared_ptr<CreateTransferUseCase> useCase)
-        : createTransferUseCase_(useCase) {}
-
-    // 处理创建转账的异步请求
-    void createTransfer(
-        const drogon::HttpRequestPtr& req,
-        std::function<void(const drogon::HttpResponsePtr&)>&& callback);
-};
-
-```
-
-### 5.2 控制器核心逻辑落地 (C++23 风格)
-
-```cpp
-// presentation/controllers/TransferController.cpp
-#include "presentation/controllers/TransferController.hpp"
-#include <json/json.h>
-
-void TransferController::createTransfer(
-    const drogon::HttpRequestPtr& req,
-    std::function<void(const drogon::HttpResponsePtr&)>&& callback)
-{
-    auto jsonPtr = req->getJsonObject();
-    if (!jsonPtr) {
-        Json::Value err;
-        err["error_code"] = "BAD_REQUEST";
-        err["message"] = "Invalid JSON body";
-        callback(drogon::HttpResponse::newJsonObjectResponse(err));
-        return;
+void TransferController::create_transfer(const HttpRequestPtr& request,
+                                         ResponseCallback callback) {
+    const auto user_id = request_context.require_user_id();
+    auto command = transfer_request_parser.parse_create(request, user_id);
+    if (!command) {
+        return callback(error_mapper.to_response(command.error()));
     }
 
-    // 1. 从 JWT 拦截器注入的请求上下文中安全获取 UserId
-    // (假设在 JwtFilter 中通过 req->attributes()->insert("user_id", ...) 注入)
-    // int64_t currentUserId = req->attributes()->get<int64_t>("user_id");
-
-    // 2. 将 Json 转换为应用层要求的 TransferInputDTO (防御性解析)
-    TransferInputDTO dto;
-    try {
-        const auto& json = *jsonPtr;
-        dto.sourceAccountId = json["sourceAccountId"].asInt64();
-        dto.targetAccountId = json["targetAccountId"].asInt64();
-
-        std::string modeStr = json["mode"].asString();
-        if (modeStr == "OutgoingAndIncoming") dto.mode = TransferMode::OutgoingAndIncoming;
-        // ... 其他模式映射
-
-        // 解析嵌套对象 Money
-        if (json.isMember("sourceAmount") && !json["sourceAmount"].isNull()) {
-            dto.sourceAmount = Money(
-                Decimal(json["sourceAmount"]["amount"].asString()),
-                Currency(json["sourceAmount"]["currency"].asString())
-            );
-        }
-        // ... 同理解析 targetAmount, feeAmount, exchangeRate
-        dto.description = json["description"].asString();
-
-    } catch (const std::exception& e) {
-        Json::Value err;
-        err["error_code"] = "BAD_REQUEST";
-        err["message"] = std::string("Field parsing failed: ") + e.what();
-        auto resp = drogon::HttpResponse::newJsonObjectResponse(err);
-        resp->setStatusCode(drogon::k400BadRequest);
-        callback(resp);
-        return;
-    }
-
-    // 3. 调用应用层 Use Case 执行命令并捕捉 C++23 std::expected
-    auto result = createTransferUseCase_->execute(dto);
-
-    // 4. 强类型错误向 HTTP 状态码的单向映射
+    // command 的字段与 pfh::application::CreateTransferCommand 一致：
+    // source_account_id, target_account_id, mode, outgoing_amount,
+    // incoming_amount, rate, description, occurred_at，以及 P1-S10 接入的 fee 字段。
+    auto result = create_transfer_use_case.execute(*command);
     if (!result) {
-        Json::Value errBody;
-        auto response = drogon::HttpResponse::newJsonObjectResponse(errBody);
-
-        switch (result.error()) {
-            case UseCaseError::AccountNotFound:
-                errBody["error_code"] = "NOT_FOUND";
-                errBody["message"] = "Source or target account not found.";
-                response->setStatusCode(drogon::k404NotFound);
-                break;
-
-            case UseCaseError::DomainRuleViolation:
-                errBody["error_code"] = "DOMAIN_RULE_VIOLATION";
-                errBody["message"] = "Financial rule restriction. Check your amount, currency balance or exchange rate.";
-                response->setStatusCode(drogon::k422UnprocessableEntity); // 422 表达语义合规但逻辑冲突
-                break;
-
-            case UseCaseError::InfrastructureFailure:
-                errBody["error_code"] = "INTERNAL_SERVER_ERROR";
-                errBody["message"] = "Database atomic transaction failed. Please retry later.";
-                response->setStatusCode(drogon::k500InternalServerError);
-                break;
-        }
-
-        response->setJsonObject(errBody);
-        callback(response);
-    } else {
-        // 5. 成功流响应 (201 Created)
-        Json::Value successBody;
-        successBody["status"] = "success";
-        auto response = drogon::HttpResponse::newJsonObjectResponse(successBody);
-        response->setStatusCode(drogon::k201Created);
-        callback(response);
+        return callback(error_mapper.to_response(result.error()));
     }
-}
 
+    callback(transfer_response_mapper.created(*result));
+}
 ```
+
+强制约束：
+
+- `user_id` 只来自通过 JwtFilter 校验的请求上下文，不接受客户端 JSON 或 Query 参数。
+- parser 在调用 Use Case 前验证 JSON 类型、枚举、RFC 3339 时间和十进制字符串，不在 Controller 中创建 `Money` 或猜测币种。
+- mapper 负责把 Application DTO 的内部带符号金额转换为 1.3 节规定的 REST 业务口径。
+- 所有错误统一经过 error mapper；Controller 不返回底层异常的 `what()` 文本。
+- Drogon 路由/Controller 由 composition root 注入依赖，不使用隐藏的全局 Repository 或 DbClient。
 
 ---
 
@@ -788,6 +798,23 @@ PFH_PASSWORD_PEPPER=<可选 pepper>
 ---
 
 ### 6.6 认证接口设计
+
+**注册**
+
+```http
+POST /api/v1/auth/register
+```
+
+请求：
+
+```json
+{
+  "username": "user@example.com",
+  "password": "plaintext-password"
+}
+```
+
+响应（201 Created）返回用户标识和初始 token pair。服务端必须完成用户名规范化与唯一性校验、密码哈希、默认 `UserPreference` 创建，并在同一事务写入必要审计/outbox 事实；响应不得返回密码哈希或内部密钥材料。
 
 **登录**
 

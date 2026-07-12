@@ -18,6 +18,7 @@
 #include "test_support.h"
 #include <gtest/gtest.h>
 #include <memory>
+#include <nlohmann/json.hpp>
 
 using namespace pfh::domain;
 using namespace pfh::application;
@@ -41,13 +42,23 @@ public:
             }
             rates.push_back(*r);
         }
+        if (omit_last_ && !rates.empty()) {
+            rates.pop_back();
+        }
+        if (duplicate_first_ && !rates.empty()) {
+            rates.push_back(rates.front());
+        }
         return rates;
     }
 
     void set_fail(bool v) { fail_ = v; }
+    void set_omit_last(bool v) { omit_last_ = v; }
+    void set_duplicate_first(bool v) { duplicate_first_ = v; }
 
 private:
     bool fail_ = false;
+    bool omit_last_ = false;
+    bool duplicate_first_ = false;
 };
 
 class UseCaseTest : public ::testing::Test {
@@ -114,7 +125,7 @@ protected:
 
 TEST_F(UseCaseTest, CreateTransaction_WhenValidIncome_PersistsAndEmitsOutbox) {
     auto s = seed();
-    CreateTransactionUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionUseCase uc(*account_repo_, *category_repo_, *tx_repo_, *uow_);
 
     CreateTransactionCommand cmd;
     cmd.user_id = s.user;
@@ -149,7 +160,7 @@ TEST_F(UseCaseTest, CreateTransaction_WhenWrongUserAccount_ReturnsNotFound) {
     });
     ASSERT_TRUE(write.has_value());
 
-    CreateTransactionUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionUseCase uc(*account_repo_, *category_repo_, *tx_repo_, *uow_);
     CreateTransactionCommand cmd;
     cmd.user_id = other;
     cmd.account_id = s.cash; // belongs to alice
@@ -165,7 +176,7 @@ TEST_F(UseCaseTest, CreateTransaction_WhenWrongUserAccount_ReturnsNotFound) {
 
 TEST_F(UseCaseTest, CreateTransaction_WhenTransferType_ReturnsValidationError) {
     auto s = seed();
-    CreateTransactionUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionUseCase uc(*account_repo_, *category_repo_, *tx_repo_, *uow_);
     CreateTransactionCommand cmd;
     cmd.user_id = s.user;
     cmd.account_id = s.cash;
@@ -180,15 +191,24 @@ TEST_F(UseCaseTest, CreateTransaction_WhenTransferType_ReturnsValidationError) {
 
 TEST_F(UseCaseTest, CreateTransaction_WhenCategoryBoardMismatch_ReturnsDomainRuleViolation) {
     auto s = seed();
-    CreateTransactionUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    CategoryId category_id;
+    auto setup = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            auto saved = category_repo_->save(
+                tx, Category(CategoryId{}, s.user, "Expense", CategoryBoard::Expense));
+            if (!saved) return std::unexpected(saved.error());
+            category_id = *saved;
+            return {};
+        });
+    ASSERT_TRUE(setup.has_value());
+    CreateTransactionUseCase uc(*account_repo_, *category_repo_, *tx_repo_, *uow_);
     CreateTransactionCommand cmd;
     cmd.user_id = s.user;
     cmd.account_id = s.cash;
     cmd.type = TransactionType::Income;
     cmd.amount = "100";
     cmd.currency_code = "USD";
-    cmd.category_id = CategoryId(5);
-    cmd.category_board = CategoryBoard::Expense; // wrong board for Income
+    cmd.category_id = category_id;
     cmd.occurred_at = sample_time();
 
     auto result = uc.execute(cmd);
@@ -196,9 +216,9 @@ TEST_F(UseCaseTest, CreateTransaction_WhenCategoryBoardMismatch_ReturnsDomainRul
     EXPECT_EQ(result.error().code, ErrorCode::DomainRuleViolation);
 }
 
-TEST_F(UseCaseTest, CreateTransaction_WhenCategoryWithoutBoard_ReturnsValidationError) {
+TEST_F(UseCaseTest, CreateTransaction_WhenCategoryDoesNotExist_ReturnsNotFound) {
     auto s = seed();
-    CreateTransactionUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionUseCase uc(*account_repo_, *category_repo_, *tx_repo_, *uow_);
     CreateTransactionCommand cmd;
     cmd.user_id = s.user;
     cmd.account_id = s.cash;
@@ -206,25 +226,33 @@ TEST_F(UseCaseTest, CreateTransaction_WhenCategoryWithoutBoard_ReturnsValidation
     cmd.amount = "100";
     cmd.currency_code = "USD";
     cmd.category_id = CategoryId(5);
-    // category_board intentionally omitted
     cmd.occurred_at = sample_time();
 
     auto result = uc.execute(cmd);
     ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, ErrorCode::ValidationError);
+    EXPECT_EQ(result.error().code, ErrorCode::NotFound);
 }
 
 TEST_F(UseCaseTest, CreateTransaction_WhenCategoryBoardMatches_Succeeds) {
     auto s = seed();
-    CreateTransactionUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    CategoryId category_id;
+    auto setup = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            auto saved = category_repo_->save(
+                tx, Category(CategoryId{}, s.user, "Expense", CategoryBoard::Expense));
+            if (!saved) return std::unexpected(saved.error());
+            category_id = *saved;
+            return {};
+        });
+    ASSERT_TRUE(setup.has_value());
+    CreateTransactionUseCase uc(*account_repo_, *category_repo_, *tx_repo_, *uow_);
     CreateTransactionCommand cmd;
     cmd.user_id = s.user;
     cmd.account_id = s.cash;
     cmd.type = TransactionType::Expense;
     cmd.amount = "40";
     cmd.currency_code = "USD";
-    cmd.category_id = CategoryId(7);
-    cmd.category_board = CategoryBoard::Expense;
+    cmd.category_id = category_id;
     cmd.occurred_at = sample_time();
 
     auto result = uc.execute(cmd);
@@ -234,9 +262,40 @@ TEST_F(UseCaseTest, CreateTransaction_WhenCategoryBoardMatches_Succeeds) {
     EXPECT_EQ(result->type, TransactionType::Expense);
 }
 
+TEST_F(UseCaseTest, CreateTransaction_WhenCategoryBelongsToOtherUser_ReturnsNotFound) {
+    auto s = seed();
+    CategoryId foreign_category;
+    auto setup = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            auto other = user_repo_->create(tx, "category-owner", "hash", ccy("USD"));
+            if (!other) return std::unexpected(other.error());
+            auto category = category_repo_->save(
+                tx, Category(CategoryId{}, *other, "Private", CategoryBoard::Expense));
+            if (!category) return std::unexpected(category.error());
+            foreign_category = *category;
+            return {};
+        });
+    ASSERT_TRUE(setup.has_value());
+
+    CreateTransactionUseCase uc(*account_repo_, *category_repo_, *tx_repo_, *uow_);
+    CreateTransactionCommand cmd;
+    cmd.user_id = s.user;
+    cmd.account_id = s.cash;
+    cmd.type = TransactionType::Expense;
+    cmd.amount = "10";
+    cmd.currency_code = "USD";
+    cmd.category_id = foreign_category;
+    cmd.occurred_at = sample_time();
+
+    auto result = uc.execute(cmd);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::NotFound);
+}
+
 TEST_F(UseCaseTest, DeleteTransaction_WhenOwned_SoftDeletesAndEmitsOutbox) {
     auto s = seed();
-    CreateTransactionUseCase create_uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionUseCase create_uc(
+        *account_repo_, *category_repo_, *tx_repo_, *uow_);
     CreateTransactionCommand cmd;
     cmd.user_id = s.user;
     cmd.account_id = s.cash;
@@ -262,7 +321,8 @@ TEST_F(UseCaseTest, DeleteTransaction_WhenOwned_SoftDeletesAndEmitsOutbox) {
 TEST_F(UseCaseTest, CreateTransfer_WhenBothAmounts_PersistsGroupAndOutbox) {
     auto s = seed();
     // seed income first so cash has funds (not enforced yet, but realistic)
-    CreateTransactionUseCase create_uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionUseCase create_uc(
+        *account_repo_, *category_repo_, *tx_repo_, *uow_);
     CreateTransactionCommand income;
     income.user_id = s.user;
     income.account_id = s.cash;
@@ -294,7 +354,8 @@ TEST_F(UseCaseTest, CreateTransfer_WhenBothAmounts_PersistsGroupAndOutbox) {
 
 TEST_F(UseCaseTest, ReportQuery_WhenTransferExists_ExcludesFromCashFlow) {
     auto s = seed();
-    CreateTransactionUseCase create_uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionUseCase create_uc(
+        *account_repo_, *category_repo_, *tx_repo_, *uow_);
     CreateTransactionCommand income;
     income.user_id = s.user;
     income.account_id = s.cash;
@@ -345,7 +406,8 @@ TEST_F(UseCaseTest, ReportQuery_WhenMultiCurrency_UsesExchangeRateForNetWorth) {
     });
     ASSERT_TRUE(write.has_value());
 
-    CreateTransactionUseCase create_uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionUseCase create_uc(
+        *account_repo_, *category_repo_, *tx_repo_, *uow_);
     CreateTransactionCommand usd_income;
     usd_income.user_id = s.user;
     usd_income.account_id = s.cash;
@@ -396,7 +458,8 @@ TEST_F(UseCaseTest, ReportQuery_WhenNonUsdPair_UsesUsdTriangulation) {
     });
     ASSERT_TRUE(rate_write.has_value());
 
-    CreateTransactionUseCase create_uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionUseCase create_uc(
+        *account_repo_, *category_repo_, *tx_repo_, *uow_);
     CreateTransactionCommand cny_income;
     cny_income.user_id = s.user;
     cny_income.account_id = s.cny_wallet;
@@ -417,7 +480,8 @@ TEST_F(UseCaseTest, ReportQuery_WhenNonUsdPair_UsesUsdTriangulation) {
 TEST_F(UseCaseTest, ReportQuery_WhenNoRateAtAll_ReturnsError) {
     auto s = seed();
     // Holdings in CNY but base USD and NO rate present at all.
-    CreateTransactionUseCase create_uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionUseCase create_uc(
+        *account_repo_, *category_repo_, *tx_repo_, *uow_);
     CreateTransactionCommand cny_income;
     cny_income.user_id = s.user;
     cny_income.account_id = s.cny_wallet;
@@ -476,6 +540,30 @@ TEST_F(UseCaseTest, RefreshExchangeRates_WhenProviderFailsButHistoryExists_Flags
     EXPECT_NE(rec.payload_json.find("\"historicalAvailable\":true"), std::string::npos);
 }
 
+TEST_F(UseCaseTest, RefreshExchangeRates_WhenOnlySomeHistoryExists_FlagsNoFallback) {
+    auto s = seed();
+    (void)s;
+    auto rw = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
+        auto r = rate_repo_->append(tx, rate("USD", "CNY", "7", 1000, "ECB"));
+        if (!r) return std::unexpected(r.error());
+        return {};
+    });
+    ASSERT_TRUE(rw.has_value());
+
+    provider_->set_fail(true);
+    RefreshExchangeRatesUseCase uc(*account_repo_, *rate_repo_, *provider_, *uow_);
+    RefreshExchangeRatesCommand cmd;
+    cmd.target_currency_codes = {"CNY", "EUR"};
+    auto result = uc.execute(cmd);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_TRUE(result->degraded);
+    EXPECT_NE(result->message.find("historical fallback is incomplete"),
+              std::string::npos);
+    EXPECT_NE(store_->outbox.back().payload_json.find(
+                  "\"historicalAvailable\":false"),
+              std::string::npos);
+}
+
 TEST_F(UseCaseTest, RefreshExchangeRates_WhenProviderOk_AppendsRatesAndOutbox) {
     auto s = seed();
     (void)s;
@@ -487,8 +575,58 @@ TEST_F(UseCaseTest, RefreshExchangeRates_WhenProviderOk_AppendsRatesAndOutbox) {
     EXPECT_FALSE(result->degraded);
     EXPECT_EQ(result->appended_count, 2u);
     EXPECT_EQ(store_->exchange_rates.size(), 2u);
-    EXPECT_EQ(store_->outbox.size(), 1u);
+    ASSERT_EQ(store_->outbox.size(), 2u);
     EXPECT_EQ(store_->outbox.front().event_name, "ExchangeRateRefreshed");
+    EXPECT_NE(store_->outbox.front().payload_json.find("\"targetCurrency\":"),
+              std::string::npos);
+}
+
+TEST_F(UseCaseTest, RefreshExchangeRates_WhenProviderOmitsPair_RejectsWholeResponse) {
+    auto s = seed();
+    (void)s;
+    provider_->set_omit_last(true);
+    RefreshExchangeRatesUseCase uc(*account_repo_, *rate_repo_, *provider_, *uow_);
+    RefreshExchangeRatesCommand cmd;
+    cmd.target_currency_codes = {"CNY", "EUR"};
+
+    auto result = uc.execute(cmd);
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::ExternalServiceError);
+    EXPECT_TRUE(store_->exchange_rates.empty());
+    EXPECT_TRUE(store_->outbox.empty());
+}
+
+TEST_F(UseCaseTest, RefreshExchangeRates_WhenProviderDuplicatesPair_RejectsWholeResponse) {
+    auto s = seed();
+    (void)s;
+    provider_->set_duplicate_first(true);
+    RefreshExchangeRatesUseCase uc(*account_repo_, *rate_repo_, *provider_, *uow_);
+    RefreshExchangeRatesCommand cmd;
+    cmd.target_currency_codes = {"CNY", "EUR"};
+
+    auto result = uc.execute(cmd);
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::ExternalServiceError);
+    EXPECT_TRUE(store_->exchange_rates.empty());
+    EXPECT_TRUE(store_->outbox.empty());
+}
+
+TEST(DomainEventTest, ExchangeRateEvents_EscapeStringsAsValidJson) {
+    ExchangeRateRefreshedEvent refreshed(
+        "Provider \"A\"\\line", "USD", "CNY", sample_time());
+    const auto refreshed_json = nlohmann::json::parse(refreshed.payload_json());
+    EXPECT_EQ(refreshed_json.at("provider"), "Provider \"A\"\\line");
+    EXPECT_EQ(refreshed_json.at("baseCurrency"), "USD");
+    EXPECT_EQ(refreshed_json.at("targetCurrency"), "CNY");
+
+    ExchangeRateRefreshFailedEvent failed(
+        "Provider\nB", "USD", false, "timeout\tupstream", sample_time());
+    const auto failed_json = nlohmann::json::parse(failed.payload_json());
+    EXPECT_EQ(failed_json.at("provider"), "Provider\nB");
+    EXPECT_EQ(failed_json.at("reason"), "timeout\tupstream");
+    EXPECT_FALSE(failed_json.at("historicalAvailable").get<bool>());
 }
 
 TEST_F(UseCaseTest, ErrorMapping_WhenDatabaseError_DoesNotLeakDetails) {
@@ -594,7 +732,8 @@ TEST_F(UseCaseTest, CreateTransfer_WhenTargetArchived_Returns422) {
 
 TEST_F(UseCaseTest, Balance_ExposesLastTransactionIdAndUpdatedAt) {
     auto s = seed();
-    CreateTransactionUseCase create_uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionUseCase create_uc(
+        *account_repo_, *category_repo_, *tx_repo_, *uow_);
     CreateTransactionCommand income;
     income.user_id = s.user;
     income.account_id = s.cash;
@@ -629,7 +768,8 @@ TEST_F(UseCaseTest, NetWorth_SplitsAssetsAndLiabilities) {
     });
     ASSERT_TRUE(add.has_value());
 
-    CreateTransactionUseCase create_uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionUseCase create_uc(
+        *account_repo_, *category_repo_, *tx_repo_, *uow_);
     CreateTransactionCommand asset_income;
     asset_income.user_id = s.user;
     asset_income.account_id = s.cash;
@@ -666,7 +806,8 @@ TEST_F(UseCaseTest, Dashboard_ScopesIncomeExpenseToCurrentMonth) {
         return {};
     });
     ASSERT_TRUE(rw.has_value());
-    CreateTransactionUseCase create_uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionUseCase create_uc(
+        *account_repo_, *category_repo_, *tx_repo_, *uow_);
 
     // "now" pinned to 2026-07-12; in-month income vs. prior-month expense.
     const auto now = std::chrono::system_clock::from_time_t(1752307200); // 2026-07-12
@@ -717,7 +858,8 @@ TEST_F(UseCaseTest, DeleteAccount_WhenInsufficientConfirmations_Rejected) {
 
 TEST_F(UseCaseTest, DeleteAccount_WhenConfirmed_PurgesAccountAndTransactions) {
     auto s = seed();
-    CreateTransactionUseCase create_uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionUseCase create_uc(
+        *account_repo_, *category_repo_, *tx_repo_, *uow_);
     CreateTransactionCommand income;
     income.user_id = s.user;
     income.account_id = s.cash;
@@ -831,7 +973,8 @@ public:
 TEST_F(UseCaseTest, NetWorth_WhenRateRepositoryFails_ReturnsInfrastructureFailure) {
     auto s = seed();
     // CNY holding forces a conversion; the failing repo returns DatabaseError.
-    CreateTransactionUseCase create_uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionUseCase create_uc(
+        *account_repo_, *category_repo_, *tx_repo_, *uow_);
     CreateTransactionCommand cny;
     cny.user_id = s.user;
     cny.account_id = s.cny_wallet;
@@ -861,7 +1004,8 @@ TEST_F(UseCaseTest, Dashboard_ExcludesTransactionAtNextMonthBoundary) {
     });
     ASSERT_TRUE(rw.has_value());
 
-    CreateTransactionUseCase create_uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionUseCase create_uc(
+        *account_repo_, *category_repo_, *tx_repo_, *uow_);
     const auto now = std::chrono::system_clock::from_time_t(1752307200);      // 2025-07-12 08:00 UTC
     const auto next_month_start = std::chrono::system_clock::from_time_t(1754006400); // 2025-08-01 00:00 UTC
 
@@ -926,7 +1070,8 @@ TEST_F(UseCaseTest, SaveTransfer_WhenLegCurrencyMismatchesAccount_Rejected) {
 // Item 7: delete-transaction is race-safe; a second delete conflicts.
 TEST_F(UseCaseTest, DeleteTransaction_SecondDelete_ReturnsConflict) {
     auto s = seed();
-    CreateTransactionUseCase create_uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionUseCase create_uc(
+        *account_repo_, *category_repo_, *tx_repo_, *uow_);
     CreateTransactionCommand expense;
     expense.user_id = s.user;
     expense.account_id = s.cash;
@@ -953,7 +1098,7 @@ TEST_F(UseCaseTest, DeleteTransaction_SecondDelete_ReturnsConflict) {
 // without any post-commit re-read.
 TEST_F(UseCaseTest, CreateTransaction_ReturnsPersistedEntityWithId) {
     auto s = seed();
-    CreateTransactionUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionUseCase uc(*account_repo_, *category_repo_, *tx_repo_, *uow_);
     CreateTransactionCommand income;
     income.user_id = s.user;
     income.account_id = s.cash;
@@ -988,7 +1133,8 @@ TEST_F(UseCaseTest, Dashboard_AssetDistribution_AggregatesByAccountType) {
     });
     ASSERT_TRUE(add.has_value());
 
-    CreateTransactionUseCase create_uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionUseCase create_uc(
+        *account_repo_, *category_repo_, *tx_repo_, *uow_);
     for (auto [acct, amt] : std::vector<std::pair<AccountId, std::string>>{
              {s.savings, "1000"}, {savings2, "500"}}) {
         CreateTransactionCommand c;
@@ -1021,7 +1167,7 @@ TEST_F(UseCaseTest, Dashboard_AssetDistribution_AggregatesByAccountType) {
 
 TEST_F(UseCaseTest, CreateTransaction_WhenAmountExceedsDbPrecision_Rejected) {
     auto s = seed();
-    CreateTransactionUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionUseCase uc(*account_repo_, *category_repo_, *tx_repo_, *uow_);
 
     // 13 integer digits: beyond NUMERIC(20,8)'s 12-digit integer part.
     CreateTransactionCommand too_big;
@@ -1046,6 +1192,45 @@ TEST_F(UseCaseTest, CreateTransaction_WhenAmountExceedsDbPrecision_Rejected) {
     auto r2 = uc.execute(too_precise);
     ASSERT_FALSE(r2.has_value());
     EXPECT_EQ(r2.error().code, ErrorCode::ValidationError);
+
+    // Precision beyond Decimal's internal scale must not be rounded away before
+    // the DB-boundary check.
+    too_precise.amount = "1.00000000001";
+    auto r3 = uc.execute(too_precise);
+    ASSERT_FALSE(r3.has_value());
+    EXPECT_EQ(r3.error().code, ErrorCode::ValidationError);
+}
+
+TEST_F(UseCaseTest, CreateTransfer_EnforcesDbAmountScaleAndRoundsDerivedLeg) {
+    auto s = seed();
+    CreateTransferUseCase uc(*account_repo_, *tx_repo_, *uow_);
+
+    CreateTransferCommand invalid;
+    invalid.user_id = s.user;
+    invalid.source_account_id = s.cash;
+    invalid.target_account_id = s.cny_wallet;
+    invalid.mode = TransferInputMode::BothAmounts;
+    invalid.outgoing_amount = "1.123456789";
+    invalid.incoming_amount = "8";
+    invalid.occurred_at = sample_time();
+    auto rejected = uc.execute(invalid);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, ErrorCode::ValidationError);
+
+    CreateTransferCommand derived;
+    derived.user_id = s.user;
+    derived.source_account_id = s.cash;
+    derived.target_account_id = s.cny_wallet;
+    derived.mode = TransferInputMode::OutgoingAndRate;
+    derived.outgoing_amount = "1";
+    derived.rate = "7.123456789";
+    derived.occurred_at = sample_time();
+    auto created = uc.execute(derived);
+    ASSERT_TRUE(created.has_value()) << created.error().message;
+    EXPECT_EQ(created->incoming_amount, "7.12345679 CNY");
+    auto stored = tx_repo_->find_by_id(created->incoming_transaction_id);
+    ASSERT_TRUE(stored.has_value());
+    EXPECT_EQ(stored->amount().amount().to_string(), "7.12345679");
 }
 
 // ---- Item 14: in-memory repos provide read-your-writes within a transaction ----
@@ -1087,11 +1272,94 @@ TEST_F(UseCaseTest, UserRepository_ReadYourWrites_FindByUsername) {
     ASSERT_TRUE(ok.has_value()) << ok.error().message;
 }
 
+TEST_F(UseCaseTest, InMemoryRepositories_RejectBrokenForeignKeys) {
+    auto s = seed();
+
+    auto missing_pref = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            return pref_repo_->save(
+                tx, UserPreference(UserId(9999), ccy("USD")));
+        });
+    ASSERT_FALSE(missing_pref.has_value());
+    EXPECT_EQ(missing_pref.error().status, RepositoryStatus::NotFound);
+
+    auto cross_board_parent = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            auto parent = category_repo_->save(
+                tx, Category(CategoryId{}, s.user, "Income", CategoryBoard::Income));
+            if (!parent) return std::unexpected(parent.error());
+            auto child = category_repo_->save(
+                tx, Category(CategoryId{}, s.user, "Wrong child",
+                             CategoryBoard::Expense, *parent));
+            if (!child) return std::unexpected(child.error());
+            return {};
+        });
+    ASSERT_FALSE(cross_board_parent.has_value());
+    EXPECT_EQ(cross_board_parent.error().status, RepositoryStatus::ValidationError);
+}
+
+TEST_F(UseCaseTest, InMemoryRepositories_RejectTenantAndBoardReassignment) {
+    auto s = seed();
+    UserId other_user;
+    CategoryId category_id;
+    auto setup = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            auto other = user_repo_->create(tx, "other-owner", "hash", ccy("USD"));
+            if (!other) return std::unexpected(other.error());
+            other_user = *other;
+            auto category = category_repo_->save(
+                tx, Category(CategoryId{}, s.user, "Food", CategoryBoard::Expense));
+            if (!category) return std::unexpected(category.error());
+            category_id = *category;
+            return {};
+        });
+    ASSERT_TRUE(setup.has_value()) << setup.error().message;
+
+    auto cash = account_repo_->find_by_id(s.cash);
+    ASSERT_TRUE(cash.has_value());
+    Account reassigned_account(
+        cash->id(), other_user, cash->name(), cash->type(), cash->subtype(),
+        cash->currency(), cash->description(), cash->is_archived(),
+        cash->archived_at(), cash->created_at(), cash->updated_at(),
+        cash->version(),
+        cash->has_category_override()
+            ? std::optional<AccountCategory>(cash->category())
+            : std::nullopt);
+    auto account_move = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            auto saved = account_repo_->save(tx, reassigned_account);
+            if (!saved) return std::unexpected(saved.error());
+            return {};
+        });
+    ASSERT_FALSE(account_move.has_value());
+    EXPECT_EQ(account_move.error().status, RepositoryStatus::ValidationError);
+
+    auto category_move = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            auto saved = category_repo_->save(
+                tx, Category(category_id, other_user, "Food", CategoryBoard::Expense));
+            if (!saved) return std::unexpected(saved.error());
+            return {};
+        });
+    ASSERT_FALSE(category_move.has_value());
+    EXPECT_EQ(category_move.error().status, RepositoryStatus::ValidationError);
+
+    auto board_move = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            auto saved = category_repo_->save(
+                tx, Category(category_id, s.user, "Food", CategoryBoard::Income));
+            if (!saved) return std::unexpected(saved.error());
+            return {};
+        });
+    ASSERT_FALSE(board_move.has_value());
+    EXPECT_EQ(board_move.error().status, RepositoryStatus::ValidationError);
+}
+
 // ---- Item 12: strongly-typed events carry userId/occurredAt; outbox stores time ----
 
 TEST_F(UseCaseTest, TransactionCreatedEvent_CarriesRequiredFieldsAndOutboxTime) {
     auto s = seed();
-    CreateTransactionUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionUseCase uc(*account_repo_, *category_repo_, *tx_repo_, *uow_);
     CreateTransactionCommand income;
     income.user_id = s.user;
     income.account_id = s.cash;
@@ -1183,7 +1451,7 @@ TEST_F(UseCaseTest, AccountWithoutOverride_DerivesCategoryFromType) {
 
 TEST_F(UseCaseTest, Adjustment_PositiveIsInflow_NegativeIsOutflow) {
     auto s = seed();
-    CreateTransactionUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionUseCase uc(*account_repo_, *category_repo_, *tx_repo_, *uow_);
 
     // Baseline income 1000.
     CreateTransactionCommand income;
@@ -1224,7 +1492,7 @@ TEST_F(UseCaseTest, Adjustment_PositiveIsInflow_NegativeIsOutflow) {
 
 TEST_F(UseCaseTest, Adjustment_ZeroAmount_Rejected) {
     auto s = seed();
-    CreateTransactionUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionUseCase uc(*account_repo_, *category_repo_, *tx_repo_, *uow_);
     CreateTransactionCommand adj;
     adj.user_id = s.user;
     adj.account_id = s.cash;
@@ -1239,7 +1507,7 @@ TEST_F(UseCaseTest, Adjustment_ZeroAmount_Rejected) {
 
 TEST_F(UseCaseTest, CashFlow_SignedAdjustments_SplitAcrossIncomeAndExpense) {
     auto s = seed();
-    CreateTransactionUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionUseCase uc(*account_repo_, *category_repo_, *tx_repo_, *uow_);
 
     // Positive adjustment => inflow (income side).
     CreateTransactionCommand pos_adj;
@@ -1274,7 +1542,7 @@ TEST_F(UseCaseTest, CashFlow_SignedAdjustments_SplitAcrossIncomeAndExpense) {
 TEST_F(UseCaseTest, CreateTransaction_WhenNoOccurredAt_StampsRecentTime) {
     auto s = seed();
     const auto before = std::chrono::system_clock::now();
-    CreateTransactionUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionUseCase uc(*account_repo_, *category_repo_, *tx_repo_, *uow_);
     CreateTransactionCommand income;
     income.user_id = s.user;
     income.account_id = s.cash;
@@ -1334,7 +1602,8 @@ TEST_F(UseCaseTest, Dashboard_UsesUserTimezoneForMonthWindow) {
     });
     ASSERT_TRUE(setup.has_value());
 
-    CreateTransactionUseCase create_uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionUseCase create_uc(
+        *account_repo_, *category_repo_, *tx_repo_, *uow_);
     // 2025-07-31 18:00 UTC == 2025-08-01 02:00 Shanghai.
     const auto july31_evening_utc = std::chrono::system_clock::from_time_t(1753984800);
     CreateTransactionCommand income;
@@ -1358,6 +1627,21 @@ TEST_F(UseCaseTest, Dashboard_UsesUserTimezoneForMonthWindow) {
     auto dash_jul = reports.dashboard_summary(s.user, now_jul);
     ASSERT_TRUE(dash_jul.has_value()) << dash_jul.error().message;
     EXPECT_EQ(dash_jul->income_total, "0");
+}
+
+TEST_F(UseCaseTest, Dashboard_WhenTimezoneIsUnknown_FailsInsteadOfUsingUtc) {
+    auto s = seed();
+    auto setup = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            return pref_repo_->save(
+                tx, UserPreference(s.user, ccy("USD"), "en-US", "Invalid/Zone"));
+        });
+    ASSERT_TRUE(setup.has_value());
+
+    ReportQueryService reports(*account_repo_, *tx_repo_, *rate_repo_, *pref_repo_);
+    auto dashboard = reports.dashboard_summary(s.user, sample_time());
+    ASSERT_FALSE(dashboard.has_value());
+    EXPECT_EQ(dashboard.error().code, ErrorCode::ConfigurationError);
 }
 
 // Top expense categories roll sub-categories up to their first-level parent
@@ -1384,7 +1668,8 @@ TEST_F(UseCaseTest, TopExpenseCategories_RollUpToRootCategory) {
     });
     ASSERT_TRUE(setup.has_value()) << setup.error().message;
 
-    CreateTransactionUseCase create_uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionUseCase create_uc(
+        *account_repo_, *category_repo_, *tx_repo_, *uow_);
     // Two expenses: one on the child, one on the root — both roll to "Food".
     for (auto [cat, amt] : std::vector<std::pair<CategoryId, std::string>>{
              {food_dining, "30"}, {food_root, "20"}}) {
@@ -1395,7 +1680,6 @@ TEST_F(UseCaseTest, TopExpenseCategories_RollUpToRootCategory) {
         e.amount = amt;
         e.currency_code = "USD";
         e.category_id = cat;
-        e.category_board = CategoryBoard::Expense;
         e.occurred_at = sample_time();
         ASSERT_TRUE(create_uc.execute(e).has_value());
     }

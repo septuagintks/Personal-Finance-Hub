@@ -95,6 +95,7 @@ TEST(Category, WhenConstructedWithDefaults_HasExpectedProperties) {
     EXPECT_EQ(cat.sort_order(), 0);
     EXPECT_FALSE(cat.is_deleted());
     EXPECT_TRUE(cat.is_root());
+    EXPECT_GT(cat.updated_at(), std::chrono::system_clock::time_point{});
 }
 
 TEST(Category, WhenSystemSourced_ExposesTemplateAndSource) {

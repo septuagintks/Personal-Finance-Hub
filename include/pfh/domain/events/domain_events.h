@@ -18,6 +18,7 @@
 #include <chrono>
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 namespace pfh::domain {
 
@@ -29,6 +30,35 @@ namespace event_detail {
     std::chrono::system_clock::time_point tp) {
     return std::chrono::duration_cast<std::chrono::seconds>(tp.time_since_epoch())
         .count();
+}
+
+[[nodiscard]] inline std::string json_string(std::string_view value) {
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::string result;
+    result.reserve(value.size() + 2);
+    result.push_back('"');
+    for (const char raw : value) {
+        const auto c = static_cast<unsigned char>(raw);
+        switch (c) {
+        case '"': result += "\\\""; break;
+        case '\\': result += "\\\\"; break;
+        case '\b': result += "\\b"; break;
+        case '\f': result += "\\f"; break;
+        case '\n': result += "\\n"; break;
+        case '\r': result += "\\r"; break;
+        case '\t': result += "\\t"; break;
+        default:
+            if (c < 0x20) {
+                result += "\\u00";
+                result.push_back(kHex[(c >> 4) & 0x0f]);
+                result.push_back(kHex[c & 0x0f]);
+            } else {
+                result.push_back(static_cast<char>(c));
+            }
+        }
+    }
+    result.push_back('"');
+    return result;
 }
 
 } // namespace event_detail
@@ -170,11 +200,11 @@ class ExchangeRateRefreshedEvent final : public IDomainEvent {
 public:
     ExchangeRateRefreshedEvent(
         std::string provider, std::string base_currency,
-        std::size_t refreshed_count,
+        std::string target_currency,
         std::chrono::system_clock::time_point fetched_at)
         : provider_(std::move(provider)),
           base_currency_(std::move(base_currency)),
-          refreshed_count_(refreshed_count),
+          target_currency_(std::move(target_currency)),
           fetched_at_(fetched_at) {}
 
     [[nodiscard]] std::string event_name() const override { return "ExchangeRateRefreshed"; }
@@ -184,9 +214,9 @@ public:
     [[nodiscard]] std::string aggregate_type() const override { return "ExchangeRate"; }
     [[nodiscard]] std::string aggregate_id() const override { return base_currency_; }
     [[nodiscard]] std::string payload_json() const override {
-        return "{\"provider\":\"" + provider_ + "\"" +
-               ",\"baseCurrency\":\"" + base_currency_ + "\"" +
-               ",\"refreshedCount\":" + std::to_string(refreshed_count_) +
+        return "{\"provider\":" + event_detail::json_string(provider_) +
+               ",\"baseCurrency\":" + event_detail::json_string(base_currency_) +
+               ",\"targetCurrency\":" + event_detail::json_string(target_currency_) +
                ",\"fetchedAt\":" +
                std::to_string(event_detail::epoch_seconds(fetched_at_)) + "}";
     }
@@ -194,23 +224,23 @@ public:
 private:
     std::string provider_;
     std::string base_currency_;
-    std::size_t refreshed_count_;
+    std::string target_currency_;
     std::chrono::system_clock::time_point fetched_at_;
 };
 
 /// @brief ExchangeRateRefreshFailed: emitted when the provider is unavailable
-/// and the refresh degrades to existing historical rates. Carries whether any
-/// usable historical rate exists so an alert handler can escalate a hard outage
+/// and the refresh degrades to existing historical rates. Carries whether all
+/// requested historical rates exist so an alert handler can escalate a hard outage
 /// (degraded AND no fallback) differently from a soft one.
 class ExchangeRateRefreshFailedEvent final : public IDomainEvent {
 public:
     ExchangeRateRefreshFailedEvent(
         std::string provider, std::string base_currency,
-        bool historical_available, std::string reason,
+        bool historical_fallback_available, std::string reason,
         std::chrono::system_clock::time_point occurred_at)
         : provider_(std::move(provider)),
           base_currency_(std::move(base_currency)),
-          historical_available_(historical_available),
+          historical_fallback_available_(historical_fallback_available),
           reason_(std::move(reason)),
           occurred_at_(occurred_at) {}
 
@@ -223,11 +253,11 @@ public:
     [[nodiscard]] std::string aggregate_type() const override { return "ExchangeRate"; }
     [[nodiscard]] std::string aggregate_id() const override { return base_currency_; }
     [[nodiscard]] std::string payload_json() const override {
-        return "{\"provider\":\"" + provider_ + "\"" +
-               ",\"baseCurrency\":\"" + base_currency_ + "\"" +
+        return "{\"provider\":" + event_detail::json_string(provider_) +
+               ",\"baseCurrency\":" + event_detail::json_string(base_currency_) +
                ",\"historicalAvailable\":" +
-               (historical_available_ ? "true" : "false") +
-               ",\"reason\":\"" + reason_ + "\"" +
+               (historical_fallback_available_ ? "true" : "false") +
+               ",\"reason\":" + event_detail::json_string(reason_) +
                ",\"occurredAt\":" +
                std::to_string(event_detail::epoch_seconds(occurred_at_)) + "}";
     }
@@ -235,7 +265,7 @@ public:
 private:
     std::string provider_;
     std::string base_currency_;
-    bool historical_available_;
+    bool historical_fallback_available_;
     std::string reason_;
     std::chrono::system_clock::time_point occurred_at_;
 };

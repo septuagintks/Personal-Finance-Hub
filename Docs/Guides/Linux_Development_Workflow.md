@@ -1,6 +1,6 @@
 # Personal Finance Hub - Linux Development Workflow
 
-Version: 1.0
+Version: 1.1
 Backend: C++23
 Architecture: Clean Architecture + Lightweight DDD
 Status: Active
@@ -11,7 +11,7 @@ Status: Active
 
 本指南用于约定 PFH 后端在 Linux 环境下的标准开发、构建、运行与测试工作流。
 
-由于最终部署目标是 Linux，本项目在进入后续 PostgreSQL、Drogon、Repository 和 API 开发前，应持续保证以下事实：
+由于最终部署目标是 Linux，本项目在 PostgreSQL、Drogon、Repository 和 API 开发期间，应持续保证以下事实：
 
 - 代码可以在 Linux 工具链下完成配置与编译。
 - 单元测试和后续集成测试优先在 Linux 环境回归。
@@ -44,7 +44,7 @@ Status: Active
 
 ### 2.3 基础工具
 
-- GCC 13+ 或 Clang 16+
+- 支持 `std::chrono` IANA tzdb 的 C++23 工具链（以 GCC 14+ / 新版 libstdc++ 为基线，最终以 CMake 能力探测结果为准）
 - CMake 3.20+
 - Ninja
 - Git
@@ -58,11 +58,7 @@ Status: Active
 
 PFH 的阶段开发默认采用 **每个 Phase 一个长期分支** 的方式推进。
 
-推荐命名：
-
-- `phase/phase-1`
-- `phase/phase-2`
-- `phase/phase-3`
+当前 Phase 1 分支为 `feature/phase1-foundation`。后续 Phase 继续遵循“一阶段一长期分支”，实际名称在对应阶段计划中记录。
 
 标准流程：
 
@@ -76,13 +72,13 @@ PFH 的阶段开发默认采用 **每个 Phase 一个长期分支** 的方式推
 ```bash
 git switch main
 git pull --ff-only origin main
-git switch -c phase/phase-1
+git switch -c feature/phase1-foundation
 ```
 
 如果分支已存在：
 
 ```bash
-git switch phase/phase-1
+git switch feature/phase1-foundation
 git pull --ff-only origin main
 ```
 
@@ -98,7 +94,7 @@ git pull --ff-only origin main
 sudo apt update
 sudo apt install -y \
   build-essential \
-  gcc-13 g++-13 \
+  gcc-14 g++-14 \
   clang-16 \
   cmake \
   ninja-build \
@@ -106,7 +102,8 @@ sudo apt install -y \
   git \
   curl \
   unzip \
-  tar
+  tar \
+  tzdata
 ```
 
 如需 PostgreSQL 本地测试环境：
@@ -120,8 +117,8 @@ sudo apt install -y postgresql postgresql-client
 当前 Phase 1 的 `Decimal` 实现依赖 GCC/Clang 的原生 `__int128` 扩展，因此 Linux 环境推荐优先使用 GCC。
 
 ```bash
-export CC=gcc-13
-export CXX=g++-13
+export CC=gcc-14
+export CXX=g++-14
 ```
 
 如需改用 Clang：
@@ -131,6 +128,10 @@ export CC=clang-16
 export CXX=clang++-16
 ```
 
+Clang 在 Linux 上通常仍使用系统 `libstdc++`；仅升级 Clang 本身不代表具备
+`std::chrono::locate_zone`。项目在 CMake configure 阶段会编译并链接一个 tzdb
+探针，不满足时直接报错。运行环境还必须安装 `tzdata`，否则 IANA 时区无法加载。
+
 ---
 
 ## 5. 获取代码与目录准备
@@ -138,7 +139,7 @@ export CXX=clang++-16
 ```bash
 git clone <repo-url>
 cd PFH
-git switch phase/phase-1
+git switch feature/phase1-foundation
 ```
 
 建议为 Linux 构建单独使用专用目录，避免和 Windows 构建目录混用：
@@ -191,7 +192,7 @@ cp config/config.example.json config/config.local.json
 - `config.local.json` 用于本地 Linux 开发。
 - 敏感信息不应提交到 Git。
 
-在 `JsonConfigLoader` 的环境变量 overlay 功能完成后，应优先使用环境变量覆盖敏感项，例如：
+`JsonConfigLoader` 已支持环境变量 overlay，应优先使用环境变量覆盖敏感项，例如：
 
 - `PFH_JWT_SECRET`
 - `PFH_DB_PASSWORD`
@@ -213,11 +214,12 @@ ctest --test-dir build/linux-gcc-debug --output-on-failure
 ctest --test-dir build/linux-gcc-debug -R Decimal --output-on-failure
 ```
 
-### 8.3 后续阶段测试约定
+### 8.3 当前阶段测试约定
 
-- P1-S05 之前：以单元测试为主
-- P1-S07 / P1-S08 之后：加入 PostgreSQL 集成测试
-- P1-S10 之后：加入 API smoke test
+- P1-S01 至 P1-S09：单元测试与 In-Memory integration scenarios 已建立快速回归基线。
+- P1-S10：加入 Drogon API 测试和 PostgreSQL 适配器测试场景。
+- P1-S11：加入 Outbox、Scheduler、汇率 HTTP Provider 和清理任务测试。
+- P1-S12：在另一台机器执行 Linux、Docker、真实 PostgreSQL 和 Debug/Release 阻断门禁。
 
 ---
 
@@ -256,16 +258,21 @@ pwsh ./quality_check.ps1
 
 ---
 
-## 11. PostgreSQL 集成阶段建议
+## 11. PostgreSQL 与 Docker 外部验收
 
-当进入 P1-S07 / P1-S08 后，推荐在 Linux 环境中同步验证以下内容：
+P1-S12 的 Linux、Docker 和真实 PostgreSQL 验收在另一台具备对应环境的机器执行。该机器必须验证：
 
 1. PostgreSQL 本地实例可连接
 2. 迁移脚本可在空库执行
 3. Repository 集成测试可重复运行
 4. 事务回滚与 outbox 路径在 Linux 下行为一致
+5. RLS fail-closed 与连接池用户上下文复用不串租户
+6. `NUMERIC(20,8/10)` 边界、舍入和超界拒绝与 Domain 一致
+7. Docker 服务可启动并通过健康检查与关键 API smoke test
 
 建议为本地测试数据库单独创建用户和库，避免污染日常开发数据库。
+
+结果必须回写 `Docs/Guides/Local_Test_Environment.md` 或 P1-S12 交付总结，至少记录 commit hash、Linux/编译器/Drogon/PostgreSQL/Docker 版本、迁移命令、测试命令、通过数量和失败详情。未取得这些记录前，不得将历史 Linux 测试或 Windows/In-Memory 结果当作当前 HEAD 的目标环境签署。
 
 ---
 
@@ -274,8 +281,10 @@ pwsh ./quality_check.ps1
 在对应 Phase 分支准备合并回 `main` 之前，至少完成以下检查：
 
 - `git diff --check` 通过
-- Linux Debug 构建通过
-- Linux 对应测试集通过
+- Linux Debug 与 Release 构建均通过
+- Linux Debug 与 Release 对应测试集均通过
+- PostgreSQL 空库迁移、真实 Repository/UoW/RLS 与 API 测试通过
+- Docker 服务启动、健康检查和关键 API smoke test 通过
 - 该 Phase 的交付总结文档已回写
 - `Docs/Development/Tasks.md` 已同步任务状态
 - 与设计不一致的地方已先回写架构文档
@@ -286,7 +295,7 @@ pwsh ./quality_check.ps1
 
 ```bash
 # 进入 Phase 分支
-git switch phase/phase-1
+git switch feature/phase1-foundation
 
 # Debug 配置
 cmake -S . -B build/linux-gcc-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug

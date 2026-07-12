@@ -1,6 +1,9 @@
 -- Version: 3
 -- Description: Seed system category template pool (global, read-only for users)
 -- Users pick from this pool to initialize their personal categories tree.
+-- Rows in this migration use the schema default locale ('zh-CN'). Future
+-- language packs must insert an explicit locale and keep parent lookup scoped
+-- to that locale.
 
 -- =============================================================================
 -- Expense board top-level categories
@@ -48,7 +51,7 @@ ON CONFLICT DO NOTHING;
 -- =============================================================================
 
 WITH food_parent AS (
-    SELECT id FROM system_category_templates WHERE name = '餐饮' AND group_name = 'expense' AND parent_id IS NULL LIMIT 1
+    SELECT id FROM system_category_templates WHERE locale = 'zh-CN' AND name = '餐饮' AND group_name = 'expense' AND parent_id IS NULL LIMIT 1
 )
 INSERT INTO system_category_templates (name, group_name, parent_id, default_board, sort_order, is_selectable)
 SELECT '早餐', 'expense', id, 'expense', 1, TRUE FROM food_parent
@@ -69,7 +72,7 @@ ON CONFLICT DO NOTHING;
 -- =============================================================================
 
 WITH daily_parent AS (
-    SELECT id FROM system_category_templates WHERE name = '日常' AND group_name = 'expense' AND parent_id IS NULL LIMIT 1
+    SELECT id FROM system_category_templates WHERE locale = 'zh-CN' AND name = '日常' AND group_name = 'expense' AND parent_id IS NULL LIMIT 1
 )
 INSERT INTO system_category_templates (name, group_name, parent_id, default_board, sort_order, is_selectable)
 SELECT '水费', 'expense', id, 'expense', 1, TRUE FROM daily_parent
@@ -88,7 +91,7 @@ ON CONFLICT DO NOTHING;
 -- =============================================================================
 
 WITH transport_parent AS (
-    SELECT id FROM system_category_templates WHERE name = '交通' AND group_name = 'expense' AND parent_id IS NULL LIMIT 1
+    SELECT id FROM system_category_templates WHERE locale = 'zh-CN' AND name = '交通' AND group_name = 'expense' AND parent_id IS NULL LIMIT 1
 )
 INSERT INTO system_category_templates (name, group_name, parent_id, default_board, sort_order, is_selectable)
 SELECT '地铁', 'expense', id, 'expense', 1, TRUE FROM transport_parent
@@ -107,7 +110,7 @@ ON CONFLICT DO NOTHING;
 -- =============================================================================
 
 WITH finance_parent AS (
-    SELECT id FROM system_category_templates WHERE name = '财务' AND group_name = 'expense' AND parent_id IS NULL LIMIT 1
+    SELECT id FROM system_category_templates WHERE locale = 'zh-CN' AND name = '财务' AND group_name = 'expense' AND parent_id IS NULL LIMIT 1
 )
 INSERT INTO system_category_templates (name, group_name, parent_id, default_board, sort_order, is_selectable)
 SELECT '手续费', 'expense', id, 'expense', 1, TRUE FROM finance_parent
@@ -122,7 +125,7 @@ ON CONFLICT DO NOTHING;
 -- =============================================================================
 
 WITH salary_parent AS (
-    SELECT id FROM system_category_templates WHERE name = '工资' AND group_name = 'income' AND parent_id IS NULL LIMIT 1
+    SELECT id FROM system_category_templates WHERE locale = 'zh-CN' AND name = '工资' AND group_name = 'income' AND parent_id IS NULL LIMIT 1
 )
 INSERT INTO system_category_templates (name, group_name, parent_id, default_board, sort_order, is_selectable)
 SELECT '基本工资', 'income', id, 'income', 1, TRUE FROM salary_parent
@@ -137,7 +140,7 @@ ON CONFLICT DO NOTHING;
 -- =============================================================================
 
 WITH investment_parent AS (
-    SELECT id FROM system_category_templates WHERE name = '投资' AND group_name = 'income' AND parent_id IS NULL LIMIT 1
+    SELECT id FROM system_category_templates WHERE locale = 'zh-CN' AND name = '投资' AND group_name = 'income' AND parent_id IS NULL LIMIT 1
 )
 INSERT INTO system_category_templates (name, group_name, parent_id, default_board, sort_order, is_selectable)
 SELECT '股息', 'income', id, 'income', 1, TRUE FROM investment_parent
@@ -154,7 +157,7 @@ ON CONFLICT DO NOTHING;
 -- =============================================================================
 
 WITH redpacket_parent AS (
-    SELECT id FROM system_category_templates WHERE name = '红包' AND group_name = 'income' AND parent_id IS NULL LIMIT 1
+    SELECT id FROM system_category_templates WHERE locale = 'zh-CN' AND name = '红包' AND group_name = 'income' AND parent_id IS NULL LIMIT 1
 )
 INSERT INTO system_category_templates (name, group_name, parent_id, default_board, sort_order, is_selectable)
 SELECT '亲友红包', 'income', id, 'income', 1, TRUE FROM redpacket_parent

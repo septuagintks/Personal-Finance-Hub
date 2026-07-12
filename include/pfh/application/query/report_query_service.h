@@ -208,8 +208,11 @@ public:
         if (!pref_for_tz) {
             return err(from_repository(pref_for_tz.error()));
         }
-        const auto [period_start, period_end] =
-            current_month_window(now, pref_for_tz->timezone());
+        auto window = current_month_window(now, pref_for_tz->timezone());
+        if (!window) {
+            return err(window.error());
+        }
+        const auto [period_start, period_end] = *window;
 
         auto nw = net_worth(user_id);
         if (!nw) {
@@ -265,9 +268,10 @@ private:
     //   2. take local midnight of the 1st of this and next month,
     //   3. convert those local instants back to UTC sys_time.
     // The returned bounds are UTC time_points, directly comparable to a
-    // transaction's stored (UTC) occurred_at. Falls back to UTC if the zone
-    // name is unknown, so a bad preference never throws out of a report.
-    [[nodiscard]] static std::pair<TimePoint, TimePoint> current_month_window(
+    // transaction's stored (UTC) occurred_at. Unknown zones fail explicitly;
+    // silently falling back to UTC would put boundary transactions in the
+    // wrong month while making the report look valid.
+    [[nodiscard]] static Result<std::pair<TimePoint, TimePoint>> current_month_window(
         TimePoint now, const std::string& tz_name) {
         namespace ch = std::chrono;
 
@@ -275,19 +279,15 @@ private:
         try {
             zone = ch::locate_zone(tz_name.empty() ? "UTC" : tz_name);
         } catch (const std::exception&) {
-            zone = nullptr; // unknown zone -> UTC fallback below
+            return err(Error(
+                ErrorCode::ConfigurationError,
+                "Configured timezone is unavailable",
+                tz_name.empty() ? "UTC" : tz_name));
         }
 
         // Local calendar date of `now`.
-        ch::local_time<ch::days> local_days_point;
-        if (zone != nullptr) {
-            const auto local = zone->to_local(now);
-            local_days_point = ch::floor<ch::days>(local);
-        } else {
-            // UTC fallback: reinterpret the UTC day as a local day.
-            local_days_point =
-                ch::local_time<ch::days>{ch::floor<ch::days>(now).time_since_epoch()};
-        }
+        const auto local = zone->to_local(now);
+        const ch::local_time<ch::days> local_days_point = ch::floor<ch::days>(local);
 
         const ch::year_month_day ymd{local_days_point};
         const ch::year_month this_month{ymd.year(), ymd.month()};
@@ -298,14 +298,11 @@ private:
             ch::year_month_day{next_month.year(), next_month.month(), ch::day{1}}};
 
         // Convert the two local midnights back to UTC instants.
-        if (zone != nullptr) {
-            const auto start = zone->to_sys(first_local);
-            const auto end = zone->to_sys(next_local);
-            return {TimePoint{start.time_since_epoch()},
-                    TimePoint{end.time_since_epoch()}};
-        }
-        return {TimePoint{first_local.time_since_epoch()},
-                TimePoint{next_local.time_since_epoch()}};
+        const auto start = zone->to_sys(first_local, ch::choose::earliest);
+        const auto end = zone->to_sys(next_local, ch::choose::earliest);
+        return std::pair<TimePoint, TimePoint>{
+            TimePoint{start.time_since_epoch()},
+            TimePoint{end.time_since_epoch()}};
     }
 
     // Format `part / whole` as a one-decimal percentage string like "68.0%".
@@ -521,9 +518,10 @@ private:
                 } else {
                     bucket = *root;
                     auto root_cat = categories_->find_by_id_for_user(*root, user_id);
-                    if (root_cat) {
-                        bucket_name = root_cat->name();
+                    if (!root_cat) {
+                        return err(from_repository(root_cat.error()));
                     }
+                    bucket_name = root_cat->name();
                 }
             }
 

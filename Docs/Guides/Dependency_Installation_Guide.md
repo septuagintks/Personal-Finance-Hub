@@ -1,13 +1,13 @@
 # Personal Finance Hub - 依赖安装指南
 
-Version: 1.0
-Updated: 2026-07-06
+Version: 1.1
+Updated: 2026-07-13
 
 ---
 
 ## 当前依赖列表
 
-### Phase 1 S04 依赖
+### 已接入依赖
 
 | 依赖              | 用途         | 状态    |
 | ----------------- | ------------ | ------- |
@@ -15,12 +15,19 @@ Updated: 2026-07-06
 | **nlohmann-json** | JSON 解析    | ✅ 必需 |
 | **GTest**         | 单元测试框架 | ✅ 必需 |
 
-### 后续阶段依赖（预留）
+### 编译与运行环境依赖
+
+| 依赖 | 用途 | 状态 |
+| --- | --- | --- |
+| 支持 `std::chrono` IANA tzdb 的 C++23 标准库 | Dashboard 用户时区月窗 | 必需，以 CMake 能力探测为准 |
+| `tzdata` | Linux IANA 时区数据库 | Linux 编译、测试和运行环境必需 |
+
+### P1-S10 必需依赖
 
 | 依赖       | 用途              | 状态           |
 | ---------- | ----------------- | -------------- |
-| **Drogon** | Web 框架          | ⏳ P1-S10 需要 |
-| **libpq**  | PostgreSQL 客户端 | ⏳ P1-S07 需要 |
+| **Drogon** | Web 框架          | P1-S10 接入 |
+| **libpq**  | PostgreSQL 客户端 | P1-S10 接入 |
 
 ---
 
@@ -88,10 +95,17 @@ choco install spdlog
 
 ```bash
 sudo apt-get update
-sudo apt-get install libspdlog-dev
-sudo apt-get install nlohmann-json3-dev
-sudo apt-get install libgtest-dev
+sudo apt-get install -y \
+  gcc-14 g++-14 \
+  tzdata \
+  libspdlog-dev \
+  nlohmann-json3-dev \
+  libgtest-dev
 ```
+
+发行版中的具体 GCC 包名可能不同。版本号不是唯一判定条件：CMake configure
+会编译并链接 `std::chrono::locate_zone` 探针，未通过时会直接停止。Clang 在
+Linux 上通常仍使用系统 `libstdc++`，因此只升级 Clang 不一定具备 tzdb 支持。
 
 #### macOS (Homebrew)
 
@@ -153,6 +167,9 @@ cmake .. -DCMAKE_PREFIX_PATH=/path/to/libs -DCMAKE_BUILD_TYPE=Debug
 cd build
 cmake --build . --config Debug
 ```
+
+若 configure 报 `PFH requires a C++ standard library with std::chrono timezone
+database support`，请升级编译器及其配套标准库，并确认 Linux 已安装 `tzdata`。
 
 ### 运行单元测试
 

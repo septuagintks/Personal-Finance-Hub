@@ -347,6 +347,17 @@ public:
 
 ```
 
+**Phase 1 刷新契约（规范性）**
+
+上面的代码用于说明 Provider、Repository 与应用用例的职责关系；实际 Phase 1
+实现必须满足以下更严格的原子性与降级规则：
+
+1. 请求目标币种先去重并排除 pivot 本身。
+2. Provider 成功响应必须逐一覆盖全部请求币种对，且不得包含重复、缺失或意外币种对；否则整批按 `ExternalServiceError` 拒绝，不写入部分结果。
+3. 完整响应在同一 Unit of Work 中 append-only 写入，并为每个成功币种对登记一条 `ExchangeRateRefreshed` 事件，事件包含 `provider`、`baseCurrency`、`targetCurrency` 和 `fetchedAt`。
+4. Provider 失败时不写新汇率，并登记 `ExchangeRateRefreshFailed`。只有**每一个**请求币种对都有历史汇率时，结果才可声明历史 fallback 可用；部分覆盖不能伪装为可用降级。
+5. Repository 查询异常与“该币种对无历史记录”必须区分；数据库异常继续上抛，不得吞掉后转成普通降级。
+
 ### 3.2 汇率查询与降级策略
 
 当外部 API 完全不可用时，应用层应能够使用数据库中的历史汇率作为降级方案。

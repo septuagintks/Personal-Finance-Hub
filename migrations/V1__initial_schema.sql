@@ -180,13 +180,14 @@ CREATE INDEX idx_accounts_user_category ON accounts(user_id, category);
 CREATE TABLE system_category_templates (
     id BIGSERIAL PRIMARY KEY,
     name VARCHAR(128) NOT NULL,
+    locale VARCHAR(16) NOT NULL DEFAULT 'zh-CN',
     group_name VARCHAR(64) NOT NULL,
     parent_id BIGINT REFERENCES system_category_templates(id),
     default_board category_board,
     sort_order INT NOT NULL DEFAULT 0,
     is_selectable BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE NULLS NOT DISTINCT (group_name, parent_id, name)
+    UNIQUE NULLS NOT DISTINCT (locale, group_name, parent_id, name)
 );
 
 CREATE INDEX idx_system_category_templates_parent ON system_category_templates(parent_id);
@@ -426,6 +427,7 @@ CREATE TABLE domain_events_outbox (
     max_retry_count INT NOT NULL DEFAULT 5,
     next_retry_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_error TEXT,
+    occurred_at TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     published_at TIMESTAMPTZ
 );

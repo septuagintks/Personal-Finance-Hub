@@ -86,8 +86,9 @@ TEST(ExchangeRate, WhenConvertingWrongCurrency_ReturnsError) {
 }
 
 TEST(ExchangeRate, WhenConversionOverflows_PropagatesError) {
-    // Huge base amount * a large rate overflows Decimal; convert must surface it.
-    auto er = rate("USD", "CNY", "99999999999999999999");
+    // Keep the rate inside NUMERIC(20,10), then use a huge domain amount so the
+    // multiplication itself overflows Decimal. convert() must surface that error.
+    auto er = rate("USD", "CNY", "9999999999.9999999999");
     auto usd = Money(dec("99999999999999999999"), ccy("USD"));
     auto result = er.convert(usd);
     ASSERT_FALSE(result.has_value());

@@ -108,6 +108,65 @@ DomainResult<Decimal> Decimal::from_integer(std::int64_t value) {
     return Decimal(scaled);
 }
 
+namespace {
+
+[[nodiscard]] std::size_t significant_fractional_digits(
+    std::string_view text) noexcept {
+    std::size_t begin = 0;
+    std::size_t end = text.size();
+    while (begin < end && (text[begin] == ' ' || text[begin] == '\t')) {
+        ++begin;
+    }
+    while (end > begin && (text[end - 1] == ' ' || text[end - 1] == '\t')) {
+        --end;
+    }
+
+    const auto dot = text.substr(begin, end - begin).find('.');
+    if (dot == std::string_view::npos) {
+        return 0;
+    }
+    const std::size_t absolute_dot = begin + dot;
+    std::size_t fractional_end = end;
+    while (fractional_end > absolute_dot + 1 && text[fractional_end - 1] == '0') {
+        --fractional_end;
+    }
+    return fractional_end - (absolute_dot + 1);
+}
+
+} // namespace
+
+DomainResult<Decimal> Decimal::parse_numeric_20_8(std::string_view text) {
+    auto parsed = parse(text);
+    if (!parsed) {
+        return std::unexpected(parsed.error());
+    }
+    if (significant_fractional_digits(text) > 8) {
+        return std::unexpected(DomainError::invalid_amount(
+            "more than 8 fractional digits for NUMERIC(20,8)"));
+    }
+    if (!parsed->fits_numeric_20_8()) {
+        return std::unexpected(DomainError::invalid_amount(
+            "outside NUMERIC(20,8) range"));
+    }
+    return parsed;
+}
+
+DomainResult<Decimal> Decimal::parse_numeric_20_10(std::string_view text) {
+    auto parsed = parse(text);
+    if (!parsed) {
+        return std::unexpected(parsed.error());
+    }
+    if (significant_fractional_digits(text) > 10) {
+        return std::unexpected(DomainError::invalid_exchange_rate(
+            "more than 10 fractional digits for NUMERIC(20,10)"));
+    }
+    if (!parsed->fits_numeric_20_10()) {
+        return std::unexpected(DomainError::invalid_exchange_rate(
+            "outside NUMERIC(20,10) range"));
+    }
+    return parsed;
+}
+
 DomainResult<Decimal> Decimal::parse(std::string_view text) {
     // Trim surrounding whitespace.
     std::size_t begin = 0;
@@ -375,6 +434,44 @@ DomainResult<Decimal> Decimal::divide(const Decimal& other) const {
 
     Storage signed_result = static_cast<Storage>(quotient);
     return Decimal(negative ? -signed_result : signed_result);
+}
+
+DomainResult<Decimal> Decimal::round_to_scale(
+    std::int32_t fractional_digits) const {
+    if (fractional_digits < 0 || fractional_digits > kScale) {
+        return std::unexpected(DomainError::invalid_amount(
+            "rounding scale must be between 0 and 10"));
+    }
+    if (fractional_digits == kScale || value_ == 0) {
+        return *this;
+    }
+
+    Storage factor = 1;
+    for (std::int32_t i = fractional_digits; i < kScale; ++i) {
+        factor *= 10;
+    }
+
+    const bool negative = value_ < 0;
+    const UStorage magnitude = negative
+        ? static_cast<UStorage>(-(value_ + 1)) + 1
+        : static_cast<UStorage>(value_);
+    const UStorage unsigned_factor = static_cast<UStorage>(factor);
+    UStorage quotient = magnitude / unsigned_factor;
+    const UStorage remainder = magnitude % unsigned_factor;
+    const UStorage twice_remainder = remainder * 2;
+    if (twice_remainder > unsigned_factor ||
+        (twice_remainder == unsigned_factor && (quotient & 1) != 0)) {
+        ++quotient;
+    }
+
+    const UStorage rounded_magnitude = quotient * unsigned_factor;
+    const UStorage signed_max =
+        static_cast<UStorage>(std::numeric_limits<Storage>::max());
+    if (rounded_magnitude > signed_max) {
+        return std::unexpected(DomainError::overflow("round_to_scale"));
+    }
+    const Storage rounded = static_cast<Storage>(rounded_magnitude);
+    return Decimal(negative ? -rounded : rounded);
 }
 
 namespace {

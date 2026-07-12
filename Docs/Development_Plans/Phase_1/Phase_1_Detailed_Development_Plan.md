@@ -1,15 +1,17 @@
 # Personal Finance Hub (PFH) - Phase 1 Detailed Development Plan
 
-Version: 1.0
+Version: 1.1
 Backend: C++23
 Architecture: Clean Architecture + Lightweight DDD
-Status: Draft
+Status: Active
 
 ---
 
 ## 1. 导言与执行目标
 
 本文档是 `Phase_1_Development_Plan.md` 的细化子计划，用于描述 Phase 1 从创建工程目录结构开始，到第一阶段测试收尾为止的具体开发顺序、交付物和验收口径。
+
+当前进度（2026-07-13）：P1-S01 至 P1-S09 的 Domain、Application、迁移脚本及 In-Memory 语义验证已经完成，Windows GCC 16 基线为 240 个单元测试与 13 个 In-Memory 集成测试，共 253 个测试。当前进入 P1-S10；真实 Drogon/PostgreSQL 适配器、API、后台任务以及 Linux/Docker/真实 PostgreSQL 验收尚未完成。
 
 ### 1.1 执行原则
 
@@ -293,14 +295,18 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 - 建立持久化读写路径和事务一致性边界。
 
-开发内容：
+已交付基线：
 
-- 实现 `DrogonUnitOfWork`。
-- Repository 写入必须使用同一事务上下文。
-- 实现 `UserRepository` 与 `UserPreferenceRepository`：
+- 定义 Repository 与 `IUnitOfWork` 接口，并用 In-Memory 实现固定事务提交、回滚、read-your-writes 和用户隔离语义。
+- 通过同一批 integration scenarios 验证账户、流水、分类、汇率、余额缓存、转账聚合和 outbox 行为。
+
+生产适配器内容（移至 P1-S10-03 完成）：
+
+- 实现 `DrogonUnitOfWork`，Repository 写入必须使用同一事务上下文。
+- 实现 PostgreSQL `UserRepository` 与 `UserPreferenceRepository`：
   - `UserRepository` 负责 `User` 聚合持久化。
   - `UserPreferenceRepository` 负责偏好数据的独立读取与更新。
-- 实现 `AccountRepository` 与 `TransactionRepository`。
+- 实现 PostgreSQL `AccountRepository`、`TransactionRepository` 与 `CategoryRepository`。
 - 实现 `TransferAggregate` 持久化写路径：
   - 提供 `saveTransfer(const TransferAggregate&)` 或等价边界。
   - 按聚合约束同时落 `transfer_groups` 与底层派生流水。
@@ -311,6 +317,7 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 验收标准：
 
+- S08 的 In-Memory 语义基线通过；这不等同于真实数据库验收。
 - 业务写入和 outbox 写入在同一事务提交。
 - 事务回滚不会留下业务数据或 outbox 脏记录。
 - Repository 集成测试覆盖用户隔离、乐观锁、余额缓存和历史汇率查询。
@@ -348,27 +355,121 @@ P1-S12 Phase 1 测试收尾与文档回写
 - 暴露 Phase 1 最小可用 API。
 - 接入 JWT、Refresh Token 和统一错误响应。
 
-开发内容：
+执行前置：
 
-- 实现认证基础：
-  - login。
-  - refresh。
-  - logout。
-  - JWT Filter。
-  - Refresh Token 轮换与撤销。
-- 实现 Account API。
-- 实现 Transaction API。
-- 实现 Transfer API。
-- 实现 Report API。
-- 实现统一错误响应格式。
-- 注册 Drogon 全局异常处理器。
+- P1-S01 至 P1-S09 的 Windows 本地门禁持续通过。
+- 生产 composition root 不得装配 In-Memory Repository。
+- `Docs/Architecture/10_REST_API_Design.md` 与当前 Application Command/DTO 保持一致。
+
+开发顺序：
+
+#### P1-S10-01 REST 契约与遗留项收口
+
+- 将流水请求统一为 `accountId/type/amount/currencyCode/categoryId/description/occurredAt`，金额仅接受十进制字符串。
+- 将转账请求统一为 `sourceAccountId/targetAccountId/mode/outgoingAmount/incomingAmount/rate/description/occurredAt`；在暴露接口前完成任务 #48，将 `feeSource`、手续费金额及可选第三方手续费账户接入 `CreateTransferCommand`。
+- 固定金额符号边界：Income/Expense 请求使用正数 magnitude，Adjustment 使用 signed amount；Presentation 对外返回业务 magnitude，数据库带符号金额不得直接泄漏。
+- 明确 Phase 1 不开放转账删除接口；在 `DeleteTransferUseCase` 完成前，路由表中不得注册 `DELETE /api/v1/transfers/{id}`。
+- 明确流水采用追加 + 软删除模型，Phase 1 不对流水普通更新增加行级 `version`；账户聚合并发继续使用 `Account.version`。
+
+产物：更新后的 REST 契约、OpenAPI/JSON Schema 边界和遗留任务状态。
+
+#### P1-S10-02 Drogon、PostgreSQL 与 CMake 目标接入
+
+- 启用 Drogon/PostgreSQL 依赖发现，落地 `pfh_application`、`pfh_infrastructure`、`pfh_presentation` 和可执行程序目标。
+- 保持依赖方向：Domain 不链接 Drogon/PostgreSQL，Application 只依赖 Domain 端口。
+- 将已增长的 header-only 用例按需迁移到 `.cpp`，避免 Controller 编译单元重复实例化。
+- 增加 `tests/api` 目标和服务测试启动入口。
+
+产物：可配置、可编译并能启动空 HTTP 服务的分层 CMake 目标。
+
+#### P1-S10-03 PostgreSQL Repository 与 DrogonUnitOfWork
+
+- 实现 `DrogonUnitOfWork`，把同一 `Transaction` 上下文显式传给所有写 Repository 和 outbox。
+- 实现 PostgreSQL 版 User、UserPreference、Account、Transaction（含 Transfer 聚合持久化）、ExchangeRate、Category、Tag、AuditLog、RefreshToken 和 RevokedToken 适配器。
+- 完成任务 #46/#47/#51：真实分类解析、事务内 read-your-writes、余额缓存 `source_version` 与 schema `version` 语义严格一致。
+- 以迁移 schema 为事实来源，所有查询和约束显式包含 `user_id`；不得照搬 In-Memory 的简化字段或计数规则。
+
+产物：可供 composition root 装配的生产持久化适配器及可复用的 PostgreSQL integration scenarios。
+
+#### P1-S10-04 Composition Root、DbClient 与 RLS 上下文
+
+- 在 bootstrap 层创建 DbClient、Repository、UnitOfWork、Use Case、QueryService、Controller 和 Filter 的唯一装配入口。
+- 鉴权后在每请求/每事务执行 `SET LOCAL app.current_user_id` 或等价安全方案；连接归还连接池前不得残留用户上下文。
+- 未设置、非法或跨用户上下文必须 fail closed，并由测试证明连接池复用不会串租户。
+- 启动时校验数据库配置、JWT 密钥和必要依赖，失败时给出不含敏感信息的明确日志。
+
+产物：仅装配真实生产适配器的可启动服务。
+
+#### P1-S10-05 HTTP DTO、解析与统一响应
+
+- 实现 JSON 到 Application Command 的防御性映射，ID、枚举、可选时间和字符串金额逐字段校验。
+- 实现 Application DTO 到响应 JSON 的映射，统一金额、RFC 3339 时间、空值和分页口径。
+- 建立统一成功响应、错误响应和 TraceId；将应用错误单向映射为 400/401/403/404/409/422/500。
+- 注册全局异常处理器，生产响应不包含堆栈、SQL、路径、密钥或底层异常文本。
+
+产物：可复用的 request parser、response mapper、error mapper 和 exception boundary。
+
+#### P1-S10-06 注册、登录与 Token 生命周期
+
+- 实现 register、login、refresh、logout 四条认证路径。
+- 实现密码哈希、JWT 签发与校验、`iss/aud/sub/sid/jti/iat/nbf/exp` 校验和 `JwtFilter` 请求上下文注入。
+- Refresh Token 只持久化哈希，刷新时执行 rotation；复用已撤销 token 时撤销整个 token family/session。
+- logout 同事务撤销 refresh token、记录 access token `jti` 并写审计/outbox 事实。
+
+产物：认证 Controller、Filter、Token Service 和持久化适配器。
+
+#### P1-S10-07 基础资源 API
+
+- 在 Controller 前补齐 CreateAccount、ArchiveAccount、Category、Tag 和 UserPreference 所需的 Application Command/Use Case；Presentation 不直接编排 Repository。
+- 按 Account、Category、Tag、UserPreference、Currency metadata 的顺序接入 API。
+- 所有资源读取、更新和删除均验证当前 `user_id`；系统模板与用户自定义分类边界保持清晰。
+- Account API 至少覆盖列表、创建、余额快照、归档和已设计的危险删除确认路径。
+
+产物：基础资源 Controller 与成功/越权/不存在/冲突测试。
+
+#### P1-S10-08 Transaction API
+
+- 接入创建和软删除流水；禁止直接创建 Transfer 派生流水。
+- Income/Expense 只接受正数 magnitude，Adjustment 按 signed 语义映射；分类由 `ICategoryRepository` 校验真实 board。
+- 拒绝 JSON number、超出 `NUMERIC(20,8)`、币种不匹配、跨用户账户与分类。
+
+产物：TransactionController 及金额、分类、权限、时间默认值测试。
+
+#### P1-S10-09 Transfer API
+
+- 在任务 #48 完成后接入三种转账模式、手续费来源和汇兑损益 Adjustment。
+- 响应中的 outgoing/incoming/fee 均使用正数 magnitude；存储层 outgoing 负号不直接返回。
+- 验证同用户账户、同账户拒绝、同币种约束、汇率精度、`NUMERIC(20,8/10)` 边界和事务原子性。
+- Phase 1 仅支持创建与查询，不注册转账删除路由。
+
+产物：TransferController 及三种模式、手续费、回滚和 422 测试。
+
+#### P1-S10-10 Report API
+
+- 暴露 net worth、cash flow 和 dashboard summary。
+- 复用 `ReportQueryService` 的用户时区月窗、历史汇率、signed Adjustment、Transfer 排除和一级分类聚合语义。
+- 所有查询显式绑定 `user_id`；缺失汇率和无效时区不得静默回退。
+
+产物：ReportController 及月边界、跨币种、分类聚合和用户隔离测试。
+
+#### P1-S10-11 API 回归与交付总结
+
+- 启动测试版 Drogon App，覆盖认证、主要成功路径、错误映射、TraceId 和异常脱敏。
+- 运行 Windows Debug 构建、253 个既有测试和新增 API 测试。
+- 回写 `Docs/Development/Tasks.md`，新增 `Phase_1_S10_Delivery_Summary.md`，记录尚待外部机器验证的项目。
+
+产物：可重复执行的 API 测试集与 S10 交付总结。
 
 验收标准：
 
 - API 路由统一以 `/api/v1` 开头。
 - 金额字段在请求和响应中均为字符串。
+- 生产 composition root 只使用 PostgreSQL Repository 与 `DrogonUnitOfWork`。
+- register/login/refresh/logout 与 token rotation/revocation 均有测试。
+- Account、Transaction、Transfer 和 Report 的最小路径均有成功与错误场景。
 - 未认证、无权限、找不到资源、冲突、业务规则错误和系统错误能返回正确 HTTP 状态码。
 - 生产响应不泄露堆栈、SQL、文件路径或密钥。
+- S10 本机门禁通过；真实 PostgreSQL 与 Linux/Docker 的最终签署保留到 P1-S12。
 
 ### 3.11 P1-S11 Outbox、调度与后台任务基础
 
@@ -376,19 +477,52 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 - 完成事务后事件投递和汇率刷新任务的最小基础。
 
-开发内容：
+开发顺序：
 
-- 实现 `OutboxPublisherJob`。
-- 支持 pending、failed、重试次数和 dead letter。
-- 实现汇率刷新调度入口。
-- 确保网络 I/O、数据库 I/O 或 CPU 密集任务不阻塞 Drogon Event Loop。
-- 为任务执行补充日志和审计事件。
+#### P1-S11-01 Outbox 领取与状态机
+
+- 使用 `FOR UPDATE SKIP LOCKED` 或等价机制批量 claim pending 事件，定义 processing、published、failed/dead-letter 状态转换。
+- claim、锁超时恢复、重试次数、下一次重试时间和最后错误摘要必须可观测。
+
+#### P1-S11-02 发布、重试与死信
+
+- 实现 `OutboxPublisherJob`，业务事务提交后才允许发布。
+- 使用有上限的指数退避；达到阈值后进入 dead letter，不得无限热重试。
+- 发布失败不得回滚已经提交的业务事实。
+
+#### P1-S11-03 Handler 幂等与审计闭环
+
+- 每个事件处理器以 event id 建立幂等边界，重复投递不得重复写坏缓存、审计或通知事实。
+- 接入 AuditLog 处理器，敏感 payload 只记录必要摘要。
+
+#### P1-S11-04 汇率 HTTP Provider
+
+- 实现真实 HTTP Provider，严格校验响应集合、币种、时间戳、正汇率和重复项。
+- 网络失败、部分响应和非法响应进入既定历史降级路径，并发出 `ExchangeRateRefreshFailedEvent`。
+
+#### P1-S11-05 Scheduler 与 JobManager
+
+- 实现汇率刷新、outbox 发布、过期 Refresh Token 和 Access Token 撤销记录清理任务。
+- 定义启动、停止、优雅退出、单实例防重入和任务超时行为。
+
+#### P1-S11-06 非阻塞约束
+
+- 网络、数据库等待和 CPU 密集工作不得阻塞 Drogon Event Loop；使用异步 client、协程或专用 worker。
+- 增加慢任务日志、job id、trace id、执行耗时和失败原因。
+
+#### P1-S11-07 后台任务测试与交付总结
+
+- 覆盖并发 claim、崩溃恢复、重复投递、退避、dead letter、历史汇率降级、任务防重入和优雅停止。
+- 回写 Tasks 并新增 `Phase_1_S11_Delivery_Summary.md`。
 
 验收标准：
 
 - outbox 事件不会在业务事务提交前派发。
 - 任务失败可以重试并进入 failed 或 dead letter。
+- 多 worker 不会同时成功处理同一事件，重复投递不会产生重复副作用。
 - 汇率刷新失败可降级并记录告警事件。
+- Drogon Event Loop 不执行阻塞式网络、数据库或长时间 CPU 工作。
+- 过期 token 与撤销记录具备可重复执行的清理任务。
 
 ### 3.12 P1-S12 Phase 1 测试收尾与文档回写
 
@@ -397,19 +531,51 @@ P1-S12 Phase 1 测试收尾与文档回写
 - 用测试和文档收束 Phase 1。
 - 确保进入 Phase 2 前，后端核心闭环稳定。
 
-开发内容：
+执行位置：
 
-- 跑通金融原语单元测试。
-- 跑通领域服务单元测试。
-- 跑通 Repository 集成测试。
-- 跑通 API smoke test。
-- 在 Linux 环境跑通对应构建与测试命令。
-- 检查报表是否排除 Transfer。
-- 检查金额字段是否拒绝 JSON number。
-- 检查危险删除、事务回滚、outbox 和历史汇率关键路径。
-- 回写 `Docs/Development/Tasks.md`。
-- 检查当前 Phase 分支是否满足交付与合并回 `main` 的前置条件。
-- 如实现与设计不一致，先更新架构文档，再调整任务状态。
+- Windows 本地门禁在当前开发机执行。
+- Linux、Docker、PostgreSQL 16+ 和真实 Drogon 运行时验证在另一台具备对应环境的机器执行；该项必须保留在 Tasks 中，取得可追溯结果前不得视为 Phase 1 已签署通过。
+
+开发顺序：
+
+#### P1-S12-01 Windows 本地回归
+
+- 执行 Debug configure/build、全部 unit/In-Memory integration/API tests、Markdown 检查和 `git diff --check`。
+- 复核 Release configure/build，确认无仅在 Debug 可编译的路径。
+
+#### P1-S12-02 外部机器环境准备
+
+- 固定 Linux 发行版、GCC/libstdc++、CMake、Drogon、PostgreSQL、Flyway、Docker 与 `tzdata` 版本。
+- 使用独立测试凭据和数据库；记录 commit hash、镜像/工具版本、执行命令与时间。
+
+#### P1-S12-03 空库迁移与真实持久化
+
+- 从空 PostgreSQL 16+ 数据库执行全部迁移，并验证重复启动不会破坏 schema。
+- 用与 In-Memory 基线相同的 scenarios 复跑全部 PostgreSQL Repository 与 `DrogonUnitOfWork` 测试。
+- 重点验证 RLS fail-closed、连接池用户上下文复用、事务回滚、并发锁、乐观锁、outbox 同事务、余额缓存 `source_version` 和历史汇率。
+- 实测 `NUMERIC(20,8/10)` 的边界、舍入和超界拒绝，关闭 Tasks 中 item 10/14/16 的连库复核项。
+
+#### P1-S12-04 API 与认证 Smoke Test
+
+- 在真实 Drogon + PostgreSQL 上覆盖 register/login/refresh/logout、JWT 拒绝、资源用户隔离和主要业务写读路径。
+- 验证 JSON number 拒绝、错误状态码、TraceId、异常脱敏、转账原子性和报表时区月边界。
+
+#### P1-S12-05 Outbox 与 Scheduler 真实运行验证
+
+- 验证事件只在 commit 后被 claim，失败重试、dead letter、幂等 handler 和进程重启恢复均符合设计。
+- 验证真实汇率 HTTP Provider、历史降级、周期调度、token 清理和优雅停止。
+
+#### P1-S12-06 Linux Debug/Release 与 Docker 门禁
+
+- 在目标 Linux 工具链分别完成 Debug/Release configure、build 和全量测试。
+- 构建并启动 Docker 运行环境，执行健康检查和关键 API smoke test；确认 `tzdata`、迁移和运行时配置齐全。
+
+#### P1-S12-07 文档定稿与分支交付
+
+- 回写 `Docs/Development/Tasks.md`、测试基线、环境记录和 `Phase_1_S12_Delivery_Summary.md`。
+- 已验收的阶段交付总结按文档规范归档；未完成项继续留在 Tasks，不以说明文字代替验收。
+- 审核架构、代码和 API 契约；存在偏差时先明确设计结论，再修代码或文档。
+- 所有阻断项通过后，才允许将完整 Phase 1 分支合并到 `main`。
 
 验收标准：
 
@@ -418,8 +584,11 @@ P1-S12 Phase 1 测试收尾与文档回写
 - unit tests 通过。
 - repository integration tests 通过。
 - api smoke tests 通过。
+- 真实 PostgreSQL 空库迁移、Repository/UoW/RLS/并发与数值边界测试通过。
 - Linux Debug 构建通过。
+- Linux Release 构建通过。
 - Linux 对应测试集通过。
+- Docker 服务启动、健康检查与关键 API smoke test 通过。
 - `git diff --check` 通过。
 - Phase 1 交付总结文档已回写完成。
 - 当前 Phase 分支满足合并回 `main` 的交付门槛。
@@ -466,8 +635,9 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 当前没有必须由维护者立即选择的架构项。
 
-### 5.1 后续可评估事项
+### 5.1 已确认事项
 
-- **Decimal 底层实现**：实现阶段在 `boost::multiprecision::int128_t` 和平台原生 `__int128_t` 之间做一次最终确认。
-- **数据库测试方式**：可先使用本地 PostgreSQL 测试库；如环境漂移明显，再引入 Testcontainer。
-- **API smoke test 范围**：Phase 1 可先覆盖核心路径，Phase 2 再扩展为完整端到端测试。
+- **Decimal 底层实现**：已采用编译器原生 `__int128` 定点实现；CMake 必须在不支持的平台明确失败。
+- **数据库测试方式**：开发机保留快速 In-Memory 回归；真实 PostgreSQL、Linux 和 Docker 阻断门禁在另一台机器于 P1-S12 执行。
+- **转账删除**：Phase 1 暂不开放；完成 `DeleteTransferUseCase` 和聚合级联测试后再新增路由。
+- **API smoke test 范围**：Phase 1 覆盖认证与核心记账闭环，完整前端端到端场景留待 Phase 2。

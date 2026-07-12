@@ -34,6 +34,10 @@ public:
             return std::unexpected(domain::RepositoryError::validation(
                 "Exchange rate base and target must differ"));
         }
+        if (!rate.rate().fits_numeric_20_10()) {
+            return std::unexpected(domain::RepositoryError::validation(
+                "Exchange rate does not fit NUMERIC(20,10)"));
+        }
 
         const auto id_value = store_.next_exchange_rate_id++;
         // Always insert a new row — never update existing history.

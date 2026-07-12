@@ -10,6 +10,7 @@
 #include "pfh/application/persistence/i_unit_of_work.h"
 #include "pfh/domain/events/domain_events.h"
 #include "pfh/domain/repositories/i_account_repository.h"
+#include "pfh/domain/repositories/i_category_repository.h"
 #include "pfh/domain/repositories/i_transaction_repository.h"
 #include "pfh/domain/category.h"
 #include <chrono>
@@ -23,9 +24,11 @@ class CreateTransactionUseCase {
 public:
     CreateTransactionUseCase(
         domain::IAccountRepository& accounts,
+        domain::ICategoryRepository& categories,
         domain::ITransactionRepository& transactions,
         IUnitOfWork& uow)
-        : accounts_(accounts), transactions_(transactions), uow_(uow) {}
+        : accounts_(accounts), categories_(categories),
+          transactions_(transactions), uow_(uow) {}
 
     [[nodiscard]] Result<TransactionDto> execute(const CreateTransactionCommand& cmd) {
         if (cmd.amount.empty()) {
@@ -36,7 +39,7 @@ public:
                 "Use CreateTransferUseCase for transfer transactions"));
         }
 
-        auto amount_dec = domain::Decimal::parse(cmd.amount);
+        auto amount_dec = domain::Decimal::parse_numeric_20_8(cmd.amount);
         if (!amount_dec) {
             return err(from_domain(amount_dec.error()));
         }
@@ -51,31 +54,9 @@ public:
         } else if (!amount_dec->is_positive()) {
             return err(Error::validation("amount must be a positive decimal string"));
         }
-        // Reject amounts the DB amount column NUMERIC(20,8) cannot hold, so a
-        // value is never silently rounded or overflowed on write.
-        if (!amount_dec->fits_numeric_20_8()) {
-            return err(Error::validation(
-                "amount exceeds supported precision/range (NUMERIC(20,8))"));
-        }
-
         auto currency = domain::Currency::create(cmd.currency_code);
         if (!currency) {
             return err(from_domain(currency.error()));
-        }
-
-        // Category board rule: if a category is attached, its board must match
-        // the transaction type (Income->income, Expense/Adjustment->expense).
-        // This is pure input validation, so it stays outside the transaction.
-        if (cmd.category_id.has_value()) {
-            if (!cmd.category_board.has_value()) {
-                return err(Error::validation(
-                    "category_board is required when category_id is provided"));
-            }
-            auto board_check = domain::Category::validate_category_board(
-                cmd.type, *cmd.category_board);
-            if (!board_check) {
-                return err(from_domain(board_check.error()));
-            }
         }
 
         domain::Money money(*amount_dec, *currency);
@@ -104,6 +85,21 @@ public:
                         account->currency().code() + " != " + currency->code());
                     return std::unexpected(domain::RepositoryError::validation(
                         "currency mismatch"));
+                }
+
+                if (cmd.category_id.has_value()) {
+                    auto category = categories_.find_by_id_for_user_for_update(
+                        tx_ctx, *cmd.category_id, cmd.user_id);
+                    if (!category) {
+                        return std::unexpected(category.error());
+                    }
+                    auto board_check = domain::Category::validate_category_board(
+                        cmd.type, category->board());
+                    if (!board_check) {
+                        app_error = from_domain(board_check.error());
+                        return std::unexpected(domain::RepositoryError::validation(
+                            "category board mismatch"));
+                    }
                 }
 
                 // Stamp current time when the caller omitted a business time,
@@ -163,6 +159,7 @@ private:
     }
 
     domain::IAccountRepository& accounts_;
+    domain::ICategoryRepository& categories_;
     domain::ITransactionRepository& transactions_;
     IUnitOfWork& uow_;
 };

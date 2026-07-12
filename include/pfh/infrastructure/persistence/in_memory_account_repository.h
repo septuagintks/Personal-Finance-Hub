@@ -194,6 +194,10 @@ public:
             return std::unexpected(domain::RepositoryError::database(
                 "save requires an active transaction"));
         }
+        if (!user_exists(account.owner())) {
+            return std::unexpected(domain::RepositoryError::not_found(
+                "Account owner not found"));
+        }
 
         // Create path: invalid id means assign new id.
         if (!account.id().is_valid()) {
@@ -232,6 +236,10 @@ public:
         if (!found) {
             return std::unexpected(domain::RepositoryError::not_found(
                 "Cannot update unknown account: " + account.id().to_string()));
+        }
+        if (account.owner() != existing.owner()) {
+            return std::unexpected(domain::RepositoryError::validation(
+                "Account owner cannot change"));
         }
 
         // Caller must pass the current version; we compare against stored version.
@@ -288,6 +296,13 @@ public:
     }
 
 private:
+    [[nodiscard]] bool user_exists(domain::UserId user_id) const {
+        if (store_.in_transaction && store_.staged_users.contains(user_id.value())) {
+            return true;
+        }
+        return store_.users.contains(user_id.value());
+    }
+
     [[nodiscard]] bool is_staged_deleted_account(std::int64_t id) const {
         if (!store_.in_transaction) {
             return false;

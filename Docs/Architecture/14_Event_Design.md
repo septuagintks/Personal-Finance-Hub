@@ -57,6 +57,7 @@ struct IDomainEvent {
 | CategoryCreated           | userId, categoryId, board, occurredAt                                 | CreateCategoryUseCase / InitializeDefaultCategoriesUseCase | CategoryTreeCacheInvalidator                               |
 | CategoryDeleted           | userId, categoryId, board, occurredAt                                 | DeleteCategoryUseCase                                      | CategoryTreeCacheInvalidator, ReportCacheInvalidator       |
 | ExchangeRateRefreshed     | provider, baseCurrency, targetCurrency, fetchedAt                     | RefreshExchangeRatesUseCase                                | LatestRateCacheInvalidator, AuditLogHandler                |
+| ExchangeRateRefreshFailed | provider, baseCurrency, historicalAvailable, reason, occurredAt       | RefreshExchangeRatesUseCase                                | AuditLogHandler, AlertHandler                              |
 | SyncCompleted             | userId, provider, syncJobId, importedCount, skippedCount, occurredAt  | RunSyncJobUseCase                                          | ReconciliationJob, AuditLogHandler                         |
 | UserPreferenceUpdated     | userId, occurredAt                                                    | UpdateUserPreferenceUseCase                                | FrontendPreferenceCacheInvalidator, ReportCacheInvalidator |
 | AuditLogRecorded          | auditLogId, operatorUserId, action, resourceType, occurredAt          | AuditLogHandler                                            | SecurityNotificationHandler                                |
@@ -68,6 +69,10 @@ struct IDomainEvent {
 3. 事件不得承担命令语义，例如不要命名为 `RefreshDashboard`
 4. 事件 payload 只携带 ID、时间和少量摘要字段
 5. 事件必须在数据库事务成功提交后派发
+
+`ExchangeRateRefreshed` 按成功返回的币种对逐条登记，不使用批次计数替代
+`targetCurrency`。`ExchangeRateRefreshFailed.historicalAvailable` 只有在本次请求的
+全部目标币种对均存在历史汇率时才为 `true`。
 
 ```cpp
 // domain/events/TransferCompletedEvent.hpp
@@ -294,9 +299,9 @@ public:
                 for (const auto& ev : pendingEvents_) {
                     auto payload = serializeDomainEvent(*ev);
                     trans->execSqlSync(
-                        "INSERT INTO domain_events_outbox (id, event_name, aggregate_type, aggregate_id, payload, status, retry_count, max_retry_count, next_retry_at, created_at) "
-                        "VALUES ($1, $2, $3, $4, $5, 'pending', 0, 5, NOW(), NOW())",
-                        generateOutboxId(), ev->getEventName(), getAggregateType(*ev), getAggregateId(*ev), payload
+                        "INSERT INTO domain_events_outbox (id, event_name, aggregate_type, aggregate_id, payload, status, retry_count, max_retry_count, next_retry_at, occurred_at, created_at) "
+                        "VALUES ($1, $2, $3, $4, $5, 'pending', 0, 5, NOW(), $6, NOW())",
+                        generateOutboxId(), ev->getEventName(), getAggregateType(*ev), getAggregateId(*ev), payload, ev->getOccurredAt()
                     );
                 }
 
@@ -403,6 +408,7 @@ retry_count INT NOT NULL DEFAULT 0,
 max_retry_count INT NOT NULL DEFAULT 5,
 next_retry_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 last_error TEXT,
+occurred_at TIMESTAMPTZ NOT NULL,
 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 published_at TIMESTAMPTZ
 );

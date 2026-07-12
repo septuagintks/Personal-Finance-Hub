@@ -1,6 +1,6 @@
 # Personal Finance Hub - Reporting & Analytics Design
 
-Version: 1.0
+Version: 1.1
 
 Backend: C++23
 
@@ -14,6 +14,8 @@ Architecture: Clean Architecture (Lightweight CQRS)
 
 - **写操作（Command）**：需要强一致性、业务规则校验、保护聚合根不被破坏（通过 Repository 加载 Entity）。
 - **读操作（Query）**：需要极致的性能、多表联合、直接输出给前端展示（无需经过 Entity 转换）。
+
+Phase 1 的最小报表读路径统一由 Application 层 `ReportQueryService` 承载，覆盖 net worth、cash flow 和 dashboard summary；不再另设 `GenerateMonthlyReportUseCase`。后续扩展为 PostgreSQL 聚合查询时，可以由 Infrastructure 实现同一查询端口，但不得改变 Controller 所依赖的 Application DTO 契约。
 
 ### 1.1 报表查询的流转路径与多租户安全隔离
 

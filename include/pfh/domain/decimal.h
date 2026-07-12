@@ -43,6 +43,16 @@ public:
     /// Fractional digits beyond kScale are rounded Half-Even.
     [[nodiscard]] static DomainResult<Decimal> parse(std::string_view text);
 
+    /// @brief Parse a user-supplied amount for a PostgreSQL NUMERIC(20,8)
+    /// boundary. Non-zero precision beyond 8 fractional digits is rejected
+    /// before Decimal's internal scale-10 parser can round it away.
+    [[nodiscard]] static DomainResult<Decimal> parse_numeric_20_8(
+        std::string_view text);
+
+    /// @brief Parse a user-supplied exchange rate for NUMERIC(20,10).
+    [[nodiscard]] static DomainResult<Decimal> parse_numeric_20_10(
+        std::string_view text);
+
     /// @brief Build a Decimal from a whole integer value.
     [[nodiscard]] static DomainResult<Decimal> from_integer(std::int64_t value);
 
@@ -61,6 +71,11 @@ public:
     [[nodiscard]] DomainResult<Decimal> subtract(const Decimal& other) const;
     [[nodiscard]] DomainResult<Decimal> multiply(const Decimal& other) const;
     [[nodiscard]] DomainResult<Decimal> divide(const Decimal& other) const;
+
+    /// @brief Round to a smaller fractional scale using Half-Even while
+    /// retaining Decimal's internal scale-10 representation.
+    [[nodiscard]] DomainResult<Decimal> round_to_scale(
+        std::int32_t fractional_digits) const;
 
     // Unary operations (cannot overflow within valid range).
     [[nodiscard]] Decimal negated() const noexcept { return Decimal(-value_); }

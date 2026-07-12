@@ -15,6 +15,27 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Dashboard month windows use the C++20 IANA timezone database. Calendar-only
+# chrono support is insufficient: the standard library must also provide and
+# link locate_zone/time_zone. Fail at configure time with a useful diagnostic
+# instead of failing deep in the report headers during the build.
+include(CheckCXXSourceCompiles)
+check_cxx_source_compiles([=[
+    #include <chrono>
+    int main() {
+        const auto* zone = std::chrono::locate_zone("UTC");
+        const auto local = zone->to_local(std::chrono::system_clock::now());
+        (void)local;
+        return 0;
+    }
+]=] PFH_HAS_STD_CHRONO_TZDB)
+if(NOT PFH_HAS_STD_CHRONO_TZDB)
+    message(FATAL_ERROR
+        "PFH requires a C++ standard library with std::chrono timezone database support "
+        "(locate_zone/time_zone). Use a newer GCC/libstdc++ toolchain or another "
+        "C++23 toolchain that passes this probe.")
+endif()
+
 # =============================================================================
 # Build Type Configuration
 # =============================================================================

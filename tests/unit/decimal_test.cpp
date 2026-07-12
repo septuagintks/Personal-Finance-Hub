@@ -363,4 +363,38 @@ TEST(Decimal, FitsNumeric2010_AllowsTenFractionalDigits) {
     EXPECT_FALSE(make("0.000000001").fits_numeric_20_8()); // but not for amount
 }
 
+TEST(Decimal, ParseNumeric208_RejectsPrecisionBeforeInternalRounding) {
+    auto hidden_precision = Decimal::parse_numeric_20_8("1.00000000001");
+    ASSERT_FALSE(hidden_precision.has_value());
+    EXPECT_EQ(hidden_precision.error().code, DomainErrorCode::InvalidAmount);
+
+    auto trailing_zeros = Decimal::parse_numeric_20_8("1.25000000000");
+    ASSERT_TRUE(trailing_zeros.has_value());
+    EXPECT_EQ(trailing_zeros->to_string(), "1.25");
+
+    auto hidden_rate_precision =
+        Decimal::parse_numeric_20_10("1.00000000001");
+    ASSERT_FALSE(hidden_rate_precision.has_value());
+    EXPECT_EQ(hidden_rate_precision.error().code,
+              DomainErrorCode::InvalidExchangeRate);
+}
+
+TEST(Decimal, RoundToScale_UsesHalfEven) {
+    auto down = make("1.234567845").round_to_scale(8);
+    ASSERT_TRUE(down.has_value());
+    EXPECT_EQ(down->to_string(), "1.23456784");
+
+    auto up = make("1.234567855").round_to_scale(8);
+    ASSERT_TRUE(up.has_value());
+    EXPECT_EQ(up->to_string(), "1.23456786");
+
+    auto negative_down = make("-1.234567845").round_to_scale(8);
+    ASSERT_TRUE(negative_down.has_value());
+    EXPECT_EQ(negative_down->to_string(), "-1.23456784");
+
+    auto negative_up = make("-1.234567855").round_to_scale(8);
+    ASSERT_TRUE(negative_up.has_value());
+    EXPECT_EQ(negative_up->to_string(), "-1.23456786");
+}
+
 } // namespace pfh::test

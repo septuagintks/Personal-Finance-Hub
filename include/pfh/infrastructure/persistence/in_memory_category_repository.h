@@ -36,6 +36,18 @@ public:
         return *cat;
     }
 
+    [[nodiscard]] domain::RepositoryResult<domain::Category>
+    find_by_id_for_user_for_update(
+        domain::ITransactionContext& /*tx*/,
+        domain::CategoryId id,
+        domain::UserId user_id) override {
+        if (!store_.in_transaction) {
+            return std::unexpected(domain::RepositoryError::database(
+                "find_by_id_for_user_for_update requires an active transaction"));
+        }
+        return find_by_id_for_user(id, user_id);
+    }
+
     [[nodiscard]] domain::RepositoryResult<std::vector<domain::Category>> find_by_board(
         domain::UserId user_id,
         domain::CategoryBoard board) override {
@@ -92,6 +104,41 @@ public:
             return std::unexpected(domain::RepositoryError::database(
                 "save requires an active transaction"));
         }
+        if (!user_exists(category.owner())) {
+            return std::unexpected(domain::RepositoryError::not_found(
+                "Category owner not found"));
+        }
+        if (category.name().empty()) {
+            return std::unexpected(domain::RepositoryError::validation(
+                "Category name must not be empty"));
+        }
+        if (category.parent_id().has_value()) {
+            if (category.id().is_valid() && *category.parent_id() == category.id()) {
+                return std::unexpected(domain::RepositoryError::validation(
+                    "Category cannot be its own parent"));
+            }
+            auto parent = find_by_id_for_user(*category.parent_id(), category.owner());
+            if (!parent) {
+                return std::unexpected(parent.error());
+            }
+            if (parent->board() != category.board()) {
+                return std::unexpected(domain::RepositoryError::validation(
+                    "Parent category must use the same board"));
+            }
+        }
+
+        for (const auto& [id, existing] : merged()) {
+            if (category.id().is_valid() && id == category.id().value()) {
+                continue;
+            }
+            if (existing.owner() == category.owner() &&
+                existing.board() == category.board() &&
+                existing.parent_id() == category.parent_id() &&
+                existing.name() == category.name()) {
+                return std::unexpected(domain::RepositoryError::conflict(
+                    "Duplicate category name in the same board and parent"));
+            }
+        }
 
         // Create path: invalid id => assign a new one.
         if (!category.id().is_valid()) {
@@ -106,16 +153,26 @@ public:
                 category.template_id(),
                 category.sort_order(),
                 category.deleted_at(),
-                category.created_at());
+                category.created_at(),
+                category.updated_at());
             store_.staged_categories.emplace(id_value, std::move(created));
             return domain::CategoryId(id_value);
         }
 
         // Update path: category must already exist (committed or staged).
         const auto id = category.id().value();
-        if (!lookup(id).has_value()) {
+        const auto existing = lookup(id);
+        if (!existing.has_value()) {
             return std::unexpected(domain::RepositoryError::not_found(
                 "Cannot update unknown category: " + category.id().to_string()));
+        }
+        if (existing->owner() != category.owner()) {
+            return std::unexpected(domain::RepositoryError::validation(
+                "Category owner cannot change"));
+        }
+        if (existing->board() != category.board()) {
+            return std::unexpected(domain::RepositoryError::validation(
+                "Category board cannot change"));
         }
         store_.staged_categories.insert_or_assign(id, category);
         return category.id();
@@ -139,6 +196,13 @@ private:
 
     [[nodiscard]] std::optional<domain::Category> lookup(std::int64_t id) const {
         if (store_.in_transaction) {
+            for (const auto deleted : store_.staged_deleted_categories) {
+                if (deleted == id) {
+                    return std::nullopt;
+                }
+            }
+        }
+        if (store_.in_transaction) {
             if (auto it = store_.staged_categories.find(id);
                 it != store_.staged_categories.end()) {
                 return it->second;
@@ -148,6 +212,13 @@ private:
             return it->second;
         }
         return std::nullopt;
+    }
+
+    [[nodiscard]] bool user_exists(domain::UserId user_id) const {
+        if (store_.in_transaction && store_.staged_users.contains(user_id.value())) {
+            return true;
+        }
+        return store_.users.contains(user_id.value());
     }
 
     InMemoryStore& store_;

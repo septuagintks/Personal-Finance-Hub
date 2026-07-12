@@ -47,6 +47,23 @@
 - `provider`: Exchange rate data provider (`mock` for testing, other providers TBD)
 - `api_key`: Provider API key (if required)
 
+## Environment Variable Overlay
+
+Configuration is loaded in this order: environment variables, JSON file, then built-in defaults. The `PFH_*` names are preferred; legacy unprefixed names remain supported for compatibility.
+
+| Configuration | Preferred environment variable |
+| ------------- | ------------------------------ |
+| Runtime environment | `PFH_ENVIRONMENT` |
+| JWT secret | `PFH_JWT_SECRET` |
+| Database host | `PFH_DB_HOST` |
+| Database port | `PFH_DB_PORT` |
+| Database name | `PFH_DB_NAME` |
+| Database user | `PFH_DB_USER` |
+| Database password | `PFH_DB_PASSWORD` |
+| Exchange-rate API key | `PFH_EXCHANGE_RATE_API_KEY` |
+
+`PFH_DB_PORT` must be an integer from 1 through 65535. Invalid environment values fail configuration loading instead of silently falling back to JSON. Environment-provided secrets are subject to the same placeholder and strength validation as JSON values.
+
 ## Environment-Specific Configs
 
 - `config.example.json`: Template with placeholder values (committed to git)
@@ -56,7 +73,7 @@
 
 ## Security Notes
 
-⚠️ **NEVER commit files containing:**
+**NEVER commit files containing:**
 - Database passwords
 - JWT secrets
 - API keys

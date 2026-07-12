@@ -4,7 +4,7 @@ Version: 0.1.0-alpha
 Backend: C++23
 Architecture: Clean Architecture + Lightweight DDD
 
-Personal Finance Hub（PFH）是一个面向个人财务管理场景的聚合平台，目标是把账户、流水、转账、预算、报表、汇率和外部账单同步整合到一个高精度、可审计、可扩展的后端系统中。项目当前处于 **Phase 1 开发阶段**，正在搭建工程骨架和核心领域模型。详细开发规范见 [Docs/README.md](Docs/README.md)。
+Personal Finance Hub（PFH）是一个面向个人财务管理场景的聚合平台，目标是把账户、流水、转账、预算、报表、汇率和外部账单同步整合到一个高精度、可审计、可扩展的后端系统中。项目当前处于 **Phase 1 开发阶段**，P1-S01 至 P1-S09 的领域与应用层基础已经完成，正在进入 P1-S10 REST API 与认证开发。详细开发规范见 [Docs/README.md](Docs/README.md)。
 
 ## 主要功能
 
@@ -41,11 +41,12 @@ DTO Mapping       Transactions      Services     Scheduler / Outbox
 ### 环境要求
 
 - **C++23 兼容编译器**（Phase 1 依赖 `__int128` 扩展实现高精度 Decimal，当前仅支持 GCC/Clang）:
-  - GCC 13+ （推荐）
-  - Clang 18+
+  - GCC 14+ 与配套新版 libstdc++（推荐，最终以 CMake tzdb 能力探测为准）
+  - Clang 18+ 与能够通过同一 tzdb 探测的标准库
   - MSVC 支持计划在后续阶段（需切换至 Boost.Multiprecision 或自实现 128 位定点数）
 - **CMake** 3.20 或更高版本
 - **PostgreSQL** 16 或更高版本
+- **tzdata**（Linux 编译、测试和运行环境必需）
 - **vcpkg**（推荐用于依赖管理）
 
 ### 构建步骤

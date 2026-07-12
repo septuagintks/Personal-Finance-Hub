@@ -1,6 +1,6 @@
 # Personal Finance Hub (PFH) - Phase 1 待办任务跟踪
 
-Version: 1.4
+Version: 1.6
 Backend: C++23
 Architecture: Clean Architecture + Lightweight DDD
 Status: Active
@@ -30,17 +30,18 @@ Status: Active
 
 ### 2.1 近期顺序
 
-1. 按 `Docs/Development_Plans/Phase_1/Phase_1_Detailed_Development_Plan.md` 创建目录结构与工程骨架。
-2. 搭建 CMake、编译选项、GoogleTest 入口和本地质量命令。
-3. 实现 `Decimal`、`Currency`、`Money` 和 `ExchangeRate`，优先锁定金额与汇率的不可变规则。
-4. 实现最小领域闭环：账户、流水、转账、汇率折算和余额规则。
-5. 接入 PostgreSQL、Flyway、Repository 与 Unit of Work，形成可持久化写路径。
+1. 执行 P1-S10-01，先固定 REST 契约、金额符号、流水并发策略与转账删除边界，并完成 #48。
+2. 执行 P1-S10-02 至 S10-04，落地 CMake 分层目标、PostgreSQL Repository、`DrogonUnitOfWork`、composition root 与 RLS 上下文。
+3. 执行 P1-S10-05 至 S10-10，按统一 HTTP 边界、认证、基础资源、Transaction、Transfer、Report 的顺序接入 `/api/v1`。
+4. 执行 P1-S10-11，补齐 API 测试和 S10 交付总结；S10 完整通过后进入 P1-S11。
+5. P1-S12 在另一台机器完成 Linux、Docker、PostgreSQL 16+、Debug/Release 和真实运行时阻断门禁。
 
 ### 2.2 当前前置条件
 
-- Phase 1 开发计划已创建：`Docs/Development_Plans/Phase_1_Development_Plan.md`。
-- Phase 1 细化子计划已创建：`Docs/Development_Plans/Phase_1/Phase_1_Detailed_Development_Plan.md`。
-- 进入代码实现前，需要先完成工程骨架和测试入口，否则金融原语缺少回归验证。
+- P1-S01 至 P1-S09 的 Domain、Application 与 In-Memory 验证基线已完成。
+- P1-S10 以 `Docs/Development_Plans/Phase_1/Phase_1_Detailed_Development_Plan.md` 的 3.10 节为执行边界。
+- CMake configure 必须通过 `std::chrono` IANA tzdb 能力探测；Linux 运行环境必须安装 `tzdata`。
+- PostgreSQL/Drogon 真实适配器仍属于 #46，生产写路径不得以 In-Memory 结果代替连库验收。
 
 ---
 
@@ -50,7 +51,7 @@ Status: Active
 
 - [x] 编写 Phase 1 开发计划文档 `Docs/Development_Plans/Phase_1_Development_Plan.md` <!-- id: 1 -->
 - [x] 编写 Phase 1 细化子计划文档 `Docs/Development_Plans/Phase_1/Phase_1_Detailed_Development_Plan.md` <!-- id: 2 -->
-- [ ] 根据 Phase 1 细化子计划评审结果，必要时回写 `Docs/Development_Plans/Phase_1_Development_Plan.md` <!-- id: 3 -->
+- [x] 根据 Phase 1 细化子计划评审结果，回写并细化 P1-S10 至 P1-S12 的执行顺序、产物与阻断门禁 <!-- id: 3 -->
 - [ ] 在 Phase 1 每个里程碑完成后回写任务状态和风险记录，保持计划与实际进度同步 <!-- id: 4 -->
 
 ### 3.2 工程骨架与本地开发 (Project Foundation)
@@ -68,7 +69,7 @@ Status: Active
 - [x] 定义应用层错误类型，覆盖 Validation、Unauthorized、Forbidden、NotFound、Conflict、DomainRuleViolation、InfrastructureFailure <!-- id: 9c -->
 - [x] 定义领域层错误类型，不依赖 HTTP 状态码 <!-- id: 9d -->
 - [x] 编写强类型 ID 和错误处理的单元测试 <!-- id: 9e -->
-- [x] 为 `JsonConfigLoader` 增加环境变量 overlay 支持，关键字段（JWT_SECRET、DB_PASSWORD、DB_HOST 等）优先从环境变量读取，详见 `Docs/Development/Config_Env_Overlay_Design.md` <!-- id: 9f -->
+- [x] 为 `JsonConfigLoader` 增加环境变量 overlay 支持，关键字段（JWT_SECRET、DB_PASSWORD、DB_HOST 等）优先从环境变量读取，详见 `Docs/Archive/Config_Env_Overlay_Design.md` <!-- id: 9f -->
 
 ### 3.3 测试与质量门禁 (Testing & Quality Gates)
 
@@ -76,7 +77,7 @@ Status: Active
 - [x] 建立测试数据目录和测试命名规范，覆盖正常路径、边界路径和错误路径 <!-- id: 11 -->
 - [x] 编写核心金融原语与领域服务的单元测试 <!-- id: 12 -->
 - [~] 编写 Repository 集成测试，覆盖事务和 outbox 落库行为 <!-- id: 13 -->
-  - 更正（S09 review item 16）：集成测试当前运行在 In-Memory 语义等价实现上，**尚未对真实 PostgreSQL 执行**。事务、outbox 同事务落库、用户隔离、乐观锁、余额缓存、历史汇率、转账聚合级联删除等规则已被 12 个集成用例覆盖，但连库验证归入 #46，S12 用同一批 scenarios 对真实测试库复跑后方可标记为 `[x]`。
+  - 更正（S09 review item 16）：集成测试当前运行在 In-Memory 语义等价实现上，**尚未对真实 PostgreSQL 执行**。事务、outbox 同事务落库、用户隔离、乐观锁、余额缓存、数值边界、历史汇率和转账聚合规则已被 13 个集成用例覆盖，但连库验证归入 #46，S12 用同一批 scenarios 对真实测试库复跑后方可标记为 `[x]`。
 - [ ] 编写 API 接口集成测试 <!-- id: 14 -->
 - [x] 增加本地质量检查命令，至少覆盖构建、测试和 Markdown 检查 <!-- id: 15 -->
 
@@ -112,8 +113,8 @@ Status: Active
   - 更正（S09 review item 16）：Domain 接口 + In-Memory 实现已完成，规则由集成测试覆盖（用户隔离、乐观锁、余额缓存、FOR UPDATE 锁定读入口、转账聚合级联删除）；**PostgreSQL 实现待接线（#46）**。
 - [~] 实现 `ExchangeRateRepository`，保证汇率 append-only 和历史时间点查询 <!-- id: 33 -->
   - 更正（S09 review item 16）：Domain 接口 + In-Memory 实现已完成；**PostgreSQL 实现待接线（#46）**。
-- [x] 实现 `ICategoryRepository`（Domain 接口 + In-Memory 实现），供报表按一级分类聚合并解析分类名 <!-- id: 33a -->
-  - 说明（S09 review）：本轮新增，堵住 #47 的报表依赖；PostgreSQL 实现随 #46/#47 落地。
+- [~] 实现 `ICategoryRepository`，供创建流水校验真实分类并支持报表按一级分类聚合 <!-- id: 33a -->
+  - 说明（S09 review）：Domain 接口、In-Memory 实现、事务内锁定读入口、`CreateTransactionUseCase` 与报表接线均已完成；**PostgreSQL 实现仍随 #46/#47 落地**。
 - [ ] 实现 `OutboxPublisherJob`，支持 pending、failed、重试次数和 dead letter 记录 <!-- id: 34 -->
 
 ### 3.7 应用层用例 (Application Use Cases)
@@ -125,16 +126,16 @@ Status: Active
 - [x] 实现账户查询与余额查询用例，提供 API 所需 DTO，不暴露持久化模型 <!-- id: 38 -->
 - [x] 实现报表 QueryService，支持 net worth、cash flow 和 dashboard summary 的最小查询 <!-- id: 39 -->
   - 备注：cash flow 显式排除 Transfer；跨币种折算走汇率仓储（直接/反向/USD 三角），缺失汇率报错、DB 故障映射为 InfrastructureFailure（不吞错）。
-  - S09 review 增强：月窗按 `UserPreference.timezone` 计算（半开区间 `[start, end)`）；净资产按余额正负拆分资产/负债、资产分布按 `AccountType` 聚合；top-expense 支持按一级分类回溯聚合（依赖 `ICategoryRepository`，未提供时回退按原始 category_id）；signed Adjustment 正数计入收入、负数计入支出。
+  - S09 review 增强：月窗按 `UserPreference.timezone` 计算（半开区间 `[start, end)`，未知时区显式报配置错误）；净资产按余额正负拆分资产/负债、资产分布按 `AccountType` 聚合；top-expense 支持按一级分类回溯聚合（未装配分类仓储时回退按原始 category_id）；signed Adjustment 正数计入收入、负数计入支出。
 
 ### 3.8 表现层与 API (Presentation & APIs)
 
-- [ ] 实现 JWT 认证与 Refresh Token 过滤器，覆盖登录、刷新、登出和黑名单撤销 <!-- id: 40 -->
-- [ ] 实现 `AccountController` 与 `TransactionController`，保证金额字段以字符串接收和返回 <!-- id: 41 -->
-- [ ] 实现 `TransferController`，覆盖三种转账输入模式、手续费来源和 422 业务错误响应 <!-- id: 42 -->
-- [ ] 实现 `ReportController`，支持轻量级 CQRS 报表查询 <!-- id: 43 -->
-- [ ] 实现统一错误响应格式，将 `std::expected` 错误映射到 REST API 设计中的 HTTP 状态码 <!-- id: 44 -->
-- [ ] 注册 Drogon 全局异常处理器，确保生产响应不泄露堆栈、SQL、路径或密钥 <!-- id: 45 -->
+- [ ] 实现注册、登录、刷新、登出、JWT Filter、Refresh Token rotation/revocation 与黑名单撤销（P1-S10-06）<!-- id: 40 -->
+- [ ] 补齐账户创建/归档、分类、标签、用户偏好 Application Use Case，并实现基础资源、`AccountController` 与 `TransactionController`；Presentation 不直接编排 Repository，金额字段以字符串接收和返回（P1-S10-07/S10-08）<!-- id: 41 -->
+- [ ] 实现 `TransferController`，覆盖三种转账输入模式、手续费来源和 422 业务错误响应（P1-S10-09，依赖 #48）<!-- id: 42 -->
+- [ ] 实现 `ReportController`，支持 net worth、cash flow 与 dashboard summary（P1-S10-10）<!-- id: 43 -->
+- [ ] 实现 HTTP DTO/parser/mapper 与统一错误响应，将 `std::expected` 映射到 HTTP 状态码并附带 TraceId（P1-S10-05）<!-- id: 44 -->
+- [ ] 注册 Drogon 全局异常处理器，确保生产响应不泄露堆栈、SQL、路径、密钥或底层异常文本（P1-S10-05）<!-- id: 45 -->
 
 ---
 
@@ -170,52 +171,60 @@ Status: Active
 
 - [ ] 接入真实持久化：实现 `DrogonUnitOfWork` 与 PostgreSQL 版 `*RepositoryImpl`，替换现有 In-Memory 实现；用同一批 integration scenarios 对真实测试库复跑 <!-- id: 46 -->
   - 说明：当前 S08 交付为「Domain 接口 + In-Memory 语义等价实现」，规则可测但未连库；#30–#33 的 Drogon 适配器部分尚未完成。
+  - 执行归属：适配器、composition root 与测试场景在 P1-S10-03/S10-04 落地；真实 PostgreSQL 复跑与签署在另一台机器的 P1-S12-03 完成。
   - RLS 依赖：真实仓储在鉴权后必须对数据库连接执行 `SET app.current_user_id = '<uid>'`（每请求/每事务），否则 fail-closed 策略会使查询返回空。连接池复用时须在归还前 `RESET`。
   - In-Memory 模型仍缺 `transaction_tag_relations.user_id`、`account_balance_cache.user_id` 等新增列的对应；接 SQL 时以迁移 schema 为准。
 - [~] 实现 `ICategoryRepository`，由仓储解析分类 board，替换 `CreateTransactionCommand.category_board` 的显式传入方式 <!-- id: 47 -->
-  - 进展（S09 review 本轮）：已交付 `ICategoryRepository` 接口 + In-Memory 实现（含 `resolve_root_id_for_user` 一级分类回溯），并接入报表 top-expense 按一级分类聚合（见 #33a、#39）。
-  - 剩余：让 `CreateTransactionUseCase` 通过仓储解析 board、移除 `CreateTransactionCommand.category_board` 的显式传入；以及 PostgreSQL 实现（随 #46）。
+  - 进展（S09 review 收尾）：已交付接口 + In-Memory 实现（含锁定读取与 `resolve_root_id_for_user`），`CreateTransactionUseCase` 已将分类仓储设为必需依赖并按 `user_id + category_id` 读取真实 board；命令中的 `category_board` 已移除，报表也已接入一级分类聚合。
+  - 剩余：实现 PostgreSQL `CategoryRepositoryImpl` 并用真实事务/并发场景复核（随 #46、S12）。
 - [ ] 实现转账手续费 / 汇兑损益路径：`CreateTransferCommand` 支持 `FeeSource` 与手续费金额，用例构造独立 `Adjustment` 流水，并测试「手续费不误计入 income/expense」 <!-- id: 48 -->
+  - 执行归属：P1-S10-01 完成 Application 契约与用例，P1-S10-09 接入 Transfer API；该项完成前不得暴露手续费字段。
 
 ### 5.2 中优先级
 
-- [ ] 实现 `ITagRepository` 与 `IAuditLogRepository` 及对应用例，打通标签与审计闭环 <!-- id: 49 -->
-- [ ] 明确 `transactions` 并发更新策略：确认「流水仅软删除/追加、不做行级乐观锁」，或为 Domain `Transaction` 补 `version` 字段并接入乐观锁 <!-- id: 50 -->
-- [ ] PostgreSQL `AccountRepositoryImpl` 的余额缓存 `source_version` 必须严格对齐 schema 的 `version` 语义（`MAX(version)` 或等价），不得照搬 In-Memory 的「未删除流水条数」简化实现 <!-- id: 51 -->
-- [ ] 补充 `DeleteTransferUseCase`：支持删除整个转账聚合（两端 + 调整项），否则在 API 文档明确「暂不支持删除转账」 <!-- id: 52 -->
+- [ ] 实现 `ITagRepository` 与 `IAuditLogRepository` 及对应用例，打通标签与审计闭环（P1-S10-03/S10-07、P1-S11-03）<!-- id: 49 -->
+- [x] 明确 `transactions` 并发更新策略：Phase 1 采用追加 + 软删除，不提供普通更新，不增加行级 `version`；账户聚合并发继续使用 `Account.version` <!-- id: 50 -->
+- [ ] PostgreSQL `AccountRepositoryImpl` 的余额缓存 `source_version` 必须严格对齐 schema 的 `version` 语义（`MAX(version)` 或等价），不得照搬 In-Memory 的「未删除流水条数」简化实现（P1-S10-03/S12-03）<!-- id: 51 -->
+- [x] 明确转账删除边界：Phase 1 不注册转账删除路由；待 `DeleteTransferUseCase` 支持两端与调整项聚合级联并通过测试后再开放 <!-- id: 52 -->
 
 ### 5.3 低优先级 / 技术债
 
-- [ ] 落地 `pfh_application` / `pfh_infrastructure` / `pfh_presentation` CMake 库目标；随实现规模增长把 header-only 用例拆出 `.cpp` <!-- id: 53 -->
-- [ ] 报表命名对齐：在架构文档补注「Phase 1 以 `ReportQueryService` 承载最小报表读路径，替代 `GenerateMonthlyReportUseCase`」 <!-- id: 54 -->
-- [ ] DTO 金额符号说明：在 API 设计文档写清「业务展示的正数金额 vs 存储层带符号金额」的边界与转换规则 <!-- id: 55 -->
-- [ ] `TransferResultDto` 金额来源为 Domain 正数幅度，与持久化带符号存储不同；在表现层统一对外表示口径 <!-- id: 56 -->
+- [ ] 落地 `pfh_application` / `pfh_infrastructure` / `pfh_presentation` CMake 库目标；随实现规模增长把 header-only 用例拆出 `.cpp`（P1-S10-02）<!-- id: 53 -->
+- [x] 报表命名对齐：Phase 1 以 `ReportQueryService` 承载最小报表读路径，不另设 `GenerateMonthlyReportUseCase` <!-- id: 54 -->
+- [x] DTO 金额符号说明：API 设计文档已明确业务 magnitude、signed Adjustment 与存储层带符号金额的边界 <!-- id: 55 -->
+- [ ] `TransferResultDto` 金额来源为 Domain 正数幅度，与持久化带符号存储不同；在表现层统一对外表示口径（P1-S10-05/S10-09）<!-- id: 56 -->
+
+### 5.4 Phase 1 外部环境阻断门禁
+
+- [ ] 在另一台机器执行 P1-S12：Linux Debug/Release 构建、Docker 服务启动、PostgreSQL 16+ 空库迁移、真实 Repository/UoW/RLS/并发/数值边界、API smoke、Outbox/Scheduler 测试，并记录 commit hash、环境版本、命令和结果 <!-- id: 57 -->
+  - 说明：当前开发机无可用 WSL/Docker；该任务必须保留到取得可追溯测试结果，不能用 Windows 或 In-Memory 基线代替。
 
 ---
 
 ## 6. S09 收尾 review 本轮修复记录
 
-来源：S09 交付后第二、三轮一致性 review。以下为本轮**已落地并有测试覆盖**的修复，按临时清单编号归档。测试基线：229 单元 + 12 集成全部通过。
+来源：S09 交付后第二、三轮一致性 review。以下为本轮**已落地并有测试覆盖**的修复，按临时清单编号归档。当前 Windows GCC 16 基线：240 单元 + 13 In-Memory 集成测试。
 
 ### 6.1 报表收尾（S10 Report API 前）
 
-- 报表月窗按 `UserPreference.timezone` 计算，半开区间 `[month_start, next_month_start)`；月初/月末附近流水不再因 UTC 偏移归错月份。（对应用户点名的报表时区项）
+- 报表月窗按 `UserPreference.timezone` 和 IANA tzdb 计算，半开区间 `[month_start, next_month_start)`；月初/月末附近流水不再因 UTC 偏移归错月份，未知时区不再静默回退 UTC。（对应用户点名的报表时区项）
 - top-expense 分类按**一级（root）分类**回溯聚合并解析分类名；无 `ICategoryRepository` 时回退按原始 category_id。（对应用户点名的占位实现项 + #47 部分）
 
 ### 6.2 领域 / 应用语义
 
 - **item 9 金额符号 / Adjustment 语义**：Adjustment 改为带符号——正数=流入（返利/补贴/FX Gain），负数=流出（手续费/更正/FX Loss）；余额、cash flow、支出分类三处一致；零额 Adjustment 拒绝。
 - **item 11 命令默认时间**：`CreateTransaction/Transfer/DeleteTransaction` 命令时间改为可选，用例缺省补 `now()`，杜绝落到 1970 epoch。
-- **item 13 Domain/schema 漂移**：`Account` 增加可选 `category_override`（默认从 type 派生，可持久化覆盖）；`Category` 字段对齐 schema（`source`/`template_id`/`sort_order`/`deleted_at`，移除 color/icon）；`UserPreference` 默认值改为 `zh-CN`/`Asia/Shanghai` 对齐 DB。
+- **item 13 Domain/schema 漂移**：`Account` 增加可选 `category_override`（默认从 type 派生，可持久化覆盖）；`Category` 对齐 `source`/`template_id`/`sort_order`/`deleted_at`/`created_at`/`updated_at`；系统分类模板补 `locale` 并将唯一键纳入 locale；`UserPreference` 默认值改为 `zh-CN`/`Asia/Shanghai` 对齐 DB。
 
 ### 6.3 事件 / 事务 / 配置
 
-- **item 12 事件契约**：新增强类型领域事件（`TransactionCreated`/`TransactionDeleted`/`TransferCompleted`/`AccountDangerouslyDeleted`/`ExchangeRateRefreshed`/`ExchangeRateRefreshFailed`），payload 携带 `userId`/`occurredAt` 等必备字段；outbox 记录 `occurred_at`。生产用例不再使用测试性 `SimpleDomainEvent`。
-- **item 14 In-Memory 事务语义**：User/Preference 仓储改为 staged 优先（事务内 read-your-writes）。剩余「仓储忽略传入事务上下文」归入 #46 真实 PostgreSQL 实现。
-- **item 15 Config / 汇率降级**：config overlay 补 `PFH_ENVIRONMENT`、`PFH_EXCHANGE_RATE_API_KEY`，非法端口改为报错而非静默回退；汇率降级发 `ExchangeRateRefreshFailedEvent` 并校验历史汇率可用性。
-- **item 10 Currency / Decimal 与 DB 边界**：Domain 币种白名单与 V2 种子统一（20 法币 + 13 加密）；`Decimal::fits_numeric_20_8/20_10` 定义 DB 数值边界，`CreateTransaction` 拒绝超界金额。真实连库范围/舍入校验随 #46、S12 验证。
+- **item 12 事件契约**：新增强类型领域事件；payload 携带必备字段并对字符串执行 JSON 转义，`ExchangeRateRefreshed` 按返回币种对逐条发出且包含 `targetCurrency`；迁移与 outbox 示例均落 `occurred_at`。生产用例不再使用测试性 `SimpleDomainEvent`。
+- **item 14 In-Memory 事务语义**：User/Preference 仓储改为 staged 优先；Account、Preference、Category、Transaction 增加用户归属、父分类同用户同 board、分类与流水类型等外键/约束等价校验。剩余真实事务上下文与数据库约束复核归入 #46。
+- **item 15 Config / 汇率降级**：config overlay 补 `PFH_ENVIRONMENT`、`PFH_EXCHANGE_RATE_API_KEY`，非法端口改为报错；汇率降级只有在**全部请求币种对**均有历史值时才标记 fallback 可用；成功响应必须精确覆盖请求集合且不得重复，并按币种对发刷新事件。
+- **item 10 Currency / Decimal 与 DB 边界**：Domain 币种白名单与 V2 种子统一（20 法币 + 13 加密）；用户输入在 Decimal 内部舍入前拒绝超过 `NUMERIC(20,8/10)` 的有效小数位和范围；普通流水、三种转账输入及 Repository 写入均有边界校验，转账派生金额显式按 Half-Even 舍入到 scale 8。真实 PostgreSQL 范围/舍入复核随 #46、S12 验证。
 
 ### 6.4 仍需在 S12 收尾核对（item 16）
 
 - #13/#28/#30/#31/#32/#33/#37 已从 `[x]` 更正为 `[~]`，注明「In-Memory 语义等价已交付、真实 PostgreSQL/Drogon 连库与后台接线属 #46/S10/S11」。S12 终审需对真实测试库复跑同批 scenarios 后再定稿。
 - item 14 的事务上下文真实性、item 10 的连库数值边界，均需 S12 在真实 PostgreSQL 上验证。
+- 当前机器无可用 WSL 发行版或 Docker，未执行当前 HEAD 的 Linux 测试；仅确认 Windows GCC 16 的 CMake tzdb 探针通过。合并 Phase 分支前必须按 `Docs/Guides/Linux_Development_Workflow.md` 在安装 `tzdata` 的 Linux 环境重新构建并全量测试。

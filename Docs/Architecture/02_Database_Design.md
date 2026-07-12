@@ -292,6 +292,7 @@ Indexes:
 ### 4.7 Transactions
 
 - 软删除 `deleted_at`
+- Phase 1 只允许追加与软删除，不提供普通 UPDATE，因此不设置流水行级乐观锁版本；账户聚合并发继续由 `accounts.version`、账户行锁与同事务写入控制。
 
 ### 4.8 Accounts
 
@@ -348,15 +349,16 @@ CREATE TYPE category_board AS ENUM (
 );
 
 CREATE TABLE system_category_templates (
-id BIGSERIAL PRIMARY KEY,
-name VARCHAR(128) NOT NULL,
-group_name VARCHAR(64) NOT NULL,
-parent_id BIGINT REFERENCES system_category_templates(id),
-default_board category_board,
-sort_order INT NOT NULL DEFAULT 0,
-is_selectable BOOLEAN NOT NULL DEFAULT TRUE,
-created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-UNIQUE NULLS NOT DISTINCT (group_name, parent_id, name)
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(128) NOT NULL,
+    locale VARCHAR(16) NOT NULL DEFAULT 'zh-CN',
+    group_name VARCHAR(64) NOT NULL,
+    parent_id BIGINT REFERENCES system_category_templates(id),
+    default_board category_board,
+    sort_order INT NOT NULL DEFAULT 0,
+    is_selectable BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE NULLS NOT DISTINCT (locale, group_name, parent_id, name)
 );
 
 CREATE TABLE categories (

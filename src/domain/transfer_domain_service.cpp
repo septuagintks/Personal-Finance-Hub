@@ -45,6 +45,10 @@ DomainResult<TransferAggregate> TransferDomainService::build_from_outgoing_and_r
     Transaction::TimePoint occurred_at,
     std::string description,
     TransferGroupId transfer_group_id) {
+    if (!outgoing_amount.amount().fits_numeric_20_8()) {
+        return std::unexpected(DomainError::invalid_amount(
+            "outgoing transfer amount does not fit NUMERIC(20,8)"));
+    }
     // Mode 1: Outgoing + Rate => Incoming.
     // Validate rate's base currency matches outgoing currency.
     if (!(outgoing_amount.currency() == rate.base())) {
@@ -57,6 +61,15 @@ DomainResult<TransferAggregate> TransferDomainService::build_from_outgoing_and_r
     if (!incoming_result) {
         return std::unexpected(incoming_result.error());
     }
+    auto rounded_incoming = incoming_result->amount().round_to_scale(8);
+    if (!rounded_incoming) {
+        return std::unexpected(rounded_incoming.error());
+    }
+    if (!rounded_incoming->fits_numeric_20_8()) {
+        return std::unexpected(DomainError::invalid_amount(
+            "derived incoming transfer amount does not fit NUMERIC(20,8)"));
+    }
+    Money persisted_incoming(*rounded_incoming, incoming_result->currency());
 
     // Build the two transaction sides.
     auto outgoing_tx = make_transfer_transaction(
@@ -72,7 +85,7 @@ DomainResult<TransferAggregate> TransferDomainService::build_from_outgoing_and_r
         TransactionId{},  // unassigned; repository assigns real id
         user_id,
         target_account,
-        *incoming_result,
+        persisted_incoming,
         occurred_at,
         description,
         transfer_group_id);
@@ -101,6 +114,11 @@ DomainResult<TransferAggregate> TransferDomainService::build_from_both_amounts(
     Transaction::TimePoint occurred_at,
     std::string description,
     TransferGroupId transfer_group_id) {
+    if (!outgoing_amount.amount().fits_numeric_20_8() ||
+        !incoming_amount.amount().fits_numeric_20_8()) {
+        return std::unexpected(DomainError::invalid_amount(
+            "transfer amounts must fit NUMERIC(20,8)"));
+    }
     // Mode 2: Outgoing + Incoming => derive Rate (or validate match for same-currency).
     const bool same_currency = (outgoing_amount.currency() == incoming_amount.currency());
 
@@ -173,6 +191,10 @@ DomainResult<TransferAggregate> TransferDomainService::build_from_incoming_and_r
     Transaction::TimePoint occurred_at,
     std::string description,
     TransferGroupId transfer_group_id) {
+    if (!incoming_amount.amount().fits_numeric_20_8()) {
+        return std::unexpected(DomainError::invalid_amount(
+            "incoming transfer amount does not fit NUMERIC(20,8)"));
+    }
     // Mode 3: Incoming + Rate => Outgoing.
     // Validate rate's target currency matches incoming currency.
     if (!(incoming_amount.currency() == rate.target())) {
@@ -190,7 +212,15 @@ DomainResult<TransferAggregate> TransferDomainService::build_from_incoming_and_r
     if (!outgoing_decimal) {
         return std::unexpected(outgoing_decimal.error());
     }
-    Money outgoing_amount(*outgoing_decimal, rate.base());
+    auto rounded_outgoing = outgoing_decimal->round_to_scale(8);
+    if (!rounded_outgoing) {
+        return std::unexpected(rounded_outgoing.error());
+    }
+    if (!rounded_outgoing->fits_numeric_20_8()) {
+        return std::unexpected(DomainError::invalid_amount(
+            "derived outgoing transfer amount does not fit NUMERIC(20,8)"));
+    }
+    Money outgoing_amount(*rounded_outgoing, rate.base());
 
     // Build the two transaction sides. Incoming keeps the user's exact input.
     auto outgoing_tx = make_transfer_transaction(
@@ -300,9 +330,13 @@ DomainVoidResult TransferDomainService::validate(const TransferAggregate& aggreg
             return std::unexpected(diff.error());
         }
 
-        auto base_tolerance = Decimal::parse(kRoundingTolerance);
-        if (!base_tolerance) {
-            return std::unexpected(base_tolerance.error());
+        auto amount_unit = Decimal::parse(kAmountRoundingUnit);
+        if (!amount_unit) {
+            return std::unexpected(amount_unit.error());
+        }
+        auto rate_unit = Decimal::parse(kRateRoundingUnit);
+        if (!rate_unit) {
+            return std::unexpected(rate_unit.error());
         }
 
         // Scale the tolerance by the rate. When outgoing is derived from
@@ -319,7 +353,19 @@ DomainVoidResult TransferDomainService::validate(const TransferAggregate& aggreg
         if (!rate_plus_one) {
             return std::unexpected(rate_plus_one.error());
         }
-        auto tolerance = base_tolerance->multiply(*rate_plus_one);
+        auto amount_component = amount_unit->multiply(*rate_plus_one);
+        if (!amount_component) {
+            return std::unexpected(amount_component.error());
+        }
+        auto outgoing_plus_one = outgoing_amount.amount().abs().add(*one);
+        if (!outgoing_plus_one) {
+            return std::unexpected(outgoing_plus_one.error());
+        }
+        auto rate_component = rate_unit->multiply(*outgoing_plus_one);
+        if (!rate_component) {
+            return std::unexpected(rate_component.error());
+        }
+        auto tolerance = amount_component->add(*rate_component);
         if (!tolerance) {
             return std::unexpected(tolerance.error());
         }

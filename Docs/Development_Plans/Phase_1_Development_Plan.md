@@ -1,9 +1,9 @@
 # Personal Finance Hub (PFH) - Phase 1 Development Plan
 
-Version: 1.0
+Version: 1.1
 Backend: C++23
 Architecture: Clean Architecture + Lightweight DDD
-Status: Draft
+Status: Active
 
 ---
 
@@ -40,6 +40,16 @@ Phase 1 不包含：
 ### 1.3 细化子计划
 
 Phase 1 的具体开发顺序、目录结构、实现步骤和测试收尾清单见 [Phase_1/Phase_1_Detailed_Development_Plan.md](Phase_1/Phase_1_Detailed_Development_Plan.md)。
+
+### 1.4 当前进度
+
+截至 2026-07-13，P1-S01 至 P1-S09 已完成 Domain、Application、迁移脚本及 In-Memory 语义验证，Windows GCC 16 基线为 253/253 测试通过。当前进入 P1-S10 REST API 与认证基础。
+
+以下内容尚未完成，不能由现有 In-Memory 测试替代：
+
+- Drogon/PostgreSQL 生产 Repository、`DrogonUnitOfWork`、DbClient 与 RLS 上下文接线。
+- REST API、认证、Outbox Publisher、Scheduler 和真实汇率 HTTP Provider。
+- 另一台机器上的 Linux、Docker、PostgreSQL 16+、Debug/Release 与 API smoke test 阻断门禁。
 
 ---
 
@@ -158,9 +168,12 @@ Presentation
 交付物：
 
 - Flyway 初始迁移脚本。
-- `UserRepository`、`AccountRepository`、`TransactionRepository`、`ExchangeRateRepository`。
+- Domain Repository 接口与 In-Memory 语义实现。
+- PostgreSQL `UserRepository`、`AccountRepository`、`TransactionRepository`、`CategoryRepository`、`ExchangeRateRepository` 等生产适配器。
 - `DrogonUnitOfWork` 与 `OutboxPublisherJob`。
 - Repository 集成测试。
+
+当前状态：迁移脚本、接口、In-Memory 事务语义和 13 个 integration scenarios 已交付；PostgreSQL Repository、`DrogonUnitOfWork` 与真实连库测试在 P1-S10/P1-S12 完成，`OutboxPublisherJob` 在 P1-S11 完成。
 
 验收标准：
 
@@ -199,19 +212,58 @@ Presentation
 
 交付物：
 
+- Drogon/PostgreSQL composition root、DbClient 与 RLS 请求/事务上下文。
+- 注册、登录、刷新、登出、JWT Filter 与 token rotation/revocation。
 - 账户 API。
 - 流水 API。
 - 转账 API。
 - 报表 API。
-- JWT 认证与 Refresh Token 过滤器。
+- 统一 HTTP DTO、错误响应、TraceId 与全局异常处理。
 - API 集成测试。
 
 验收标准：
 
 - API 路由统一以 `/api/v1` 开头。
 - 金额字段在请求和响应中均为字符串。
-- 错误响应统一为 `{"error_code": "STRING", "message": "Readable description"}`。
+- 生产 composition root 不装配 In-Memory Repository。
+- 错误响应统一包含 `error_code`、`message` 与 `trace_id`。
 - 生产环境响应不泄露堆栈、SQL、文件路径或密钥。
+
+### 3.8 P1.7 Outbox、调度与后台任务
+
+目标：
+
+- 完成 post-commit 事件投递、汇率刷新和数据清理任务的最小可靠闭环。
+
+交付物：
+
+- 支持并发 claim、重试、dead letter 和崩溃恢复的 `OutboxPublisherJob`。
+- 幂等事件 Handler 与审计闭环。
+- 真实汇率 HTTP Provider、Scheduler/JobManager 和 token 清理任务。
+
+验收标准：
+
+- 事件不在业务事务提交前发布，多 worker 不会重复成功处理同一事件。
+- 重试与 dead letter 可观测，重复投递不产生重复副作用。
+- 网络、数据库和长时间任务不阻塞 Drogon Event Loop。
+
+### 3.9 P1.8 测试签署与阶段交付
+
+目标：
+
+- 在真实目标环境完成 Phase 1 阻断门禁并定稿文档。
+
+交付物：
+
+- Windows 本地回归结果。
+- 另一台机器上的 Linux/Docker/PostgreSQL 16+ Debug/Release、Repository/UoW/RLS、API 和后台任务验证结果。
+- Phase 1 最终交付总结与归档记录。
+
+验收标准：
+
+- 金融规则、真实持久化、认证/API、outbox/scheduler 和文档门禁全部通过。
+- 外部机器测试记录包含 commit hash、环境版本、命令和结果。
+- 未完成项继续保留在 Tasks；所有阻断项通过后才允许 Phase 分支合并到 `main`。
 
 ---
 
@@ -227,6 +279,8 @@ cmake build
 unit tests
 repository integration tests
 api smoke tests
+Linux Debug/Release build and tests
+Docker service smoke test
 markdown check
 ```
 
@@ -236,6 +290,8 @@ markdown check
 - Transfer、ExchangeRate、Decimal 相关测试失败，不合并。
 - 事务、outbox、危险删除相关测试失败，不合并。
 - API 金额字段接受 JSON number，不合并。
+- 真实 PostgreSQL 的迁移、Repository/UoW/RLS、并发或数值边界未验证，不合并。
+- 另一台机器的 Linux/Docker 阻断门禁没有可追溯结果，不合并。
 
 ---
 
@@ -248,7 +304,7 @@ markdown check
 应对：
 
 - 先写边界测试，再实现。
-- 明确底层使用 `__int128_t` 或 `boost::multiprecision::int128_t`。
+- 当前实现固定使用编译器原生 `__int128`，CMake 对不支持的平台明确失败。
 - 所有外部输入必须先经字符串解析。
 
 ### 5.2 Drogon 事务上下文泄漏
@@ -277,5 +333,6 @@ markdown check
 
 ### 6.1 后续可评估事项
 
-- **Decimal 底层实现**：优先尝试 `boost::multiprecision::int128_t`；如编译器与平台稳定支持 `__int128_t`，可在实现阶段再确认。
-- **Repository 集成测试环境**：可先使用本地 PostgreSQL 测试库；后续如需要更强隔离，再引入 Testcontainer。
+- **Decimal 底层实现**：已确认使用编译器原生 `__int128`。
+- **Repository 集成测试环境**：开发机执行 In-Memory 快速回归；真实 PostgreSQL、Linux 与 Docker 验证固定在另一台机器于 P1-S12 执行。
+- **转账删除范围**：Phase 1 暂不开放删除路由，待 `DeleteTransferUseCase` 与聚合级联测试完成后再评估。

@@ -91,6 +91,8 @@ public:
 
 ### 2.3 转账与流水仓储接口
 
+Phase 1 的 `transactions` 采用追加 + 软删除模型：创建后不提供普通字段更新，因此不增加行级 `version`，也不对流水本身执行乐观锁更新。并发一致性由应用层事务、账户行锁、`Account.version` 和转账聚合原子写入保证；若未来增加流水编辑能力，必须先引入独立修订模型或为 Transaction 增加版本字段，不得静默覆盖。
+
 ```cpp
 // domain/repositories/ITransactionRepository.hpp
 #pragma once
@@ -489,9 +491,9 @@ public:
                 for (const auto& event : pendingEvents_) {
                     auto payload = serializeDomainEvent(*event); // 序列化为 JSON
                     trans->execSqlSync(
-                        "INSERT INTO domain_events_outbox (id, event_name, aggregate_type, aggregate_id, payload, status, retry_count, max_retry_count, next_retry_at, created_at) "
-                        "VALUES ($1, $2, $3, $4, $5, 'pending', 0, 5, NOW(), NOW())",
-                        generateOutboxId(), event->getEventName(), getAggregateType(*event), getAggregateId(*event), payload
+                        "INSERT INTO domain_events_outbox (id, event_name, aggregate_type, aggregate_id, payload, status, retry_count, max_retry_count, next_retry_at, occurred_at, created_at) "
+                        "VALUES ($1, $2, $3, $4, $5, 'pending', 0, 5, NOW(), $6, NOW())",
+                        generateOutboxId(), event->getEventName(), getAggregateType(*event), getAggregateId(*event), payload, event->getOccurredAt()
                     );
                 }
 

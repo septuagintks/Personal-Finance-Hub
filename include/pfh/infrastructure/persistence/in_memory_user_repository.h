@@ -152,11 +152,17 @@ public:
             return std::unexpected(domain::RepositoryError::database(
                 "save requires an active transaction"));
         }
+        const auto uid = preference.user_id().value();
+        const bool user_exists = store_.staged_users.contains(uid) ||
+                                 store_.users.contains(uid);
+        if (!user_exists) {
+            return std::unexpected(domain::RepositoryError::not_found(
+                "Cannot save preference for unknown user"));
+        }
         store_.staged_preferences.insert_or_assign(
-            preference.user_id().value(), preference);
+            uid, preference);
 
         // Keep users.base_currency_code in sync for fallback reads.
-        const auto uid = preference.user_id().value();
         if (store_.users.contains(uid)) {
             auto rec = store_.users.at(uid);
             rec.base_currency = preference.base_currency();

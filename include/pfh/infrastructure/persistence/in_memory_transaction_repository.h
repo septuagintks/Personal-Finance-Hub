@@ -67,12 +67,20 @@ public:
             return std::unexpected(domain::RepositoryError::validation(
                 "Transfer transactions must be written via save_transfer, not save_single"));
         }
+        if (!transaction.amount().amount().fits_numeric_20_8()) {
+            return std::unexpected(domain::RepositoryError::validation(
+                "Transaction amount does not fit NUMERIC(20,8)"));
+        }
 
         // Ownership isolation: account must exist and belong to same user.
         if (auto account_check = ensure_account_owned_by(
                 transaction.account_id(), transaction.user_id());
             !account_check.has_value()) {
             return std::unexpected(account_check.error());
+        }
+        if (auto category_check = ensure_category_matches_transaction(transaction);
+            !category_check.has_value()) {
+            return std::unexpected(category_check.error());
         }
 
         auto id_value = transaction.id().is_valid()
@@ -125,6 +133,23 @@ public:
 
         const auto& outgoing = transfer.outgoing();
         const auto& incoming = transfer.incoming();
+
+        if (!outgoing.amount().amount().fits_numeric_20_8() ||
+            !incoming.amount().amount().fits_numeric_20_8()) {
+            return std::unexpected(domain::RepositoryError::validation(
+                "Transfer leg amount does not fit NUMERIC(20,8)"));
+        }
+        if (transfer.rate().has_value() &&
+            !transfer.rate()->rate().fits_numeric_20_10()) {
+            return std::unexpected(domain::RepositoryError::validation(
+                "Transfer rate does not fit NUMERIC(20,10)"));
+        }
+        for (const auto& adjustment : transfer.adjustments()) {
+            if (!adjustment.amount().amount().fits_numeric_20_8()) {
+                return std::unexpected(domain::RepositoryError::validation(
+                    "Transfer adjustment does not fit NUMERIC(20,8)"));
+            }
+        }
 
         if (outgoing.type() != domain::TransactionType::Transfer ||
             incoming.type() != domain::TransactionType::Transfer) {
@@ -427,6 +452,47 @@ private:
         if (acc->owner() != user_id) {
             return std::unexpected(domain::RepositoryError::validation(
                 "Account does not belong to user"));
+        }
+        return {};
+    }
+
+    [[nodiscard]] domain::RepositoryVoidResult ensure_category_matches_transaction(
+        const domain::Transaction& transaction) const {
+        if (!transaction.category_id().has_value()) {
+            return {};
+        }
+
+        if (store_.in_transaction &&
+            std::find(store_.staged_deleted_categories.begin(),
+                      store_.staged_deleted_categories.end(),
+                      transaction.category_id()->value()) !=
+                store_.staged_deleted_categories.end()) {
+            return std::unexpected(domain::RepositoryError::not_found(
+                "Category not found for transaction user"));
+        }
+
+        const domain::Category* category = nullptr;
+        if (store_.in_transaction) {
+            if (auto it = store_.staged_categories.find(
+                    transaction.category_id()->value());
+                it != store_.staged_categories.end()) {
+                category = &it->second;
+            }
+        }
+        if (category == nullptr) {
+            if (auto it = store_.categories.find(transaction.category_id()->value());
+                it != store_.categories.end()) {
+                category = &it->second;
+            }
+        }
+        if (category == nullptr || category->is_deleted() ||
+            category->owner() != transaction.user_id()) {
+            return std::unexpected(domain::RepositoryError::not_found(
+                "Category not found for transaction user"));
+        }
+        if (!category->is_valid_for(transaction.type())) {
+            return std::unexpected(domain::RepositoryError::validation(
+                "Category board does not match transaction type"));
         }
         return {};
     }
