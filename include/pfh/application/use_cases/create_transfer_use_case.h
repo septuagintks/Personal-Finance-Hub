@@ -13,6 +13,7 @@
 #include "pfh/domain/repositories/i_transaction_repository.h"
 #include "pfh/domain/transfer_domain_service.h"
 #include <memory>
+#include <optional>
 #include <utility>
 
 namespace pfh::application {
@@ -30,73 +31,84 @@ public:
             return err(Error::validation("source and target accounts must differ"));
         }
 
-        auto source = accounts_.find_by_id_for_user(cmd.source_account_id, cmd.user_id);
-        if (!source) {
-            return err(from_repository(source.error()));
-        }
-        auto target = accounts_.find_by_id_for_user(cmd.target_account_id, cmd.user_id);
-        if (!target) {
-            return err(from_repository(target.error()));
-        }
-        if (source->is_archived() || target->is_archived()) {
-            return err(Error(ErrorCode::ArchivedAccountOperation,
-                             "Cannot transfer involving archived account"));
-        }
-
-        auto aggregate_result = build_aggregate(cmd, *source, *target);
-        if (!aggregate_result) {
-            return err(aggregate_result.error());
-        }
-        const domain::TransferAggregate aggregate = std::move(*aggregate_result);
-
-        domain::TransferGroupId group_id;
-        domain::TransactionId out_id;
-        domain::TransactionId in_id;
+        // Everything that reads the accounts, validates them and writes the
+        // transfer happens inside ONE transaction. The account rows are locked
+        // with find_by_id_for_update (SELECT ... FOR UPDATE) in ascending id
+        // order to prevent deadlocks (design §4.1), and the leg ids come back
+        // from save_transfer instead of a non-transactional re-read that a real
+        // PostgreSQL connection would not see.
+        std::optional<domain::TransferAggregate> aggregate;
+        domain::TransferPersistResult persisted;
+        // Carries an application-level error (with its precise ErrorCode) out of
+        // the transaction closure. The closure can only signal abort via a
+        // RepositoryError, which would flatten codes like ArchivedAccountOperation
+        // into a generic 400/500; capturing the real Error here preserves it.
+        std::optional<Error> app_error;
         auto write = uow_.execute_in_transaction(
             [&](domain::ITransactionContext& tx_ctx) -> domain::RepositoryVoidResult {
-                auto saved = transactions_.save_transfer(tx_ctx, aggregate);
+                // Lock in ascending account id order to avoid deadlock cycles.
+                const bool source_first =
+                    cmd.source_account_id.value() <= cmd.target_account_id.value();
+                const auto first_id =
+                    source_first ? cmd.source_account_id : cmd.target_account_id;
+                const auto second_id =
+                    source_first ? cmd.target_account_id : cmd.source_account_id;
+
+                auto first = accounts_.find_by_id_for_update(tx_ctx, first_id, cmd.user_id);
+                if (!first) {
+                    return std::unexpected(first.error());
+                }
+                auto second = accounts_.find_by_id_for_update(tx_ctx, second_id, cmd.user_id);
+                if (!second) {
+                    return std::unexpected(second.error());
+                }
+                const domain::Account& source = source_first ? *first : *second;
+                const domain::Account& target = source_first ? *second : *first;
+
+                if (source.is_archived() || target.is_archived()) {
+                    app_error = Error(ErrorCode::ArchivedAccountOperation,
+                                      "Cannot transfer involving archived account");
+                    return std::unexpected(domain::RepositoryError::validation(
+                        "archived account"));
+                }
+
+                auto aggregate_result = build_aggregate(cmd, source, target);
+                if (!aggregate_result) {
+                    app_error = aggregate_result.error();
+                    return std::unexpected(domain::RepositoryError::validation(
+                        "invalid transfer"));
+                }
+                aggregate = std::move(*aggregate_result);
+
+                auto saved = transactions_.save_transfer(tx_ctx, *aggregate);
                 if (!saved) {
                     return std::unexpected(saved.error());
                 }
-                group_id = *saved;
-
-                // Resolve persisted legs for response DTO.
-                auto all = transactions_.find_by_user(cmd.user_id, false);
-                if (!all) {
-                    return std::unexpected(all.error());
-                }
-                for (const auto& tx : *all) {
-                    if (!tx.transfer_group_id().has_value() ||
-                        tx.transfer_group_id()->value() != group_id.value()) {
-                        continue;
-                    }
-                    if (tx.account_id() == cmd.source_account_id) {
-                        out_id = tx.id();
-                    } else if (tx.account_id() == cmd.target_account_id) {
-                        in_id = tx.id();
-                    }
-                }
+                persisted = *saved;
 
                 uow_.register_event(std::make_shared<domain::SimpleDomainEvent>(
                     "TransferCompleted",
                     "TransferGroup",
-                    group_id.to_string(),
+                    persisted.group_id.to_string(),
                     "{\"source\":" + cmd.source_account_id.to_string() +
                         ",\"target\":" + cmd.target_account_id.to_string() + "}"));
                 return {};
             });
         if (!write) {
+            if (app_error.has_value()) {
+                return err(*app_error);
+            }
             return err(from_repository(write.error()));
         }
 
         TransferResultDto dto;
-        dto.transfer_group_id = group_id;
-        dto.outgoing_transaction_id = out_id;
-        dto.incoming_transaction_id = in_id;
-        dto.outgoing_amount = aggregate.outgoing().amount().to_string();
-        dto.incoming_amount = aggregate.incoming().amount().to_string();
-        if (aggregate.rate().has_value()) {
-            dto.rate = aggregate.rate()->rate().to_string();
+        dto.transfer_group_id = persisted.group_id;
+        dto.outgoing_transaction_id = persisted.outgoing_id;
+        dto.incoming_transaction_id = persisted.incoming_id;
+        dto.outgoing_amount = aggregate->outgoing().amount().to_string();
+        dto.incoming_amount = aggregate->incoming().amount().to_string();
+        if (aggregate->rate().has_value()) {
+            dto.rate = aggregate->rate()->rate().to_string();
         }
         return dto;
     }

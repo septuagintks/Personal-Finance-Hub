@@ -78,9 +78,11 @@ DomainResult<TransferAggregate> TransferDomainService::build_from_outgoing_and_r
         transfer_group_id);
 
     TransferAggregate aggregate(
+        TransferMode::OutgoingAndRate,
         std::move(outgoing_tx),
         std::move(incoming_tx),
-        rate);
+        rate,
+        {});
 
     // Validate consistency.
     if (auto validation = validate(aggregate); !validation) {
@@ -148,9 +150,11 @@ DomainResult<TransferAggregate> TransferDomainService::build_from_both_amounts(
         transfer_group_id);
 
     TransferAggregate aggregate(
+        TransferMode::OutgoingAndIncoming,
         std::move(outgoing_tx),
         std::move(incoming_tx),
-        rate);
+        rate,
+        {});
 
     // Validate consistency.
     if (auto validation = validate(aggregate); !validation) {
@@ -176,32 +180,24 @@ DomainResult<TransferAggregate> TransferDomainService::build_from_incoming_and_r
             incoming_amount.currency().code(), rate.target().code()));
     }
 
-    // Reverse the rate to get outgoing currency -> incoming currency.
-    auto inverse_rate = rate.inverse();
-    if (!inverse_rate) {
-        return std::unexpected(inverse_rate.error());
+    // Derive outgoing = incoming / rate by DIRECT division (not inverse-then-
+    // multiply, which loses precision from the intermediate inverse rate). The
+    // user's incoming amount is authoritative and is NEVER modified: e.g. an
+    // input of 7180 CNY stays exactly 7180 CNY, and outgoing = 7180 / 7.18 =
+    // 1000 USD. Any residual rounding lands on the derived (outgoing) side and
+    // is absorbed by the cross-currency tolerance check in validate().
+    auto outgoing_decimal = incoming_amount.amount().divide(rate.rate());
+    if (!outgoing_decimal) {
+        return std::unexpected(outgoing_decimal.error());
     }
+    Money outgoing_amount(*outgoing_decimal, rate.base());
 
-    // Convert incoming back to outgoing via the inverse rate.
-    auto outgoing_result = inverse_rate->convert(incoming_amount);
-    if (!outgoing_result) {
-        return std::unexpected(outgoing_result.error());
-    }
-
-    // To ensure validation passes, recompute incoming from the computed outgoing
-    // using the forward rate. This eliminates rounding discrepancies from the
-    // inverse->forward round-trip.
-    auto recomputed_incoming = rate.convert(*outgoing_result);
-    if (!recomputed_incoming) {
-        return std::unexpected(recomputed_incoming.error());
-    }
-
-    // Build the two transaction sides using the recomputed incoming amount.
+    // Build the two transaction sides. Incoming keeps the user's exact input.
     auto outgoing_tx = make_transfer_transaction(
         TransactionId{},  // unassigned; repository assigns real id
         user_id,
         source_account,
-        *outgoing_result,
+        outgoing_amount,
         occurred_at,
         description,
         transfer_group_id);
@@ -210,15 +206,17 @@ DomainResult<TransferAggregate> TransferDomainService::build_from_incoming_and_r
         TransactionId{},  // unassigned; repository assigns real id
         user_id,
         target_account,
-        *recomputed_incoming,  // Use recomputed amount for consistency
+        incoming_amount,  // user's exact input, preserved
         occurred_at,
         description,
         transfer_group_id);
 
     TransferAggregate aggregate(
+        TransferMode::IncomingAndRate,
         std::move(outgoing_tx),
         std::move(incoming_tx),
-        rate);
+        rate,
+        {});
 
     // Validate consistency.
     if (auto validation = validate(aggregate); !validation) {
@@ -245,7 +243,30 @@ DomainVoidResult TransferDomainService::validate(const TransferAggregate& aggreg
             "Outgoing and incoming must share the same transfer_group_id"));
     }
 
-    // Rule 3: Currency consistency.
+    // Rule 3: Source and target accounts must differ. A self-transfer is not a
+    // transfer. Enforced here so the invariant holds no matter which builder or
+    // caller constructed the aggregate (not only CreateTransferUseCase).
+    if (aggregate.outgoing().account_id() == aggregate.incoming().account_id()) {
+        return std::unexpected(DomainError::invalid_operation(
+            "Transfer source and target accounts must differ"));
+    }
+
+    // Rule 4: Both legs must belong to the same user.
+    if (aggregate.outgoing().user_id() != aggregate.incoming().user_id()) {
+        return std::unexpected(DomainError::invalid_operation(
+            "Transfer legs must belong to the same user"));
+    }
+
+    // Rule 5: Both amounts must be strictly positive magnitudes. The domain
+    // builds legs with positive magnitudes (the repository applies storage
+    // signs), so a non-positive amount here is an illegal transfer.
+    if (!aggregate.outgoing().amount().amount().is_positive() ||
+        !aggregate.incoming().amount().amount().is_positive()) {
+        return std::unexpected(DomainError::invalid_operation(
+            "Transfer amounts must be positive"));
+    }
+
+    // Rule 6: Currency consistency.
     const auto& outgoing_amount = aggregate.outgoing().amount();
     const auto& incoming_amount = aggregate.incoming().amount();
 
@@ -279,7 +300,26 @@ DomainVoidResult TransferDomainService::validate(const TransferAggregate& aggreg
             return std::unexpected(diff.error());
         }
 
-        auto tolerance = Decimal::parse(kRoundingTolerance);
+        auto base_tolerance = Decimal::parse(kRoundingTolerance);
+        if (!base_tolerance) {
+            return std::unexpected(base_tolerance.error());
+        }
+
+        // Scale the tolerance by the rate. When outgoing is derived from
+        // incoming / rate (Mode 3), its ≤0.5-ULP rounding is amplified by the
+        // rate when we recompute expected_incoming = outgoing * rate, so the
+        // round-trip drift is bounded by ~(rate + 1) ULP, not a fixed 1 ULP.
+        // A genuinely mismatched incoming is off by orders of magnitude more,
+        // so this stays safe against real errors.
+        auto one = Decimal::from_integer(1);
+        if (!one) {
+            return std::unexpected(one.error());
+        }
+        auto rate_plus_one = rate.rate().abs().add(*one);
+        if (!rate_plus_one) {
+            return std::unexpected(rate_plus_one.error());
+        }
+        auto tolerance = base_tolerance->multiply(*rate_plus_one);
         if (!tolerance) {
             return std::unexpected(tolerance.error());
         }

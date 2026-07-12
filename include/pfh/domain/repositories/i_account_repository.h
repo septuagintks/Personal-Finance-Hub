@@ -23,6 +23,20 @@ public:
         AccountId id,
         UserId user_id) = 0;
 
+    /// @brief Load an owned account inside the active transaction and take a row
+    /// lock on it (PostgreSQL `SELECT ... FOR UPDATE`).
+    ///
+    /// This is the write-path read boundary: use cases that mutate balances
+    /// (posting, transfer, import) must acquire the account lock here so the
+    /// ownership/archive checks and the subsequent writes see a consistent,
+    /// serialized view of the row. To prevent deadlocks, callers locking more
+    /// than one account MUST lock in ascending account id order (design §4.1).
+    /// Requires an active transaction context.
+    [[nodiscard]] virtual RepositoryResult<Account> find_by_id_for_update(
+        ITransactionContext& tx,
+        AccountId id,
+        UserId user_id) = 0;
+
     [[nodiscard]] virtual RepositoryResult<std::vector<Account>> find_active_by_user(
         UserId user_id) = 0;
 

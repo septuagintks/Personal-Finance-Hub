@@ -5,6 +5,7 @@
 #include "pfh/application/use_cases/account_query_use_cases.h"
 #include "pfh/application/use_cases/create_transaction_use_case.h"
 #include "pfh/application/use_cases/create_transfer_use_case.h"
+#include "pfh/application/use_cases/delete_account_use_case.h"
 #include "pfh/application/use_cases/delete_transaction_use_case.h"
 #include "pfh/application/use_cases/refresh_exchange_rates_use_case.h"
 #include "pfh/infrastructure/persistence/in_memory_account_repository.h"
@@ -368,6 +369,68 @@ TEST_F(UseCaseTest, ReportQuery_WhenMultiCurrency_UsesExchangeRateForNetWorth) {
     EXPECT_EQ(nw->total, "200");
 }
 
+TEST_F(UseCaseTest, ReportQuery_WhenNonUsdPair_UsesUsdTriangulation) {
+    // Base = EUR, holdings in CNY. No direct/reverse EUR<->CNY rate exists;
+    // only USD->EUR and USD->CNY. Report must triangulate via USD.
+    auto s = seed();
+
+    // Set user base currency to EUR.
+    auto pref_write = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
+        UserPreference pref(s.user, ccy("EUR"));
+        return pref_repo_->save(tx, pref);
+    });
+    ASSERT_TRUE(pref_write.has_value()) << pref_write.error().message;
+
+    auto rate_write = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
+        // 1 USD = 0.5 EUR, 1 USD = 8 CNY  => 1 CNY = 0.0625 EUR
+        if (auto r = rate_repo_->append(tx, rate("USD", "EUR", "0.5", 1000, "ECB")); !r) {
+            return std::unexpected(r.error());
+        }
+        if (auto r = rate_repo_->append(tx, rate("USD", "CNY", "8", 1000, "ECB")); !r) {
+            return std::unexpected(r.error());
+        }
+        return {};
+    });
+    ASSERT_TRUE(rate_write.has_value());
+
+    CreateTransactionUseCase create_uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionCommand cny_income;
+    cny_income.user_id = s.user;
+    cny_income.account_id = s.cny_wallet;
+    cny_income.type = TransactionType::Income;
+    cny_income.amount = "800";
+    cny_income.currency_code = "CNY";
+    cny_income.occurred_at = sample_time();
+    ASSERT_TRUE(create_uc.execute(cny_income).has_value());
+
+    ReportQueryService reports(*account_repo_, *tx_repo_, *rate_repo_, *pref_repo_);
+    auto nw = reports.net_worth(s.user);
+    ASSERT_TRUE(nw.has_value()) << nw.error().message;
+    EXPECT_EQ(nw->currency_code, "EUR");
+    // CNY->EUR = (USD->EUR)/(USD->CNY) = 0.5/8 = 0.0625 ; 800 * 0.0625 = 50 EUR
+    EXPECT_EQ(nw->total, "50");
+}
+
+TEST_F(UseCaseTest, ReportQuery_WhenNoRateAtAll_ReturnsError) {
+    auto s = seed();
+    // Holdings in CNY but base USD and NO rate present at all.
+    CreateTransactionUseCase create_uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionCommand cny_income;
+    cny_income.user_id = s.user;
+    cny_income.account_id = s.cny_wallet;
+    cny_income.type = TransactionType::Income;
+    cny_income.amount = "700";
+    cny_income.currency_code = "CNY";
+    cny_income.occurred_at = sample_time();
+    ASSERT_TRUE(create_uc.execute(cny_income).has_value());
+
+    ReportQueryService reports(*account_repo_, *tx_repo_, *rate_repo_, *pref_repo_);
+    auto nw = reports.net_worth(s.user);
+    ASSERT_FALSE(nw.has_value());
+    EXPECT_EQ(nw.error().code, ErrorCode::InvalidExchangeRate);
+    // Must NOT leak SQL or use a default 0/1 rate.
+}
+
 TEST_F(UseCaseTest, RefreshExchangeRates_WhenProviderFails_DegradesWithoutWrite) {
     auto s = seed();
     (void)s;
@@ -408,6 +471,518 @@ TEST_F(UseCaseTest, ErrorMapping_WhenDatabaseError_DoesNotLeakDetails) {
     EXPECT_EQ(mapped.code, ErrorCode::InfrastructureFailure);
     EXPECT_EQ(mapped.message, "Database operation failed");
     EXPECT_TRUE(mapped.details.empty());
+}
+
+// ---- Fix 1: account archive round-trips through optimistic-locked save ----
+
+TEST_F(UseCaseTest, AccountArchive_ThenSave_SucceedsAndBumpsVersionOnce) {
+    auto s = seed();
+    auto loaded = account_repo_->find_by_id(s.cash);
+    ASSERT_TRUE(loaded.has_value());
+    ASSERT_EQ(loaded->version(), 1);
+
+    // archive() must NOT touch version_, so the loaded version still matches
+    // the stored version and the optimistic-lock save can succeed.
+    Account acct = *loaded;
+    acct.archive(sample_time());
+    EXPECT_EQ(acct.version(), 1);
+    EXPECT_TRUE(acct.is_archived());
+
+    auto write = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
+        auto r = account_repo_->save(tx, acct);
+        if (!r) {
+            return std::unexpected(r.error());
+        }
+        return {};
+    });
+    ASSERT_TRUE(write.has_value()) << write.error().message;
+
+    auto after = account_repo_->find_by_id(s.cash);
+    ASSERT_TRUE(after.has_value());
+    EXPECT_TRUE(after->is_archived());
+    EXPECT_EQ(after->version(), 2); // repository owns the single increment
+}
+
+// ---- Fix 2: transfer resolves leg ids without a non-transactional re-read ----
+
+TEST_F(UseCaseTest, CreateTransfer_ReturnsBothLegIds) {
+    auto s = seed();
+    CreateTransferUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransferCommand cmd;
+    cmd.user_id = s.user;
+    cmd.source_account_id = s.cash;
+    cmd.target_account_id = s.savings;
+    cmd.mode = TransferInputMode::BothAmounts;
+    cmd.outgoing_amount = "100";
+    cmd.incoming_amount = "100";
+    cmd.occurred_at = sample_time();
+
+    auto result = uc.execute(cmd);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_TRUE(result->transfer_group_id.is_valid());
+    EXPECT_TRUE(result->outgoing_transaction_id.is_valid());
+    EXPECT_TRUE(result->incoming_transaction_id.is_valid());
+    EXPECT_NE(result->outgoing_transaction_id.value(),
+              result->incoming_transaction_id.value());
+}
+
+TEST_F(UseCaseTest, CreateTransfer_WhenTargetArchived_Returns422) {
+    auto s = seed();
+    // Archive the savings account inside a proper optimistic-locked save.
+    auto loaded = account_repo_->find_by_id(s.savings);
+    ASSERT_TRUE(loaded.has_value());
+    Account acct = *loaded;
+    acct.archive(sample_time());
+    auto arch = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
+        auto r = account_repo_->save(tx, acct);
+        if (!r) return std::unexpected(r.error());
+        return {};
+    });
+    ASSERT_TRUE(arch.has_value());
+
+    CreateTransferUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransferCommand cmd;
+    cmd.user_id = s.user;
+    cmd.source_account_id = s.cash;
+    cmd.target_account_id = s.savings;
+    cmd.mode = TransferInputMode::BothAmounts;
+    cmd.outgoing_amount = "100";
+    cmd.incoming_amount = "100";
+    cmd.occurred_at = sample_time();
+
+    auto result = uc.execute(cmd);
+    ASSERT_FALSE(result.has_value());
+    // The precise application code survives the transaction abort.
+    EXPECT_EQ(result.error().code, ErrorCode::ArchivedAccountOperation);
+    // Nothing was written.
+    EXPECT_TRUE(store_->transfer_groups.empty());
+}
+
+// ---- Fix 3: enriched report DTOs + dangerous account delete ----
+
+TEST_F(UseCaseTest, Balance_ExposesLastTransactionIdAndUpdatedAt) {
+    auto s = seed();
+    CreateTransactionUseCase create_uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionCommand income;
+    income.user_id = s.user;
+    income.account_id = s.cash;
+    income.type = TransactionType::Income;
+    income.amount = "500";
+    income.currency_code = "USD";
+    income.occurred_at = sample_time();
+    auto created = create_uc.execute(income);
+    ASSERT_TRUE(created.has_value());
+
+    GetAccountBalanceUseCase balance_uc(*account_repo_);
+    auto bal = balance_uc.execute(s.user, s.cash);
+    ASSERT_TRUE(bal.has_value());
+    EXPECT_EQ(bal->amount, "500");
+    ASSERT_TRUE(bal->last_transaction_id.has_value());
+    EXPECT_EQ(bal->last_transaction_id->value(), created->id.value());
+}
+
+TEST_F(UseCaseTest, NetWorth_SplitsAssetsAndLiabilities) {
+    auto s = seed();
+    // Add a Credit (liability) account and a USD->CNY rate (the seed's zero-
+    // balance CNY wallet still needs a rate to convert into the USD base).
+    AccountId credit;
+    auto add = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
+        Account card(AccountId{}, s.user, "Card", AccountType::Credit, "credit", ccy("USD"));
+        auto id = account_repo_->save(tx, card);
+        if (!id) return std::unexpected(id.error());
+        credit = *id;
+        auto r = rate_repo_->append(tx, rate("USD", "CNY", "7", 1000, "ECB"));
+        if (!r) return std::unexpected(r.error());
+        return {};
+    });
+    ASSERT_TRUE(add.has_value());
+
+    CreateTransactionUseCase create_uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionCommand asset_income;
+    asset_income.user_id = s.user;
+    asset_income.account_id = s.cash;
+    asset_income.type = TransactionType::Income;
+    asset_income.amount = "1000";
+    asset_income.currency_code = "USD";
+    asset_income.occurred_at = sample_time();
+    ASSERT_TRUE(create_uc.execute(asset_income).has_value());
+
+    // Spend on the credit card => negative balance (a liability).
+    CreateTransactionCommand card_expense;
+    card_expense.user_id = s.user;
+    card_expense.account_id = credit;
+    card_expense.type = TransactionType::Expense;
+    card_expense.amount = "300";
+    card_expense.currency_code = "USD";
+    card_expense.occurred_at = sample_time();
+    ASSERT_TRUE(create_uc.execute(card_expense).has_value());
+
+    ReportQueryService reports(*account_repo_, *tx_repo_, *rate_repo_, *pref_repo_);
+    auto nw = reports.net_worth(s.user);
+    ASSERT_TRUE(nw.has_value()) << nw.error().message;
+    EXPECT_EQ(nw->total_assets, "1000");
+    EXPECT_EQ(nw->total_liabilities, "-300");
+    EXPECT_EQ(nw->total, "700");
+}
+
+TEST_F(UseCaseTest, Dashboard_ScopesIncomeExpenseToCurrentMonth) {
+    auto s = seed();
+    // Rate so the seed's zero-balance CNY wallet can convert into USD base.
+    auto rw = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
+        auto r = rate_repo_->append(tx, rate("USD", "CNY", "7", 1000, "ECB"));
+        if (!r) return std::unexpected(r.error());
+        return {};
+    });
+    ASSERT_TRUE(rw.has_value());
+    CreateTransactionUseCase create_uc(*account_repo_, *tx_repo_, *uow_);
+
+    // "now" pinned to 2026-07-12; in-month income vs. prior-month expense.
+    const auto now = std::chrono::system_clock::from_time_t(1752307200); // 2026-07-12
+    const auto in_month = std::chrono::system_clock::from_time_t(1751500800); // 2026-07-03
+    const auto last_month = std::chrono::system_clock::from_time_t(1749000000); // 2026-06-04
+
+    CreateTransactionCommand cur;
+    cur.user_id = s.user;
+    cur.account_id = s.cash;
+    cur.type = TransactionType::Income;
+    cur.amount = "900";
+    cur.currency_code = "USD";
+    cur.occurred_at = in_month;
+    ASSERT_TRUE(create_uc.execute(cur).has_value());
+
+    CreateTransactionCommand old;
+    old.user_id = s.user;
+    old.account_id = s.cash;
+    old.type = TransactionType::Expense;
+    old.amount = "400";
+    old.currency_code = "USD";
+    old.occurred_at = last_month;
+    ASSERT_TRUE(create_uc.execute(old).has_value());
+
+    ReportQueryService reports(*account_repo_, *tx_repo_, *rate_repo_, *pref_repo_);
+    auto dash = reports.dashboard_summary(s.user, now);
+    ASSERT_TRUE(dash.has_value()) << dash.error().message;
+    // Only the July income counts; the June expense is outside the window.
+    EXPECT_EQ(dash->income_total, "900");
+    EXPECT_EQ(dash->expense_total, "0");
+    EXPECT_EQ(dash->account_count, 3u);
+    EXPECT_FALSE(dash->asset_distribution.empty());
+}
+
+TEST_F(UseCaseTest, DeleteAccount_WhenInsufficientConfirmations_Rejected) {
+    auto s = seed();
+    DeleteAccountUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    DeleteAccountCommand cmd;
+    cmd.user_id = s.user;
+    cmd.account_id = s.cash;
+    cmd.confirmations = 1; // requires 3
+    auto result = uc.execute(cmd);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::ValidationError);
+    // Account still present.
+    EXPECT_TRUE(account_repo_->find_by_id(s.cash).has_value());
+}
+
+TEST_F(UseCaseTest, DeleteAccount_WhenConfirmed_PurgesAccountAndTransactions) {
+    auto s = seed();
+    CreateTransactionUseCase create_uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionCommand income;
+    income.user_id = s.user;
+    income.account_id = s.cash;
+    income.type = TransactionType::Income;
+    income.amount = "250";
+    income.currency_code = "USD";
+    income.occurred_at = sample_time();
+    ASSERT_TRUE(create_uc.execute(income).has_value());
+
+    DeleteAccountUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    DeleteAccountCommand cmd;
+    cmd.user_id = s.user;
+    cmd.account_id = s.cash;
+    cmd.confirmations = DeleteAccountUseCase::kRequiredConfirmations;
+    auto result = uc.execute(cmd);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    EXPECT_FALSE(account_repo_->find_by_id(s.cash).has_value());
+    auto remaining = tx_repo_->find_by_account(s.cash);
+    ASSERT_TRUE(remaining.has_value());
+    EXPECT_TRUE(remaining->empty());
+    EXPECT_EQ(store_->outbox.back().event_name, "AccountDangerouslyDeleted");
+}
+
+TEST_F(UseCaseTest, DeleteAccount_WhenOtherUsersAccount_ReturnsNotFound) {
+    auto s = seed();
+    UserId other;
+    auto w = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
+        auto uid = user_repo_->create(tx, "bob", "hash", ccy("USD"));
+        if (!uid) return std::unexpected(uid.error());
+        other = *uid;
+        return {};
+    });
+    ASSERT_TRUE(w.has_value());
+
+    DeleteAccountUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    DeleteAccountCommand cmd;
+    cmd.user_id = other;
+    cmd.account_id = s.cash; // belongs to alice
+    cmd.confirmations = DeleteAccountUseCase::kRequiredConfirmations;
+    auto result = uc.execute(cmd);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::NotFound);
+    EXPECT_TRUE(account_repo_->find_by_id(s.cash).has_value());
+}
+
+// ---- Review round 2 ----
+
+// Item 2: deleting a transfer-involved account must purge BOTH legs and the
+// transfer group, leaving no dangling half-transfer on the counterpart account.
+TEST_F(UseCaseTest, DeleteAccount_WithTransfer_PurgesBothLegsAndGroup) {
+    auto s = seed();
+    CreateTransferUseCase transfer_uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransferCommand tcmd;
+    tcmd.user_id = s.user;
+    tcmd.source_account_id = s.cash;
+    tcmd.target_account_id = s.savings;
+    tcmd.mode = TransferInputMode::BothAmounts;
+    tcmd.outgoing_amount = "100";
+    tcmd.incoming_amount = "100";
+    tcmd.occurred_at = sample_time();
+    ASSERT_TRUE(transfer_uc.execute(tcmd).has_value());
+    ASSERT_EQ(store_->transfer_groups.size(), 1u);
+
+    // Delete the SOURCE account; the incoming leg lives on savings.
+    DeleteAccountUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    DeleteAccountCommand cmd;
+    cmd.user_id = s.user;
+    cmd.account_id = s.cash;
+    cmd.confirmations = DeleteAccountUseCase::kRequiredConfirmations;
+    ASSERT_TRUE(uc.execute(cmd).has_value());
+
+    // No transfer group and no leftover leg on the counterpart (savings).
+    EXPECT_TRUE(store_->transfer_groups.empty());
+    auto savings_txs = tx_repo_->find_by_account(s.savings);
+    ASSERT_TRUE(savings_txs.has_value());
+    EXPECT_TRUE(savings_txs->empty());
+    // And no orphan transfer transactions remain user-wide.
+    auto all = tx_repo_->find_by_user(s.user);
+    ASSERT_TRUE(all.has_value());
+    for (const auto& tx : *all) {
+        EXPECT_NE(tx.type(), TransactionType::Transfer);
+    }
+}
+
+// Item 3: a database failure from the rate repository must surface as
+// InfrastructureFailure, not be swallowed into InvalidExchangeRate.
+namespace {
+class FailingRateRepository final : public IExchangeRateRepository {
+public:
+    domain::RepositoryResult<ExchangeRateId> append(
+        ITransactionContext&, const ExchangeRate&) override {
+        return std::unexpected(RepositoryError::database("append down"));
+    }
+    domain::RepositoryResult<ExchangeRate> find_latest(
+        const Currency&, const Currency&) override {
+        return std::unexpected(RepositoryError::database("db down"));
+    }
+    domain::RepositoryResult<ExchangeRate> find_historical(
+        const Currency&, const Currency&,
+        std::chrono::system_clock::time_point) override {
+        return std::unexpected(RepositoryError::database("db down"));
+    }
+    domain::RepositoryResult<std::vector<ExchangeRate>> find_all_for_pair(
+        const Currency&, const Currency&) override {
+        return std::unexpected(RepositoryError::database("db down"));
+    }
+};
+} // namespace
+
+TEST_F(UseCaseTest, NetWorth_WhenRateRepositoryFails_ReturnsInfrastructureFailure) {
+    auto s = seed();
+    // CNY holding forces a conversion; the failing repo returns DatabaseError.
+    CreateTransactionUseCase create_uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionCommand cny;
+    cny.user_id = s.user;
+    cny.account_id = s.cny_wallet;
+    cny.type = TransactionType::Income;
+    cny.amount = "700";
+    cny.currency_code = "CNY";
+    cny.occurred_at = sample_time();
+    ASSERT_TRUE(create_uc.execute(cny).has_value());
+
+    FailingRateRepository failing;
+    ReportQueryService reports(*account_repo_, *tx_repo_, failing, *pref_repo_);
+    auto nw = reports.net_worth(s.user);
+    ASSERT_FALSE(nw.has_value());
+    EXPECT_EQ(nw.error().code, ErrorCode::InfrastructureFailure);
+    // Must NOT leak the DB message.
+    EXPECT_EQ(nw.error().message, "Database operation failed");
+}
+
+// Item 4: a transaction stamped exactly at next-month 00:00 belongs to the
+// NEXT period, not the current one.
+TEST_F(UseCaseTest, Dashboard_ExcludesTransactionAtNextMonthBoundary) {
+    auto s = seed();
+    auto rw = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
+        auto r = rate_repo_->append(tx, rate("USD", "CNY", "7", 1000, "ECB"));
+        if (!r) return std::unexpected(r.error());
+        return {};
+    });
+    ASSERT_TRUE(rw.has_value());
+
+    CreateTransactionUseCase create_uc(*account_repo_, *tx_repo_, *uow_);
+    const auto now = std::chrono::system_clock::from_time_t(1752307200);      // 2025-07-12 08:00 UTC
+    const auto next_month_start = std::chrono::system_clock::from_time_t(1754006400); // 2025-08-01 00:00 UTC
+
+    CreateTransactionCommand at_boundary;
+    at_boundary.user_id = s.user;
+    at_boundary.account_id = s.cash;
+    at_boundary.type = TransactionType::Income;
+    at_boundary.amount = "500";
+    at_boundary.currency_code = "USD";
+    at_boundary.occurred_at = next_month_start;
+    ASSERT_TRUE(create_uc.execute(at_boundary).has_value());
+
+    ReportQueryService reports(*account_repo_, *tx_repo_, *rate_repo_, *pref_repo_);
+    auto dash = reports.dashboard_summary(s.user, now);
+    ASSERT_TRUE(dash.has_value()) << dash.error().message;
+    // The Aug 1 00:00 income is outside July's [start, end) window.
+    EXPECT_EQ(dash->income_total, "0");
+}
+
+// Item 6: domain service rejects same-account and non-positive transfers even
+// when called directly (not just through the use case).
+TEST_F(UseCaseTest, TransferDomainService_RejectsSameAccountTransfer) {
+    auto built = TransferDomainService::build_from_both_amounts(
+        money("100", "USD"), money("100", "USD"),
+        AccountId(7), AccountId(7), // same account
+        UserId(1), sample_time(), "self", TransferGroupId{});
+    ASSERT_FALSE(built.has_value());
+}
+
+// Item 6: repository rejects a transfer whose leg currency mismatches the
+// account currency.
+TEST_F(UseCaseTest, SaveTransfer_WhenLegCurrencyMismatchesAccount_Rejected) {
+    auto s = seed();
+    // Build a same-currency USD transfer aggregate cash->savings, but the
+    // aggregate is fine; instead craft a mismatch by targeting the CNY wallet
+    // with a USD incoming leg via Mode 1 (rate USD->USD is identity but target
+    // account is CNY). Simplest: cross aggregate cash(USD)->cny(CNY) with wrong
+    // incoming currency is prevented at build; so we verify the repo guard by
+    // routing an aggregate whose incoming account is cny but amount is USD.
+    auto write = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
+        // Mode 2 USD->USD but land incoming on the CNY wallet: build with both
+        // USD amounts and source=cash(USD), target=cny(CNY-account).
+        auto aggregate = TransferDomainService::build_from_both_amounts(
+            money("100", "USD"), money("100", "USD"),
+            s.cash, s.cny_wallet, s.user, sample_time(), "mismatch",
+            TransferGroupId{});
+        if (!aggregate) {
+            // Domain layer allows this (it does not know account currencies);
+            // if it ever rejects, treat as validation for the assertion below.
+            return std::unexpected(RepositoryError::validation(aggregate.error().message));
+        }
+        auto saved = tx_repo_->save_transfer(tx, *aggregate);
+        if (!saved) {
+            return std::unexpected(saved.error());
+        }
+        return {};
+    });
+    ASSERT_FALSE(write.has_value());
+    EXPECT_EQ(write.error().status, RepositoryStatus::ValidationError);
+}
+
+// Item 7: delete-transaction is race-safe; a second delete conflicts.
+TEST_F(UseCaseTest, DeleteTransaction_SecondDelete_ReturnsConflict) {
+    auto s = seed();
+    CreateTransactionUseCase create_uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionCommand expense;
+    expense.user_id = s.user;
+    expense.account_id = s.cash;
+    expense.type = TransactionType::Expense;
+    expense.amount = "40";
+    expense.currency_code = "USD";
+    expense.occurred_at = sample_time();
+    auto created = create_uc.execute(expense);
+    ASSERT_TRUE(created.has_value());
+
+    DeleteTransactionUseCase del(*tx_repo_, *uow_);
+    DeleteTransactionCommand dc;
+    dc.user_id = s.user;
+    dc.transaction_id = created->id;
+    dc.deleted_at = sample_time();
+    ASSERT_TRUE(del.execute(dc).has_value());
+
+    auto second = del.execute(dc);
+    ASSERT_FALSE(second.has_value());
+    EXPECT_EQ(second.error().code, ErrorCode::Conflict);
+}
+
+// Item 1: create-transaction builds its DTO from the persisted entity (id set)
+// without any post-commit re-read.
+TEST_F(UseCaseTest, CreateTransaction_ReturnsPersistedEntityWithId) {
+    auto s = seed();
+    CreateTransactionUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransactionCommand income;
+    income.user_id = s.user;
+    income.account_id = s.cash;
+    income.type = TransactionType::Income;
+    income.amount = "1234";
+    income.currency_code = "USD";
+    income.occurred_at = sample_time();
+    auto result = uc.execute(income);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_TRUE(result->id.is_valid());
+    EXPECT_EQ(result->amount, "1234");
+}
+
+// Item 8: asset distribution is aggregated by AccountType, not per-account.
+TEST_F(UseCaseTest, Dashboard_AssetDistribution_AggregatesByAccountType) {
+    auto s = seed();
+    auto rw = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
+        auto r = rate_repo_->append(tx, rate("USD", "CNY", "7", 1000, "ECB"));
+        if (!r) return std::unexpected(r.error());
+        return {};
+    });
+    ASSERT_TRUE(rw.has_value());
+
+    // Two Savings accounts + the seed's Cash and CNY DigitalWallet.
+    AccountId savings2;
+    auto add = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
+        Account s2(AccountId{}, s.user, "Savings2", AccountType::Savings, "bank", ccy("USD"));
+        auto id = account_repo_->save(tx, s2);
+        if (!id) return std::unexpected(id.error());
+        savings2 = *id;
+        return {};
+    });
+    ASSERT_TRUE(add.has_value());
+
+    CreateTransactionUseCase create_uc(*account_repo_, *tx_repo_, *uow_);
+    for (auto [acct, amt] : std::vector<std::pair<AccountId, std::string>>{
+             {s.savings, "1000"}, {savings2, "500"}}) {
+        CreateTransactionCommand c;
+        c.user_id = s.user;
+        c.account_id = acct;
+        c.type = TransactionType::Income;
+        c.amount = amt;
+        c.currency_code = "USD";
+        c.occurred_at = sample_time();
+        ASSERT_TRUE(create_uc.execute(c).has_value());
+    }
+
+    const auto now = std::chrono::system_clock::from_time_t(1752307200);
+    ReportQueryService reports(*account_repo_, *tx_repo_, *rate_repo_, *pref_repo_);
+    auto dash = reports.dashboard_summary(s.user, now);
+    ASSERT_TRUE(dash.has_value()) << dash.error().message;
+
+    // The two Savings accounts collapse into ONE "Savings" slice = 1500.
+    int savings_slices = 0;
+    for (const auto& slice : dash->asset_distribution) {
+        if (slice.label == "Savings") {
+            ++savings_slices;
+            EXPECT_EQ(slice.amount, "1500");
+        }
+    }
+    EXPECT_EQ(savings_slices, 1);
 }
 
 } // namespace pfh::test

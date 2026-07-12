@@ -27,6 +27,14 @@
 
 namespace pfh::domain {
 
+/// @brief How the transfer was constructed. Persisted so the exact input mode
+/// can be reproduced (the repository must NOT infer it from currency equality).
+enum class TransferMode {
+    OutgoingAndRate = 1,   ///< User gave outgoing + rate; incoming derived.
+    OutgoingAndIncoming = 2, ///< User gave both amounts; rate derived (or same-currency).
+    IncomingAndRate = 3    ///< User gave incoming + rate; outgoing derived.
+};
+
 /// @brief Fee source for transfer adjustments.
 enum class FeeSource {
     SourceAccount,  ///< Fee deducted from the source account (most common).
@@ -46,24 +54,13 @@ enum class FeeSource {
 /// created atomically.
 class TransferAggregate {
 public:
-    /// @brief Construct a transfer aggregate.
-    ///
-    /// Pre-condition: outgoing and incoming must both be TransactionType::Transfer
-    /// and share the same transfer_group_id.
-    TransferAggregate(
-        Transaction outgoing,
-        Transaction incoming,
-        std::optional<ExchangeRate> rate = std::nullopt,
-        std::vector<Transaction> adjustments = {})
-        : outgoing_(std::move(outgoing)),
-          incoming_(std::move(incoming)),
-          rate_(std::move(rate)),
-          adjustments_(std::move(adjustments)) {}
-
     [[nodiscard]] const Transaction& outgoing() const noexcept { return outgoing_; }
     [[nodiscard]] const Transaction& incoming() const noexcept { return incoming_; }
     [[nodiscard]] const std::optional<ExchangeRate>& rate() const noexcept { return rate_; }
     [[nodiscard]] const std::vector<Transaction>& adjustments() const noexcept { return adjustments_; }
+
+    /// @brief The input mode used to construct this transfer (persisted).
+    [[nodiscard]] TransferMode mode() const noexcept { return mode_; }
 
     /// @brief Check if this is a same-currency transfer.
     [[nodiscard]] bool is_same_currency() const noexcept {
@@ -81,6 +78,26 @@ public:
     }
 
 private:
+    /// @brief Construct a transfer aggregate.
+    ///
+    /// Private: only TransferDomainService may build an aggregate, so every
+    /// aggregate has passed consistency validation and carries a real mode.
+    /// This prevents callers from assembling an unvalidated/illegal transfer.
+    TransferAggregate(
+        TransferMode mode,
+        Transaction outgoing,
+        Transaction incoming,
+        std::optional<ExchangeRate> rate,
+        std::vector<Transaction> adjustments)
+        : mode_(mode),
+          outgoing_(std::move(outgoing)),
+          incoming_(std::move(incoming)),
+          rate_(std::move(rate)),
+          adjustments_(std::move(adjustments)) {}
+
+    friend class TransferDomainService;
+
+    TransferMode mode_;
     Transaction outgoing_;
     Transaction incoming_;
     std::optional<ExchangeRate> rate_;

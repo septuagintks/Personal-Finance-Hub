@@ -36,6 +36,11 @@ struct BalanceDto {
     domain::AccountId account_id;
     std::string currency_code;
     std::string amount; // string, never float/double
+    // REST contract (10_REST_API_Design §2.2) exposes these on the balance
+    // snapshot. last_transaction_id is nullopt when the account has no
+    // transactions yet.
+    std::optional<domain::TransactionId> last_transaction_id;
+    std::chrono::system_clock::time_point updated_at{};
 };
 
 struct TransactionDto {
@@ -109,16 +114,44 @@ struct CashFlowDto {
 
 struct NetWorthDto {
     std::string currency_code;
+    // total == total_assets + total_liabilities (liabilities are negative).
     std::string total;
+    std::string total_assets;      // sum of asset-category balances (>= 0 typically)
+    std::string total_liabilities; // sum of liability-category balances (<= 0)
+    std::chrono::system_clock::time_point generated_at{};
+};
+
+// One slice of the asset distribution / top-category breakdowns. `amount` and
+// `percentage` are strings at the boundary; percentage is formatted like
+// "68.0%" per the REST contract.
+struct DistributionSliceDto {
+    std::string label;
+    std::string amount;
+    std::string percentage;
+};
+
+struct CategoryBreakdownDto {
+    std::optional<domain::CategoryId> category_id;
+    std::string category_name;
+    std::string amount;
+    std::string percentage;
 };
 
 struct DashboardSummaryDto {
     std::string currency_code;
     std::string net_worth;
-    std::string income_total;
-    std::string expense_total;
+    std::string total_assets;
+    std::string total_liabilities;
+    std::string income_total;   // period income (default period = current month)
+    std::string expense_total;  // period expense
     std::string cash_flow_net;
     std::size_t account_count = 0;
+    std::vector<DistributionSliceDto> asset_distribution;
+    std::vector<CategoryBreakdownDto> top_expense_categories;
+    // Reporting window the income/expense/period stats were computed over.
+    std::chrono::system_clock::time_point report_period_start{};
+    std::chrono::system_clock::time_point report_period_end{};
+    std::chrono::system_clock::time_point generated_at{};
 };
 
 struct RefreshExchangeRatesCommand {

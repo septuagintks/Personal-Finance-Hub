@@ -98,19 +98,24 @@ public:
     }
 
     /// @brief Archive the account (soft-hide from active views).
+    ///
+    /// Does NOT bump version_. The version is a persistence-owned optimistic-lock
+    /// token: it reflects the stored row version the entity was loaded with, and
+    /// the repository is the sole authority that validates it (loaded == stored)
+    /// and increments it on a successful write. Bumping it here would make the
+    /// entity's version diverge from the stored version before save() ever runs,
+    /// so the optimistic-lock check could never pass.
     void archive(TimePoint archived_at) {
         is_archived_ = true;
         archived_at_ = archived_at;
         updated_at_ = archived_at;
-        ++version_;
     }
 
-    /// @brief Unarchive the account.
+    /// @brief Unarchive the account. See archive() for why version_ is untouched.
     void unarchive(TimePoint unarchived_at) {
         is_archived_ = false;
         archived_at_ = std::nullopt;
         updated_at_ = unarchived_at;
-        ++version_;
     }
 
 private:

@@ -124,14 +124,32 @@ TEST(TransferDomainService, WhenBuildFromIncomingAndRate_CalculatesOutgoing) {
         TransferGroupId(999));
 
     ASSERT_TRUE(transfer.has_value());
-    // Mode 3 computes outgoing from incoming/rate, which may not round-trip
-    // exactly due to Decimal precision. The service recomputes incoming from
-    // the computed outgoing to ensure consistency.
-    // 7180 / 7.18 = 999.99999988... (rounded to scale 10)
-    // 999.99999988 * 7.18 = 7179.9999991384 (recomputed incoming)
-    EXPECT_EQ(transfer->outgoing().amount().to_string(), "999.99999988 USD");
-    EXPECT_EQ(transfer->incoming().amount().to_string(), "7179.9999991384 CNY");
+    // The user's incoming amount is authoritative and MUST NOT be modified.
+    // outgoing = 7180 / 7.18 = 1000 USD (exact); incoming stays exactly 7180 CNY.
+    EXPECT_EQ(transfer->incoming().amount().to_string(), "7180 CNY");
+    EXPECT_EQ(transfer->outgoing().amount().to_string(), "1000 USD");
     EXPECT_TRUE(transfer->rate().has_value());
+    EXPECT_EQ(transfer->mode(), TransferMode::IncomingAndRate);
+}
+
+TEST(TransferDomainService, WhenBuildFromIncomingAndRate_PreservesUserIncomingUnderRounding) {
+    // Non-exact division: 7170 / 7.18 rounds on the derived outgoing side, but
+    // the user's incoming amount is preserved verbatim (never rewritten).
+    auto incoming = money("7170", "CNY");
+    auto exchange_rate = rate("USD", "CNY", "7.18");
+    auto transfer = TransferDomainService::build_from_incoming_and_rate(
+        incoming,
+        AccountId(1),
+        AccountId(2),
+        exchange_rate,
+        UserId(100),
+        sample_time(),
+        "Test transfer",
+        TransferGroupId(999));
+
+    ASSERT_TRUE(transfer.has_value()) << transfer.error().message;
+    EXPECT_EQ(transfer->incoming().amount().to_string(), "7170 CNY");
+    EXPECT_EQ(transfer->mode(), TransferMode::IncomingAndRate);
 }
 
 TEST(TransferDomainService, WhenBuildFromIncomingAndRateCurrencyMismatch_ReturnsError) {

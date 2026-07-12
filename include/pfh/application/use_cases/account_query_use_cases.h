@@ -69,6 +69,10 @@ public:
         dto.account_id = account_id;
         dto.currency_code = snapshot->balance.currency().code();
         dto.amount = snapshot->balance.amount().to_string();
+        if (snapshot->last_transaction_id.is_valid()) {
+            dto.last_transaction_id = snapshot->last_transaction_id;
+        }
+        dto.updated_at = snapshot->as_of;
         return dto;
     }
 

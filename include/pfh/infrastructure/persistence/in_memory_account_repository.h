@@ -58,6 +58,20 @@ public:
         return account;
     }
 
+    [[nodiscard]] domain::RepositoryResult<domain::Account> find_by_id_for_update(
+        domain::ITransactionContext& /*tx*/,
+        domain::AccountId id,
+        domain::UserId user_id) override {
+        // The in-memory store is single-threaded, so there is no real row lock
+        // to take; the transaction requirement and ownership semantics still
+        // match the PostgreSQL `SELECT ... FOR UPDATE` contract callers rely on.
+        if (!store_.in_transaction) {
+            return std::unexpected(domain::RepositoryError::database(
+                "find_by_id_for_update requires an active transaction"));
+        }
+        return find_by_id_for_user(id, user_id);
+    }
+
     [[nodiscard]] domain::RepositoryResult<std::vector<domain::Account>> find_active_by_user(
         domain::UserId user_id) override {
         std::map<std::int64_t, domain::Account> merged = store_.accounts;
@@ -144,7 +158,8 @@ public:
             return domain::BalanceSnapshot(
                 id,
                 cache->balance,
-                std::chrono::system_clock::now());
+                std::chrono::system_clock::now(),
+                cache->last_transaction_id);
         }
 
         // Cache miss / invalid: rebuild via domain service.
@@ -154,6 +169,9 @@ public:
             return std::unexpected(domain::RepositoryError::database(
                 "Balance calculation failed: " + snapshot.error().message));
         }
+        // Domain service does not track the last transaction id; the repository
+        // owns cache metadata, so stamp it here for the response DTO.
+        snapshot->last_transaction_id = last_tx_id;
 
         // Write-back cache (staged if in transaction, otherwise direct).
         InMemoryBalanceCache rebuilt{

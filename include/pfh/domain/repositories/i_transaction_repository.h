@@ -14,19 +14,48 @@
 
 namespace pfh::domain {
 
+/// @brief Identifiers assigned by save_transfer for a persisted transfer.
+///
+/// The repository assigns the group id and both leg ids as part of the same
+/// write, so callers get them back directly instead of re-querying inside the
+/// transaction (a non-transactional read would not see the uncommitted rows on
+/// a real PostgreSQL connection).
+struct TransferPersistResult {
+    TransferGroupId group_id;
+    TransactionId outgoing_id;
+    TransactionId incoming_id;
+};
+
 class ITransactionRepository {
 public:
     virtual ~ITransactionRepository() = default;
 
     [[nodiscard]] virtual RepositoryResult<Transaction> find_by_id(TransactionId id) = 0;
 
-    [[nodiscard]] virtual RepositoryResult<TransactionId> save_single(
+    /// @brief Load a transaction inside the active transaction and take a row
+    /// lock (PostgreSQL `SELECT ... FOR UPDATE`). Write paths that check state
+    /// (e.g. not-already-deleted) before mutating must use this so the check and
+    /// the write are serialized against concurrent deletes. Requires an active
+    /// transaction context.
+    [[nodiscard]] virtual RepositoryResult<Transaction> find_by_id_for_update(
+        ITransactionContext& tx,
+        TransactionId id) = 0;
+
+    /// @brief Persist a single (non-transfer) transaction and return the fully
+    /// persisted entity (with its assigned id and normalized storage sign).
+    /// Callers must not re-read after commit: on RLS-scoped connections a
+    /// post-commit read on another connection may not see the row, and a read
+    /// failure after a successful commit would wrongly surface as an API error
+    /// (risking duplicate re-submits).
+    [[nodiscard]] virtual RepositoryResult<Transaction> save_single(
         ITransactionContext& tx,
         const Transaction& transaction) = 0;
 
     /// @brief Persist a TransferAggregate atomically:
     /// transfer_groups row + outgoing + incoming (+ adjustments).
-    [[nodiscard]] virtual RepositoryResult<TransferGroupId> save_transfer(
+    /// Returns the assigned group id together with both leg ids so callers do
+    /// not have to re-read within the same transaction.
+    [[nodiscard]] virtual RepositoryResult<TransferPersistResult> save_transfer(
         ITransactionContext& tx,
         const TransferAggregate& transfer) = 0;
 
@@ -46,7 +75,19 @@ public:
         UserId user_id,
         std::chrono::system_clock::time_point deleted_at) = 0;
 
+    /// @brief Physically delete this account's NON-transfer transactions only.
+    /// Transfer legs are handled by physical_delete_transfers_touching_account
+    /// so the paired leg on the other account and the transfer_groups row are
+    /// removed atomically as a unit (never leaving an orphan leg).
     [[nodiscard]] virtual RepositoryVoidResult physical_delete_by_account(
+        ITransactionContext& tx,
+        AccountId account_id) = 0;
+
+    /// @brief Physically delete every transfer aggregate that touches this
+    /// account: both legs (including the one on the counterpart account) and the
+    /// transfer_groups row. This prevents dangerous account deletion from
+    /// leaving a dangling half-transfer on the other side.
+    [[nodiscard]] virtual RepositoryVoidResult physical_delete_transfers_touching_account(
         ITransactionContext& tx,
         AccountId account_id) = 0;
 };

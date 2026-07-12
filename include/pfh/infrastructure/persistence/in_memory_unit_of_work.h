@@ -48,6 +48,7 @@ public:
         store_.staged_deleted_accounts.clear();
         store_.staged_deleted_transactions.clear();
         store_.staged_deleted_balance_cache.clear();
+        store_.staged_deleted_transfer_groups.clear();
 
         InMemoryTransactionContext tx(store_.next_tx_context_id++);
         auto result = action(tx);
@@ -66,6 +67,7 @@ public:
             store_.staged_deleted_accounts.clear();
             store_.staged_deleted_transactions.clear();
             store_.staged_deleted_balance_cache.clear();
+            store_.staged_deleted_transfer_groups.clear();
             pending_events_.clear();
             return result;
         }
@@ -117,6 +119,9 @@ public:
         for (const auto id : store_.staged_deleted_balance_cache) {
             store_.balance_cache.erase(id);
         }
+        for (const auto id : store_.staged_deleted_transfer_groups) {
+            store_.transfer_groups.erase(id);
+        }
 
         store_.in_transaction = false;
         store_.staged_users.clear();
@@ -130,6 +135,7 @@ public:
         store_.staged_deleted_accounts.clear();
         store_.staged_deleted_transactions.clear();
         store_.staged_deleted_balance_cache.clear();
+        store_.staged_deleted_transfer_groups.clear();
         pending_events_.clear();
         return {};
     }

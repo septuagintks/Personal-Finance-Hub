@@ -17,8 +17,12 @@
 #include "pfh/domain/repositories/i_exchange_rate_repository.h"
 #include "pfh/domain/repositories/i_transaction_repository.h"
 #include "pfh/domain/repositories/i_user_preference_repository.h"
+#include <algorithm>
 #include <chrono>
+#include <map>
 #include <optional>
+#include <utility>
+#include <vector>
 
 namespace pfh::application {
 
@@ -34,6 +38,10 @@ public:
           rates_(rates),
           preferences_(preferences) {}
 
+    // Window is half-open [from, to): `from` inclusive, `to` EXCLUSIVE. This
+    // matches the documented month window [month_start, next_month_start) so a
+    // transaction stamped exactly at next-month 00:00 lands in the next period,
+    // not this one.
     [[nodiscard]] Result<CashFlowDto> cash_flow(
         domain::UserId user_id,
         std::optional<std::chrono::system_clock::time_point> from = std::nullopt,
@@ -64,7 +72,7 @@ public:
             if (from.has_value() && tx.occurred_at() < *from) {
                 continue;
             }
-            if (to.has_value() && tx.occurred_at() > *to) {
+            if (to.has_value() && tx.occurred_at() >= *to) { // exclusive upper bound
                 continue;
             }
 
@@ -122,37 +130,62 @@ public:
         if (!zero) {
             return err(from_domain(zero.error()));
         }
-        domain::Money total(*zero, base);
+        domain::Money assets(*zero, base);
+        domain::Money liabilities(*zero, base);
+        const auto now = std::chrono::system_clock::now();
 
         for (const auto& account : *accounts) {
             auto snapshot = accounts_.balance_of(account.id());
             if (!snapshot) {
                 return err(from_repository(snapshot.error()));
             }
-            auto converted = convert_to_base(
-                snapshot->balance, base, std::chrono::system_clock::now());
+            auto converted = convert_to_base(snapshot->balance, base, now);
             if (!converted) {
                 return err(converted.error());
             }
-            auto sum = total.add(*converted);
+            // Split by BALANCE SIGN per the reporting design (09 §2.1): a
+            // positive converted balance adds to total_assets, a negative one
+            // to total_liabilities. This is independent of account category, so
+            // e.g. an overdrawn cash account correctly counts as a liability and
+            // a credit account in credit counts as an asset. total = assets +
+            // liabilities holds because liabilities stays negative.
+            domain::Money& bucket =
+                converted->amount().is_negative() ? liabilities : assets;
+            auto sum = bucket.add(*converted);
             if (!sum) {
                 return err(from_domain(sum.error()));
             }
-            total = *sum;
+            bucket = *sum;
+        }
+
+        auto total = assets.add(liabilities);
+        if (!total) {
+            return err(from_domain(total.error()));
         }
 
         NetWorthDto dto;
         dto.currency_code = base.code();
-        dto.total = total.amount().to_string();
+        dto.total = total->amount().to_string();
+        dto.total_assets = assets.amount().to_string();
+        dto.total_liabilities = liabilities.amount().to_string();
+        dto.generated_at = now;
         return dto;
     }
 
-    [[nodiscard]] Result<DashboardSummaryDto> dashboard_summary(domain::UserId user_id) {
+    // `now` is injectable so tests can pin the reporting window; production
+    // callers use the default (system clock). The dashboard's income/expense
+    // are scoped to the CURRENT MONTH [month_start, next_month_start), not all
+    // history — the standalone cash_flow() keeps its all-history default.
+    [[nodiscard]] Result<DashboardSummaryDto> dashboard_summary(
+        domain::UserId user_id,
+        std::chrono::system_clock::time_point now = std::chrono::system_clock::now()) {
+        const auto [period_start, period_end] = current_month_window(now);
+
         auto nw = net_worth(user_id);
         if (!nw) {
             return err(nw.error());
         }
-        auto cf = cash_flow(user_id);
+        auto cf = cash_flow(user_id, period_start, period_end);
         if (!cf) {
             return err(cf.error());
         }
@@ -164,14 +197,308 @@ public:
         DashboardSummaryDto dto;
         dto.currency_code = nw->currency_code;
         dto.net_worth = nw->total;
+        dto.total_assets = nw->total_assets;
+        dto.total_liabilities = nw->total_liabilities;
         dto.income_total = cf->income_total;
         dto.expense_total = cf->expense_total;
         dto.cash_flow_net = cf->net_total;
         dto.account_count = accounts->size();
+        dto.report_period_start = period_start;
+        dto.report_period_end = period_end;
+        dto.generated_at = now;
+
+        // Asset distribution: per active account, its base-currency balance and
+        // share of total assets (liability accounts are reported with their
+        // natural negative amount, matching the REST contract example).
+        auto dist = asset_distribution(user_id, nw->currency_code, now);
+        if (!dist) {
+            return err(dist.error());
+        }
+        dto.asset_distribution = std::move(*dist);
+
+        // Top expense categories over the current-month window.
+        auto cats = top_expense_categories(user_id, period_start, period_end);
+        if (!cats) {
+            return err(cats.error());
+        }
+        dto.top_expense_categories = std::move(*cats);
         return dto;
     }
 
 private:
+    using TimePoint = std::chrono::system_clock::time_point;
+
+    // Compute [first day of month 00:00 UTC, first day of next month 00:00 UTC)
+    // for the calendar month containing `now`. Uses std::chrono calendar types
+    // so it is correct across month/year boundaries without external libs.
+    //
+    // KNOWN LIMITATION: the month boundary is computed in UTC and does not yet
+    // honor UserPreference.timezone. For users far from UTC this can misfile
+    // transactions near midnight on the first/last day of the month. Applying
+    // the user's timezone offset here is deferred to the timezone-aware
+    // reporting work (needs a tz database); tracked as follow-up, not silently
+    // ignored.
+    [[nodiscard]] static std::pair<TimePoint, TimePoint> current_month_window(
+        TimePoint now) {
+        namespace ch = std::chrono;
+        const auto day_point = ch::floor<ch::days>(now);
+        const ch::year_month_day ymd{day_point};
+        // Add months via year_month (calendar-correct); adding months directly
+        // to sys_days would yield a meaningless fixed-length duration.
+        const ch::year_month this_month{ymd.year(), ymd.month()};
+        const ch::year_month next_month = this_month + ch::months{1};
+        const ch::year_month_day first{
+            this_month.year(), this_month.month(), ch::day{1}};
+        const ch::year_month_day next{
+            next_month.year(), next_month.month(), ch::day{1}};
+        const auto start = ch::sys_days{first};
+        const auto end = ch::sys_days{next};
+        return {TimePoint{start.time_since_epoch()},
+                TimePoint{end.time_since_epoch()}};
+    }
+
+    // Format `part / whole` as a one-decimal percentage string like "68.0%".
+    // whole == 0 yields "0.0%" (avoids divide-by-zero, no misleading share).
+    [[nodiscard]] static Result<std::string> format_percentage(
+        const domain::Decimal& part, const domain::Decimal& whole) {
+        if (whole.is_zero()) {
+            return std::string("0.0%");
+        }
+        auto hundred = domain::Decimal::from_integer(100);
+        if (!hundred) {
+            return err(from_domain(hundred.error()));
+        }
+        auto scaled = part.multiply(*hundred);
+        if (!scaled) {
+            return err(from_domain(scaled.error()));
+        }
+        auto pct = scaled->divide(whole);
+        if (!pct) {
+            return err(from_domain(pct.error()));
+        }
+        // Round to one decimal place: multiply by 10, truncate to integer via
+        // string, then reinsert the decimal point. Decimal has no direct
+        // round-to-scale, so format from the canonical string.
+        return format_one_decimal(*pct) + "%";
+    }
+
+    // Render a Decimal with exactly one fractional digit as a plain display
+    // string, e.g. 68 -> "68.0", 35.68 -> "35.6" (display-only truncation of
+    // extra digits; the canonical string is already trimmed and half-even
+    // rounded at the Decimal scale, so this only affects presentation).
+    [[nodiscard]] static std::string format_one_decimal(const domain::Decimal& d) {
+        std::string s = d.to_string();
+        const auto dot = s.find('.');
+        if (dot == std::string::npos) {
+            return s + ".0";
+        }
+        if (dot + 2 < s.size()) {
+            s = s.substr(0, dot + 2); // keep exactly one fractional digit
+        } else if (dot + 2 > s.size()) {
+            s += "0"; // pad to one fractional digit
+        }
+        return s;
+    }
+
+    // Human label for an AccountType (distribution is aggregated by type per
+    // 09 §2.1 rule 7, which defaults to AccountType/AccountCategory buckets).
+    [[nodiscard]] static std::string account_type_label(domain::AccountType t) {
+        switch (t) {
+        case domain::AccountType::Cash:          return "Cash";
+        case domain::AccountType::Savings:       return "Savings";
+        case domain::AccountType::Credit:        return "Credit";
+        case domain::AccountType::DigitalWallet: return "DigitalWallet";
+        case domain::AccountType::Investment:    return "Investment";
+        case domain::AccountType::Crypto:        return "Crypto";
+        case domain::AccountType::Other:         return "Other";
+        }
+        return "Other";
+    }
+
+    // Base-currency balance and share of total assets, aggregated by
+    // AccountType (not per-account). The percentage denominator is the total of
+    // positive (asset) balances, so a net-liability type shows a negative share
+    // — matching the REST example where Credit is "-3.7%".
+    [[nodiscard]] Result<std::vector<DistributionSliceDto>> asset_distribution(
+        domain::UserId user_id,
+        const std::string& /*base_code*/,
+        TimePoint now) {
+        auto pref = preferences_.find_by_user(user_id);
+        if (!pref) {
+            return err(from_repository(pref.error()));
+        }
+        const auto& base = pref->base_currency();
+
+        auto accounts = accounts_.find_active_by_user(user_id);
+        if (!accounts) {
+            return err(from_repository(accounts.error()));
+        }
+
+        auto zero = domain::Decimal::from_integer(0);
+        if (!zero) {
+            return err(from_domain(zero.error()));
+        }
+
+        // Aggregate by AccountType, preserving first-seen order for determinism.
+        std::vector<domain::AccountType> order;
+        std::map<int, domain::Decimal> by_type;
+        domain::Decimal asset_total = *zero;
+
+        for (const auto& account : *accounts) {
+            auto snapshot = accounts_.balance_of(account.id());
+            if (!snapshot) {
+                return err(from_repository(snapshot.error()));
+            }
+            auto converted = convert_to_base(snapshot->balance, base, now);
+            if (!converted) {
+                return err(converted.error());
+            }
+            const int key = static_cast<int>(account.type());
+            if (by_type.find(key) == by_type.end()) {
+                by_type.emplace(key, *zero);
+                order.push_back(account.type());
+            }
+            auto sum = by_type.at(key).add(converted->amount());
+            if (!sum) {
+                return err(from_domain(sum.error()));
+            }
+            by_type.at(key) = *sum;
+
+            // Positive balances contribute to the asset-share denominator.
+            if (converted->amount().is_positive()) {
+                auto asum = asset_total.add(converted->amount());
+                if (!asum) {
+                    return err(from_domain(asum.error()));
+                }
+                asset_total = *asum;
+            }
+        }
+
+        std::vector<DistributionSliceDto> result;
+        result.reserve(order.size());
+        for (const auto& type : order) {
+            const auto amount = by_type.at(static_cast<int>(type));
+            auto pct = format_percentage(amount, asset_total);
+            if (!pct) {
+                return err(pct.error());
+            }
+            DistributionSliceDto dto;
+            dto.label = account_type_label(type);
+            dto.amount = amount.to_string();
+            dto.percentage = *pct;
+            result.push_back(std::move(dto));
+        }
+        return result;
+    }
+
+    // Aggregate expense transactions by category over [from, to), largest first.
+    // Until ICategoryRepository exists the category name is the id string (the
+    // presentation layer resolves the human name); uncategorized expenses are
+    // grouped under an empty category id.
+    [[nodiscard]] Result<std::vector<CategoryBreakdownDto>> top_expense_categories(
+        domain::UserId user_id,
+        TimePoint from,
+        TimePoint to) {
+        auto pref = preferences_.find_by_user(user_id);
+        if (!pref) {
+            return err(from_repository(pref.error()));
+        }
+        const auto& base = pref->base_currency();
+
+        auto txs = transactions_.find_by_user(user_id, false);
+        if (!txs) {
+            return err(from_repository(txs.error()));
+        }
+
+        auto zero = domain::Decimal::from_integer(0);
+        if (!zero) {
+            return err(from_domain(zero.error()));
+        }
+
+        // Preserve first-seen order for determinism, keyed by optional category.
+        std::vector<std::optional<domain::CategoryId>> order;
+        std::map<std::int64_t, domain::Decimal> by_cat; // key: id value, -1 = none
+        domain::Decimal expense_total = *zero;
+
+        auto key_of = [](const std::optional<domain::CategoryId>& c) -> std::int64_t {
+            return c.has_value() ? c->value() : -1;
+        };
+
+        for (const auto& tx : *txs) {
+            if (tx.type() != domain::TransactionType::Expense &&
+                tx.type() != domain::TransactionType::Adjustment) {
+                continue; // income & transfers excluded from expense breakdown
+            }
+            if (tx.occurred_at() < from || tx.occurred_at() >= to) {
+                continue;
+            }
+            auto converted = convert_to_base(tx.amount(), base, tx.occurred_at());
+            if (!converted) {
+                return err(converted.error());
+            }
+            auto abs_amt =
+                converted->is_negative() ? converted->negated() : *converted;
+
+            const auto k = key_of(tx.category_id());
+            if (by_cat.find(k) == by_cat.end()) {
+                by_cat.emplace(k, *zero);
+                order.push_back(tx.category_id());
+            }
+            auto sum = by_cat.at(k).add(abs_amt.amount());
+            if (!sum) {
+                return err(from_domain(sum.error()));
+            }
+            by_cat.at(k) = *sum;
+
+            auto tsum = expense_total.add(abs_amt.amount());
+            if (!tsum) {
+                return err(from_domain(tsum.error()));
+            }
+            expense_total = *tsum;
+        }
+
+        std::vector<CategoryBreakdownDto> result;
+        result.reserve(order.size());
+        for (const auto& cat : order) {
+            const auto amount = by_cat.at(key_of(cat));
+            auto pct = format_percentage(amount, expense_total);
+            if (!pct) {
+                return err(pct.error());
+            }
+            CategoryBreakdownDto dto;
+            dto.category_id = cat;
+            dto.category_name = cat.has_value() ? cat->to_string() : "";
+            dto.amount = amount.to_string();
+            dto.percentage = *pct;
+            result.push_back(std::move(dto));
+        }
+        // Largest amount first. Compare by parsed Decimal to avoid string order.
+        std::sort(result.begin(), result.end(),
+                  [](const CategoryBreakdownDto& a, const CategoryBreakdownDto& b) {
+                      auto da = domain::Decimal::parse(a.amount);
+                      auto db = domain::Decimal::parse(b.amount);
+                      if (!da || !db) {
+                          return false;
+                      }
+                      return *da > *db;
+                  });
+        return result;
+    }
+
+    // Convert `amount` into `base` using rates observed at or before `at`.
+    //
+    // Fallback chain (all point-in-time, never future rates):
+    //   1. same currency               -> identity
+    //   2. direct   from -> base        -> multiply
+    //   3. reverse  base -> from        -> divide (avoids inverse rounding loss)
+    //   4. USD triangulation           -> USD->from & USD->base, cross-rate
+    //   5. otherwise                    -> error (missing rate; NOT latest)
+    //
+    // Reproducibility: we only ever call find_historical(at). We deliberately do
+    // NOT fall back to find_latest, which could return a rate fetched AFTER `at`
+    // and make a historical report non-reproducible. Callers wanting the current
+    // value pass `at = now()`, for which find_historical returns the newest rate
+    // at-or-before now (i.e. the current rate).
     [[nodiscard]] Result<domain::Money> convert_to_base(
         const domain::Money& amount,
         const domain::Currency& base,
@@ -180,33 +507,78 @@ private:
             return amount;
         }
 
-        // Prefer direct rate: 1 amount.currency = rate base
-        auto direct = rates_.find_historical(amount.currency(), base, at);
+        // Look up a rate at-or-before `at`. Only a genuine NotFound may fall
+        // through to the next fallback; any other repository error (e.g. a
+        // database failure) must abort and propagate as InfrastructureFailure,
+        // never be silently downgraded to "missing rate".
+        auto lookup = [this, at](const domain::Currency& b, const domain::Currency& t)
+            -> Result<std::optional<domain::ExchangeRate>> {
+            auto r = rates_.find_historical(b, t, at);
+            if (r) {
+                return std::optional<domain::ExchangeRate>(*r);
+            }
+            if (r.error().status == domain::RepositoryStatus::NotFound) {
+                return std::optional<domain::ExchangeRate>(std::nullopt);
+            }
+            return err(from_repository(r.error()));
+        };
+
+        // 2. Direct rate: 1 from = rate base.
+        auto direct = lookup(amount.currency(), base);
         if (!direct) {
-            direct = rates_.find_latest(amount.currency(), base);
+            return err(direct.error());
         }
-        if (direct) {
-            return map_domain(domain::CurrencyConversionService::convert(amount, *direct));
-        }
-
-        // Reverse pair: 1 base = rate amount.currency
-        // Convert by division to avoid inverse-rate rounding loss
-        // (e.g. 700 CNY / 7 USD/CNY = 100 USD exactly).
-        auto reverse = rates_.find_historical(base, amount.currency(), at);
-        if (!reverse) {
-            reverse = rates_.find_latest(base, amount.currency());
-        }
-        if (!reverse) {
-            return err(Error(ErrorCode::InvalidExchangeRate,
-                             "Missing exchange rate for report conversion",
-                             amount.currency().code() + "->" + base.code()));
+        if (direct->has_value()) {
+            return map_domain(domain::CurrencyConversionService::convert(amount, **direct));
         }
 
-        auto converted_amount = amount.amount().divide(reverse->rate());
-        if (!converted_amount) {
-            return err(from_domain(converted_amount.error()));
+        // 3. Reverse pair: 1 base = rate from. Convert by division to avoid the
+        //    rounding loss of inverting the rate first
+        //    (e.g. 700 CNY / 7 = 100 USD exactly).
+        auto reverse = lookup(base, amount.currency());
+        if (!reverse) {
+            return err(reverse.error());
         }
-        return domain::Money(*converted_amount, base);
+        if (reverse->has_value()) {
+            auto converted = amount.amount().divide((*reverse)->rate());
+            if (!converted) {
+                return err(from_domain(converted.error()));
+            }
+            return domain::Money(*converted, base);
+        }
+
+        // 4. USD triangulation for non-USD <-> non-USD pairs.
+        auto usd = domain::Currency::create("USD");
+        if (!usd) {
+            return err(from_domain(usd.error()));
+        }
+        const bool from_is_usd = (amount.currency() == *usd);
+        const bool base_is_usd = (base == *usd);
+        if (!from_is_usd && !base_is_usd) {
+            auto usd_to_from = lookup(*usd, amount.currency());
+            if (!usd_to_from) {
+                return err(usd_to_from.error());
+            }
+            auto usd_to_base = lookup(*usd, base);
+            if (!usd_to_base) {
+                return err(usd_to_base.error());
+            }
+            if (usd_to_from->has_value() && usd_to_base->has_value()) {
+                // cross_rate(USD->from, USD->base) yields from -> base.
+                auto cross = domain::CurrencyConversionService::cross_rate(
+                    **usd_to_from, **usd_to_base);
+                if (!cross) {
+                    return err(from_domain(cross.error()));
+                }
+                return map_domain(
+                    domain::CurrencyConversionService::convert(amount, *cross));
+            }
+        }
+
+        // 5. No usable point-in-time rate. Do not guess with a future/latest rate.
+        return err(Error(ErrorCode::InvalidExchangeRate,
+                         "Missing exchange rate for report conversion at the requested time",
+                         amount.currency().code() + "->" + base.code()));
     }
 
     domain::IAccountRepository& accounts_;

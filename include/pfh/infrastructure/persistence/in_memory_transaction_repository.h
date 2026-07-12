@@ -11,6 +11,7 @@
 #include "pfh/infrastructure/persistence/in_memory_store.h"
 #include <algorithm>
 #include <map>
+#include <set>
 #include <utility>
 
 namespace pfh::infrastructure {
@@ -38,12 +39,33 @@ public:
             "Transaction not found: " + id.to_string()));
     }
 
-    [[nodiscard]] domain::RepositoryResult<domain::TransactionId> save_single(
+    [[nodiscard]] domain::RepositoryResult<domain::Transaction> find_by_id_for_update(
+        domain::ITransactionContext& /*tx*/,
+        domain::TransactionId id) override {
+        // Single-threaded in-memory store: no real row lock to take, but the
+        // active-transaction requirement mirrors the PostgreSQL FOR UPDATE
+        // contract callers depend on for check-then-write serialization.
+        if (!store_.in_transaction) {
+            return std::unexpected(domain::RepositoryError::database(
+                "find_by_id_for_update requires an active transaction"));
+        }
+        return find_by_id(id);
+    }
+
+    [[nodiscard]] domain::RepositoryResult<domain::Transaction> save_single(
         domain::ITransactionContext& /*tx*/,
         const domain::Transaction& transaction) override {
         if (!store_.in_transaction) {
             return std::unexpected(domain::RepositoryError::database(
                 "save_single requires an active transaction"));
+        }
+
+        // Transfer legs may ONLY be written via save_transfer (as a validated
+        // aggregate). Reject standalone Transfer rows so no orphan leg can be
+        // created that bypasses the aggregate consistency rules.
+        if (transaction.type() == domain::TransactionType::Transfer) {
+            return std::unexpected(domain::RepositoryError::validation(
+                "Transfer transactions must be written via save_transfer, not save_single"));
         }
 
         // Ownership isolation: account must exist and belong to same user.
@@ -85,15 +107,15 @@ public:
             transaction.transfer_group_id(),
             transaction.created_at(),
             transaction.deleted_at());
-        store_.staged_transactions.insert_or_assign(id_value, std::move(stored));
+        store_.staged_transactions.insert_or_assign(id_value, stored);
 
         // Invalidate balance cache for this account (rebuild on next read).
         store_.staged_balance_cache.erase(transaction.account_id().value());
         store_.staged_deleted_balance_cache.push_back(transaction.account_id().value());
-        return domain::TransactionId(id_value);
+        return stored;
     }
 
-    [[nodiscard]] domain::RepositoryResult<domain::TransferGroupId> save_transfer(
+    [[nodiscard]] domain::RepositoryResult<domain::TransferPersistResult> save_transfer(
         domain::ITransactionContext& tx,
         const domain::TransferAggregate& transfer) override {
         if (!store_.in_transaction) {
@@ -124,12 +146,14 @@ public:
                 "Transfer sides must share transfer_group_id"));
         }
 
-        // Both accounts must exist and belong to the user.
-        if (auto check = ensure_account_owned_by(outgoing.account_id(), outgoing.user_id());
+        // Both accounts must exist, belong to the user, and their currency must
+        // match the corresponding leg's currency (a leg's currency is fixed by
+        // the account it lands on).
+        if (auto check = ensure_account_matches_leg(outgoing);
             !check.has_value()) {
             return std::unexpected(check.error());
         }
-        if (auto check = ensure_account_owned_by(incoming.account_id(), incoming.user_id());
+        if (auto check = ensure_account_matches_leg(incoming);
             !check.has_value()) {
             return std::unexpected(check.error());
         }
@@ -148,7 +172,10 @@ public:
         InMemoryTransferGroup group{
             assigned_group,
             outgoing.user_id(),
-            transfer.is_cross_currency() ? 1 : 2,
+            // Persist the exact input mode from the aggregate. Never infer it
+            // from currency equality (that mislabels Mode 2 cross-currency as
+            // Mode 1 and can never represent Mode 3).
+            static_cast<int>(transfer.mode()),
             transfer.rate()};
         store_.staged_transfer_groups.insert_or_assign(group_value, std::move(group));
 
@@ -213,7 +240,7 @@ public:
         store_.staged_deleted_balance_cache.push_back(outgoing.account_id().value());
         store_.staged_deleted_balance_cache.push_back(incoming.account_id().value());
 
-        return assigned_group;
+        return domain::TransferPersistResult{assigned_group, out_id, in_id};
     }
 
     [[nodiscard]] domain::RepositoryResult<std::vector<domain::Transaction>> find_by_account(
@@ -298,10 +325,55 @@ public:
         }
         auto merged = merge_transactions();
         for (const auto& [id, tx] : merged) {
-            if (tx.account_id() == account_id) {
+            // Only NON-transfer rows here. Transfer legs are removed as whole
+            // aggregates by physical_delete_transfers_touching_account so the
+            // counterpart leg and the transfer_groups row go with them.
+            if (tx.account_id() == account_id &&
+                tx.type() != domain::TransactionType::Transfer) {
                 store_.staged_transactions.erase(id);
                 store_.staged_deleted_transactions.push_back(id);
             }
+        }
+        return {};
+    }
+
+    [[nodiscard]] domain::RepositoryVoidResult physical_delete_transfers_touching_account(
+        domain::ITransactionContext& /*tx*/,
+        domain::AccountId account_id) override {
+        if (!store_.in_transaction) {
+            return std::unexpected(domain::RepositoryError::database(
+                "physical_delete_transfers_touching_account requires an active transaction"));
+        }
+        auto merged = merge_transactions();
+
+        // 1. Collect the transfer groups that have at least one leg on this
+        //    account.
+        std::set<std::int64_t> group_ids;
+        for (const auto& [id, tx] : merged) {
+            if (tx.type() == domain::TransactionType::Transfer &&
+                tx.account_id() == account_id &&
+                tx.transfer_group_id().has_value() &&
+                tx.transfer_group_id()->is_valid()) {
+                group_ids.insert(tx.transfer_group_id()->value());
+            }
+        }
+
+        // 2. Delete every leg belonging to those groups (both sides), then the
+        //    group rows themselves.
+        for (const auto& [id, tx] : merged) {
+            if (tx.type() == domain::TransactionType::Transfer &&
+                tx.transfer_group_id().has_value() &&
+                group_ids.count(tx.transfer_group_id()->value()) > 0) {
+                store_.staged_transactions.erase(id);
+                store_.staged_deleted_transactions.push_back(id);
+                // Invalidate the counterpart account's balance cache too.
+                store_.staged_balance_cache.erase(tx.account_id().value());
+                store_.staged_deleted_balance_cache.push_back(tx.account_id().value());
+            }
+        }
+        for (const auto gid : group_ids) {
+            store_.staged_transfer_groups.erase(gid);
+            store_.staged_deleted_transfer_groups.push_back(gid);
         }
         return {};
     }
@@ -355,6 +427,39 @@ private:
         if (acc->owner() != user_id) {
             return std::unexpected(domain::RepositoryError::validation(
                 "Account does not belong to user"));
+        }
+        return {};
+    }
+
+    // Ownership + currency-consistency check for a transfer leg: the account
+    // must exist, belong to the leg's user, and carry the leg's currency.
+    [[nodiscard]] domain::RepositoryVoidResult ensure_account_matches_leg(
+        const domain::Transaction& leg) const {
+        const domain::Account* acc = nullptr;
+        if (store_.in_transaction) {
+            if (auto it = store_.staged_accounts.find(leg.account_id().value());
+                it != store_.staged_accounts.end()) {
+                acc = &it->second;
+            }
+        }
+        if (acc == nullptr) {
+            if (auto it = store_.accounts.find(leg.account_id().value());
+                it != store_.accounts.end()) {
+                acc = &it->second;
+            }
+        }
+        if (acc == nullptr) {
+            return std::unexpected(domain::RepositoryError::not_found(
+                "Account not found: " + leg.account_id().to_string()));
+        }
+        if (acc->owner() != leg.user_id()) {
+            return std::unexpected(domain::RepositoryError::validation(
+                "Account does not belong to user"));
+        }
+        if (!(acc->currency() == leg.amount().currency())) {
+            return std::unexpected(domain::RepositoryError::validation(
+                "Transfer leg currency does not match account currency: " +
+                leg.amount().currency().code() + " vs " + acc->currency().code()));
         }
         return {};
     }

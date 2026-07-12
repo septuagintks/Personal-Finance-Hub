@@ -58,6 +58,7 @@ protected:
         UserId user;
         AccountId cash;
         AccountId savings;
+        AccountId cny;
     };
 
     FixtureIds seed_user_with_accounts(const std::string& username = "alice") {
@@ -95,6 +96,19 @@ protected:
                 return std::unexpected(savings_id.error());
             }
             ids.savings = *savings_id;
+
+            Account cny_wallet(
+                AccountId{},
+                ids.user,
+                "CNY Wallet",
+                AccountType::DigitalWallet,
+                "wallet",
+                ccy("CNY"));
+            auto cny_id = account_repo_->save(tx, cny_wallet);
+            if (!cny_id) {
+                return std::unexpected(cny_id.error());
+            }
+            ids.cny = *cny_id;
             return {};
         });
         EXPECT_TRUE(result.has_value()) << result.error().message;
@@ -358,6 +372,67 @@ TEST_F(RepositoryIntegrationTest, TransactionRepository_WhenSavingTransfer_Persi
     }
     EXPECT_EQ(negative_count, 1);
     EXPECT_EQ(positive_count, 1);
+
+    // Persisted transfer group must carry the exact input mode (Mode 2 here),
+    // not an inferred value.
+    ASSERT_EQ(store_->transfer_groups.size(), 1u);
+    EXPECT_EQ(store_->transfer_groups.begin()->second.transfer_mode,
+              static_cast<int>(TransferMode::OutgoingAndIncoming));
+}
+
+TEST_F(RepositoryIntegrationTest, TransactionRepository_WhenSaveSingleTransferType_Rejected) {
+    auto ids = seed_user_with_accounts();
+
+    auto write = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
+        // Attempt to write an orphan Transfer leg directly, bypassing the
+        // aggregate. This MUST be rejected.
+        Transaction orphan(
+            TransactionId{},
+            ids.user,
+            ids.cash,
+            money("100", "USD"),
+            TransactionType::Transfer,
+            sample_time(),
+            "orphan transfer leg");
+        auto saved = tx_repo_->save_single(tx, orphan);
+        if (!saved) {
+            return std::unexpected(saved.error());
+        }
+        return {};
+    });
+    ASSERT_FALSE(write.has_value());
+    EXPECT_EQ(write.error().status, RepositoryStatus::ValidationError);
+}
+
+TEST_F(RepositoryIntegrationTest, TransactionRepository_WhenSavingCrossCurrencyMode1_PersistsMode1) {
+    auto ids = seed_user_with_accounts();
+
+    auto write = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
+        // Mode 1 cross-currency: outgoing USD + rate => incoming CNY.
+        auto aggregate = TransferDomainService::build_from_outgoing_and_rate(
+            money("1000", "USD"),
+            ids.cash,
+            ids.cny,
+            rate("USD", "CNY", "7.18"),
+            ids.user,
+            sample_time(),
+            "cross move",
+            TransferGroupId{});
+        if (!aggregate) {
+            return std::unexpected(RepositoryError::validation(aggregate.error().message));
+        }
+        auto group = tx_repo_->save_transfer(tx, *aggregate);
+        if (!group) {
+            return std::unexpected(group.error());
+        }
+        return {};
+    });
+    ASSERT_TRUE(write.has_value()) << write.error().message;
+    ASSERT_EQ(store_->transfer_groups.size(), 1u);
+    // Cross-currency Mode 1 must persist as Mode 1, not be inferred as "cross => 1"
+    // coincidentally; the value comes from the aggregate's recorded mode.
+    EXPECT_EQ(store_->transfer_groups.begin()->second.transfer_mode,
+              static_cast<int>(TransferMode::OutgoingAndRate));
 }
 
 // ---- Exchange rate append-only + historical query ----

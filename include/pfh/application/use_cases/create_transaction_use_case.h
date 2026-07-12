@@ -11,7 +11,9 @@
 #include "pfh/domain/events/simple_domain_event.h"
 #include "pfh/domain/repositories/i_account_repository.h"
 #include "pfh/domain/repositories/i_transaction_repository.h"
+#include "pfh/domain/category.h"
 #include <memory>
+#include <optional>
 #include <utility>
 
 namespace pfh::application {
@@ -46,22 +48,9 @@ public:
             return err(from_domain(currency.error()));
         }
 
-        auto account = accounts_.find_by_id_for_user(cmd.account_id, cmd.user_id);
-        if (!account) {
-            return err(from_repository(account.error()));
-        }
-        if (account->is_archived()) {
-            return err(Error(ErrorCode::ArchivedAccountOperation,
-                             "Cannot post to archived account"));
-        }
-        if (!(account->currency() == *currency)) {
-            return err(Error::domain_rule_violation(
-                "Transaction currency must match account currency",
-                account->currency().code() + " != " + currency->code()));
-        }
-
         // Category board rule: if a category is attached, its board must match
         // the transaction type (Income->income, Expense/Adjustment->expense).
+        // This is pure input validation, so it stays outside the transaction.
         if (cmd.category_id.has_value()) {
             if (!cmd.category_board.has_value()) {
                 return err(Error::validation(
@@ -75,40 +64,67 @@ public:
         }
 
         domain::Money money(*amount_dec, *currency);
-        domain::Transaction tx(
-            domain::TransactionId{},
-            cmd.user_id,
-            cmd.account_id,
-            money,
-            cmd.type,
-            cmd.occurred_at,
-            cmd.description,
-            cmd.category_id);
 
-        domain::TransactionId created_id;
+        // Account load+validate and the write share one transaction, with the
+        // account row locked (SELECT ... FOR UPDATE) so a concurrent archive or
+        // currency change cannot slip between the check and the insert.
+        std::optional<domain::Transaction> persisted;
+        std::optional<Error> app_error;
         auto write = uow_.execute_in_transaction(
             [&](domain::ITransactionContext& tx_ctx) -> domain::RepositoryVoidResult {
+                auto account =
+                    accounts_.find_by_id_for_update(tx_ctx, cmd.account_id, cmd.user_id);
+                if (!account) {
+                    return std::unexpected(account.error());
+                }
+                if (account->is_archived()) {
+                    app_error = Error(ErrorCode::ArchivedAccountOperation,
+                                      "Cannot post to archived account");
+                    return std::unexpected(domain::RepositoryError::validation(
+                        "archived account"));
+                }
+                if (!(account->currency() == *currency)) {
+                    app_error = Error::domain_rule_violation(
+                        "Transaction currency must match account currency",
+                        account->currency().code() + " != " + currency->code());
+                    return std::unexpected(domain::RepositoryError::validation(
+                        "currency mismatch"));
+                }
+
+                domain::Transaction tx(
+                    domain::TransactionId{},
+                    cmd.user_id,
+                    cmd.account_id,
+                    money,
+                    cmd.type,
+                    cmd.occurred_at,
+                    cmd.description,
+                    cmd.category_id);
+
+                // save_single returns the persisted entity, so we build the DTO
+                // from it directly — no post-commit re-read (which an RLS-scoped
+                // connection might not see, and whose failure would falsely fail
+                // an already-committed write).
                 auto saved = transactions_.save_single(tx_ctx, tx);
                 if (!saved) {
                     return std::unexpected(saved.error());
                 }
-                created_id = *saved;
+                persisted = std::move(*saved);
                 uow_.register_event(std::make_shared<domain::SimpleDomainEvent>(
                     "TransactionCreated",
                     "Transaction",
-                    created_id.to_string(),
+                    persisted->id().to_string(),
                     "{\"account_id\":" + cmd.account_id.to_string() + "}"));
                 return {};
             });
         if (!write) {
+            if (app_error.has_value()) {
+                return err(*app_error);
+            }
             return err(from_repository(write.error()));
         }
 
-        auto stored = transactions_.find_by_id(created_id);
-        if (!stored) {
-            return err(from_repository(stored.error()));
-        }
-        return to_dto(*stored);
+        return to_dto(*persisted);
     }
 
 private:

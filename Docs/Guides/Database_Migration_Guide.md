@@ -36,6 +36,19 @@ Flyway enforces strict naming:
 | V2      | `V2__seed_initial_currencies.sql`      | Seed fiat + controlled crypto metadata |
 | V3      | `V3__seed_system_category_templates.sql` | Seed global category template pool     |
 
+> **Pre-release note on V1:** `V1__initial_schema.sql` was revised in place
+> during Phase 1 development (multi-tenant `user_id` constraints and Row Level
+> Security hardening) after an earlier version had already been authored. Flyway
+> treats applied migrations as immutable and validates them by checksum, so any
+> database that applied the earlier V1 will fail startup with a **checksum
+> mismatch** on the current file. Because Phase 1 has not shipped, the intended
+> resolution is to **drop and recreate** the affected development database (all
+> V1–V3 re-run cleanly on an empty DB), or, if the data must be kept, run
+> `flyway repair` to re-baseline the checksum after confirming the schema
+> already matches the current V1. From the first released environment onward,
+> V1 is frozen: all further schema changes must be additive `V4+` migrations
+> (see §6, §7.1).
+
 ---
 
 ## 4. Local Development Setup

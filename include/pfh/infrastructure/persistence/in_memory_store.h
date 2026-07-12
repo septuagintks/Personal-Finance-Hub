@@ -120,6 +120,7 @@ struct InMemoryStore {
     std::vector<std::int64_t> staged_deleted_accounts;
     std::vector<std::int64_t> staged_deleted_transactions;
     std::vector<std::int64_t> staged_deleted_balance_cache;
+    std::vector<std::int64_t> staged_deleted_transfer_groups;
 };
 
 } // namespace pfh::infrastructure

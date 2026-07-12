@@ -29,9 +29,18 @@ struct BalanceSnapshot {
     AccountId account_id;
     Money balance;
     Transaction::TimePoint as_of;
+    // Id of the newest transaction included in this balance; invalid (0) when
+    // the account has no transactions yet. Surfaced by the REST balance
+    // endpoint (10_REST_API_Design §2.2 lastTransactionId).
+    TransactionId last_transaction_id{};
 
     BalanceSnapshot(AccountId acc, Money bal, Transaction::TimePoint t)
         : account_id(acc), balance(std::move(bal)), as_of(t) {}
+
+    BalanceSnapshot(AccountId acc, Money bal, Transaction::TimePoint t,
+                    TransactionId last_tx)
+        : account_id(acc), balance(std::move(bal)), as_of(t),
+          last_transaction_id(last_tx) {}
 };
 
 /// @brief Pure domain service for balance calculation.
