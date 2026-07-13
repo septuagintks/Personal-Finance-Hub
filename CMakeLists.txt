@@ -92,8 +92,18 @@ endif()
 # Dependencies
 # =============================================================================
 
-# find_package(Drogon REQUIRED)     # Added in P1-S10
-# find_package(PostgreSQL REQUIRED)  # Added in P1-S07
+# PostgreSQL persistence: optional for local development without a database,
+# required for production builds. When OFF, only In-Memory repositories compile.
+option(PFH_BUILD_POSTGRESQL "Build PostgreSQL persistence adapters" OFF)
+
+if(PFH_BUILD_POSTGRESQL)
+    find_package(Drogon REQUIRED)
+    find_package(PostgreSQL REQUIRED)
+    add_compile_definitions(PFH_HAS_POSTGRESQL)
+    message(STATUS "PostgreSQL persistence: ENABLED")
+else()
+    message(STATUS "PostgreSQL persistence: DISABLED (In-Memory only)")
+endif()
 
 # Resolves spdlog, nlohmann_json and GoogleTest via find_package with a
 # FetchContent fallback (see cmake/Dependencies.cmake).
@@ -129,11 +139,26 @@ set(PFH_APPLICATION_SOURCES
 )
 
 # Infrastructure Layer - External services, persistence, etc.
+# Currently header-only In-Memory repositories live in include/.
+# PostgreSQL implementations added in P1-S10-03, guarded by PFH_HAS_POSTGRESQL.
 set(PFH_INFRASTRUCTURE_SOURCES
-    # Configuration and logging (header-only for now)
-    # src/infrastructure/config.cpp  # Header-only
-    # src/infrastructure/logger.cpp  # Header-only
+    src/infrastructure/placeholder.cpp
 )
+
+if(PFH_HAS_POSTGRESQL)
+    list(APPEND PFH_INFRASTRUCTURE_SOURCES
+        src/infrastructure/persistence/drogon_transaction_context.cpp
+        src/infrastructure/persistence/drogon_unit_of_work.cpp
+        src/infrastructure/persistence/account_repository_impl.cpp
+        src/infrastructure/persistence/transaction_repository_impl.cpp
+        src/infrastructure/persistence/category_repository_impl.cpp
+        src/infrastructure/persistence/user_repository_impl.cpp
+        src/infrastructure/persistence/user_preference_repository_impl.cpp
+        src/infrastructure/persistence/exchange_rate_repository_impl.cpp
+        src/infrastructure/persistence/postgres_result_set.cpp
+        src/infrastructure/persistence/rls_session.cpp
+    )
+endif()
 
 # Presentation Layer - REST API controllers
 set(PFH_PRESENTATION_SOURCES
@@ -148,17 +173,30 @@ set(PFH_PRESENTATION_SOURCES
 add_library(pfh_domain STATIC ${PFH_DOMAIN_SOURCES})
 target_include_directories(pfh_domain PUBLIC ${PFH_INCLUDE_DIR})
 
-# Application Library
+# Application Layer - currently header-only use cases
+# Uncomment when .cpp files are extracted
 # add_library(pfh_application STATIC ${PFH_APPLICATION_SOURCES})
 # target_link_libraries(pfh_application PUBLIC pfh_domain)
 
-# Infrastructure Library
-# add_library(pfh_infrastructure STATIC ${PFH_INFRASTRUCTURE_SOURCES})
-# target_link_libraries(pfh_infrastructure PUBLIC pfh_domain)
+# Infrastructure Library - In-Memory (always) + PostgreSQL (when PFH_BUILD_POSTGRESQL=ON)
+add_library(pfh_infrastructure STATIC ${PFH_INFRASTRUCTURE_SOURCES})
+target_include_directories(pfh_infrastructure PUBLIC ${PFH_INCLUDE_DIR})
+target_link_libraries(pfh_infrastructure PUBLIC
+    pfh_domain
+    spdlog::spdlog
+    nlohmann_json::nlohmann_json
+)
 
-# Presentation Library
+if(PFH_HAS_POSTGRESQL)
+    target_link_libraries(pfh_infrastructure PUBLIC
+        Drogon::Drogon
+        PostgreSQL::PostgreSQL
+    )
+endif()
+
+# Presentation Library - Drogon controllers (future)
 # add_library(pfh_presentation STATIC ${PFH_PRESENTATION_SOURCES})
-# target_link_libraries(pfh_presentation PUBLIC pfh_application)
+# target_link_libraries(pfh_presentation PUBLIC pfh_application pfh_infrastructure)
 
 # =============================================================================
 # Executable Target
@@ -169,22 +207,11 @@ add_executable(pfh_server
 )
 
 target_link_libraries(pfh_server PRIVATE
+    pfh_domain
+    pfh_infrastructure
     spdlog::spdlog
     nlohmann_json::nlohmann_json
 )
-
-target_include_directories(pfh_server PRIVATE
-    ${PFH_INCLUDE_DIR}
-)
-
-# target_link_libraries(pfh_server PRIVATE
-#     pfh_presentation
-#     pfh_application
-#     pfh_infrastructure
-#     pfh_domain
-#     # Drogon::Drogon
-#     # spdlog::spdlog
-# )
 
 # =============================================================================
 # Testing
@@ -232,4 +259,8 @@ message(STATUS "Project Version: ${PROJECT_VERSION}")
 message(STATUS "C++ Standard: C++${CMAKE_CXX_STANDARD}")
 message(STATUS "Build Type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "Compiler: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
+if(PFH_HAS_POSTGRESQL)
+    message(STATUS "PostgreSQL: ${PostgreSQL_VERSION_STRING}")
+    message(STATUS "Drogon: ${Drogon_VERSION}")
+endif()
 message(STATUS "=============================================================")
