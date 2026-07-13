@@ -26,6 +26,16 @@ struct TransferPersistResult {
     TransactionId incoming_id;
 };
 
+/// @brief Persisted transfer aggregate read model. Amounts in transactions use
+/// storage signs; Application maps them back to REST magnitudes.
+struct TransferSnapshot {
+    TransferGroupId group_id;
+    UserId user_id;
+    int transfer_mode = 0;
+    std::optional<Decimal> exchange_rate;
+    std::vector<Transaction> transactions;
+};
+
 class ITransactionRepository {
 public:
     virtual ~ITransactionRepository() = default;
@@ -59,6 +69,7 @@ public:
         ITransactionContext& tx,
         const TransferAggregate& transfer) = 0;
 
+    /// @brief Find account transactions in the half-open range [from, to).
     [[nodiscard]] virtual RepositoryResult<std::vector<Transaction>> find_by_account(
         AccountId account_id,
         std::optional<std::chrono::system_clock::time_point> from = std::nullopt,
@@ -68,6 +79,10 @@ public:
     [[nodiscard]] virtual RepositoryResult<std::vector<Transaction>> find_by_user(
         UserId user_id,
         bool include_deleted = false) = 0;
+
+    [[nodiscard]] virtual RepositoryResult<TransferSnapshot> find_transfer_by_group(
+        TransferGroupId group_id,
+        UserId user_id) = 0;
 
     [[nodiscard]] virtual RepositoryVoidResult soft_delete(
         ITransactionContext& tx,

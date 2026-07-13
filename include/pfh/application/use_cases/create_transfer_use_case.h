@@ -7,6 +7,7 @@
 #include "pfh/application/dto.h"
 #include "pfh/application/error.h"
 #include "pfh/application/error_mapping.h"
+#include "pfh/application/input_constraints.h"
 #include "pfh/application/persistence/i_unit_of_work.h"
 #include "pfh/domain/events/domain_events.h"
 #include "pfh/domain/repositories/i_account_repository.h"
@@ -137,8 +138,10 @@ public:
         dto.transfer_group_id = persisted.group_id;
         dto.outgoing_transaction_id = persisted.outgoing_id;
         dto.incoming_transaction_id = persisted.incoming_id;
-        dto.outgoing_amount = aggregate->outgoing().amount().to_string();
-        dto.incoming_amount = aggregate->incoming().amount().to_string();
+        dto.outgoing_amount =
+            aggregate->outgoing().amount().amount().to_string();
+        dto.incoming_amount =
+            aggregate->incoming().amount().amount().to_string();
         if (aggregate->rate().has_value()) {
             dto.rate = aggregate->rate()->rate().to_string();
         }
@@ -154,6 +157,10 @@ private:
         if (!cmd.user_id.is_valid() || !cmd.source_account_id.is_valid() ||
             !cmd.target_account_id.is_valid()) {
             return err(Error::validation("user and transfer account ids must be valid"));
+        }
+        if (cmd.description.size() > kMaxDescriptionLength) {
+            return err(Error::validation(
+                "description exceeds the maximum length"));
         }
         if (cmd.source_account_id == cmd.target_account_id) {
             return err(Error::validation("source and target accounts must differ"));
@@ -244,8 +251,9 @@ private:
         auto parse_money = [](const std::string& amount,
                               const domain::Currency& currency)
             -> Result<domain::Money> {
-            if (amount.empty()) {
-                return err(Error::validation("amount is required"));
+            if (!is_plain_decimal_string(amount, false)) {
+                return err(Error::validation(
+                    "amount must be a positive plain decimal string"));
             }
             auto d = domain::Decimal::parse_numeric_20_8(amount);
             if (!d) {
@@ -287,6 +295,10 @@ private:
             auto out = parse_money(cmd.outgoing_amount, source.currency());
             if (!out) {
                 return err(out.error());
+            }
+            if (!is_plain_decimal_string(cmd.rate, false)) {
+                return err(Error::validation(
+                    "rate must be a positive plain decimal string"));
             }
             auto rate_dec = domain::Decimal::parse_numeric_20_10(cmd.rate);
             if (!rate_dec) {
@@ -336,6 +348,10 @@ private:
             auto in = parse_money(cmd.incoming_amount, target.currency());
             if (!in) {
                 return err(in.error());
+            }
+            if (!is_plain_decimal_string(cmd.rate, false)) {
+                return err(Error::validation(
+                    "rate must be a positive plain decimal string"));
             }
             auto rate_dec = domain::Decimal::parse_numeric_20_10(cmd.rate);
             if (!rate_dec) {

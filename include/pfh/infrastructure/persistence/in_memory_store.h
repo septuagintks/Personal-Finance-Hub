@@ -16,6 +16,7 @@
 #include "pfh/domain/audit_log.h"
 #include "pfh/domain/category.h"
 #include "pfh/domain/exchange_rate.h"
+#include "pfh/domain/tag.h"
 #include "pfh/domain/transaction.h"
 #include "pfh/domain/user.h"
 #include "pfh/domain/user_preference.h"
@@ -23,6 +24,7 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -121,12 +123,16 @@ struct InMemoryStore {
     std::int64_t next_refresh_token_id = 1;
 
     std::int64_t next_category_id = 1;
+    std::int64_t next_tag_id = 1;
 
     std::map<std::int64_t, InMemoryUserRecord> users;
     std::map<std::int64_t, domain::UserPreference> preferences;
     std::map<std::int64_t, domain::Account> accounts;
     std::map<std::int64_t, domain::Transaction> transactions;
     std::map<std::int64_t, domain::Category> categories;
+    std::map<std::int64_t, domain::SystemCategoryTemplate> category_templates;
+    std::map<std::int64_t, domain::Tag> tags;
+    std::map<std::int64_t, std::set<std::int64_t>> transaction_tag_relations;
     std::map<std::int64_t, InMemoryTransferGroup> transfer_groups;
     std::map<std::int64_t, InMemoryBalanceCache> balance_cache;
     // Append-only: key is exchange_rate id, order of insertion preserved by map id.
@@ -145,6 +151,8 @@ struct InMemoryStore {
     std::map<std::int64_t, domain::Account> staged_accounts;
     std::map<std::int64_t, domain::Transaction> staged_transactions;
     std::map<std::int64_t, domain::Category> staged_categories;
+    std::map<std::int64_t, domain::Tag> staged_tags;
+    std::map<std::int64_t, std::set<std::int64_t>> staged_transaction_tag_relations;
     std::map<std::int64_t, InMemoryTransferGroup> staged_transfer_groups;
     std::map<std::int64_t, InMemoryBalanceCache> staged_balance_cache;
     std::map<std::int64_t, domain::ExchangeRate> staged_exchange_rates;
@@ -158,6 +166,7 @@ struct InMemoryStore {
     std::vector<std::int64_t> staged_deleted_balance_cache;
     std::vector<std::int64_t> staged_deleted_transfer_groups;
     std::vector<std::int64_t> staged_deleted_categories;
+    std::vector<std::int64_t> staged_deleted_tags;
 };
 
 } // namespace pfh::infrastructure

@@ -1,0 +1,550 @@
+// Personal Finance Hub - Foundational Resource Controllers
+
+#include "pfh/presentation/controllers/resource_controllers.h"
+
+#include "pfh/application/use_cases/delete_account_use_case.h"
+#include "pfh/presentation/http/http_response_mapper.h"
+#include "pfh/presentation/http/json_request_parser.h"
+#include "pfh/presentation/http/time_codec.h"
+
+#include <nlohmann/json.hpp>
+
+#include <charconv>
+#include <cstdint>
+#include <iomanip>
+#include <optional>
+#include <set>
+#include <sstream>
+#include <string>
+#include <string_view>
+#include <system_error>
+#include <vector>
+
+namespace pfh::presentation {
+
+namespace {
+
+using Json = nlohmann::json;
+
+[[nodiscard]] std::string currency_catalog_etag(
+    const std::vector<application::CurrencyMetadataDto>& currencies) {
+    std::uint64_t hash = 14695981039346656037ULL;
+    const auto mix_byte = [&](std::uint8_t byte) {
+        hash ^= byte;
+        hash *= 1099511628211ULL;
+    };
+    const auto mix_text = [&](std::string_view value) {
+        auto size = static_cast<std::uint64_t>(value.size());
+        for (int shift = 0; shift < 64; shift += 8) {
+            mix_byte(static_cast<std::uint8_t>(size >> shift));
+        }
+        for (const char value_byte : value) {
+            mix_byte(static_cast<std::uint8_t>(
+                static_cast<unsigned char>(value_byte)));
+        }
+    };
+    for (const auto& currency : currencies) {
+        mix_text(currency.code);
+        mix_text(currency.symbol);
+        mix_text(std::to_string(currency.precision));
+        mix_text(currency.display_name);
+        mix_text(currency.is_crypto ? "1" : "0");
+    }
+
+    std::ostringstream result;
+    result << "W/\"pfh-currency-" << std::hex << std::setfill('0')
+           << std::setw(16) << hash << '\"';
+    return result.str();
+}
+
+[[nodiscard]] application::Result<domain::UserId> require_user(
+    const HttpRequest& request) {
+    if (!request.identity.has_value() ||
+        !request.identity->access_claims.user_id.is_valid()) {
+        return application::err(application::Error::unauthorized());
+    }
+    return request.identity->access_claims.user_id;
+}
+
+[[nodiscard]] std::string account_type_text(domain::AccountType type) {
+    switch (type) {
+    case domain::AccountType::Cash: return "cash";
+    case domain::AccountType::Savings: return "savings";
+    case domain::AccountType::Credit: return "credit";
+    case domain::AccountType::DigitalWallet: return "digital_wallet";
+    case domain::AccountType::Investment: return "investment";
+    case domain::AccountType::Crypto: return "crypto";
+    case domain::AccountType::Other: return "other";
+    }
+    return "other";
+}
+
+[[nodiscard]] application::Result<domain::AccountType> parse_account_type(
+    const std::string& value) {
+    if (value == "cash") return domain::AccountType::Cash;
+    if (value == "savings") return domain::AccountType::Savings;
+    if (value == "credit") return domain::AccountType::Credit;
+    if (value == "digital_wallet") return domain::AccountType::DigitalWallet;
+    if (value == "investment") return domain::AccountType::Investment;
+    if (value == "crypto") return domain::AccountType::Crypto;
+    if (value == "other") return domain::AccountType::Other;
+    return application::err(application::Error::validation(
+        "type is not a supported account type"));
+}
+
+[[nodiscard]] std::string account_category_text(domain::AccountCategory value) {
+    return value == domain::AccountCategory::Asset ? "asset" : "liability";
+}
+
+[[nodiscard]] std::string board_text(domain::CategoryBoard value) {
+    return value == domain::CategoryBoard::Income ? "income" : "expense";
+}
+
+[[nodiscard]] application::Result<domain::CategoryBoard> parse_board(
+    const std::string& value) {
+    if (value == "income") return domain::CategoryBoard::Income;
+    if (value == "expense") return domain::CategoryBoard::Expense;
+    return application::err(application::Error::validation(
+        "board must be income or expense"));
+}
+
+[[nodiscard]] std::string source_text(domain::CategorySource value) {
+    return value == domain::CategorySource::System ? "system" : "user";
+}
+
+[[nodiscard]] Json account_json(const application::AccountDto& value) {
+    return Json{
+        {"id", value.id.value()},
+        {"name", value.name},
+        {"type", account_type_text(value.type)},
+        {"subtype", value.subtype},
+        {"category", account_category_text(value.category)},
+        {"currencyCode", value.currency_code},
+        {"description", value.description},
+        {"isArchived", value.is_archived},
+        {"version", value.version}};
+}
+
+[[nodiscard]] Json category_json(const application::CategoryDto& value) {
+    Json result{
+        {"id", value.id.value()},
+        {"name", value.name},
+        {"board", board_text(value.board)},
+        {"source", source_text(value.source)},
+        {"parentId", value.parent_id.has_value()
+            ? Json(value.parent_id->value()) : Json(nullptr)},
+        {"templateId", value.template_id.has_value()
+            ? Json(*value.template_id) : Json(nullptr)},
+        {"sortOrder", value.sort_order}};
+    return result;
+}
+
+[[nodiscard]] Json category_tree_json(
+    const application::CategoryTreeDto& value) {
+    auto result = category_json(value);
+    result["children"] = Json::array();
+    for (const auto& child : value.children) {
+        result["children"].push_back(category_tree_json(child));
+    }
+    return result;
+}
+
+[[nodiscard]] Json tag_json(const application::TagDto& value) {
+    return Json{{"id", value.id.value()}, {"name", value.name}};
+}
+
+[[nodiscard]] std::string theme_text(domain::ThemeMode value) {
+    switch (value) {
+    case domain::ThemeMode::System: return "system";
+    case domain::ThemeMode::Light: return "light";
+    case domain::ThemeMode::Dark: return "dark";
+    }
+    return "system";
+}
+
+[[nodiscard]] std::string home_page_text(domain::HomePage value) {
+    switch (value) {
+    case domain::HomePage::Dashboard: return "dashboard";
+    case domain::HomePage::Transactions: return "transactions";
+    case domain::HomePage::Reports: return "reports";
+    case domain::HomePage::Accounts: return "accounts";
+    }
+    return "dashboard";
+}
+
+[[nodiscard]] std::string report_period_text(domain::ReportPeriod value) {
+    switch (value) {
+    case domain::ReportPeriod::CurrentMonth: return "current_month";
+    case domain::ReportPeriod::LastMonth: return "last_month";
+    case domain::ReportPeriod::Last3Months: return "last_3_months";
+    case domain::ReportPeriod::CurrentYear: return "current_year";
+    case domain::ReportPeriod::Custom: return "custom";
+    }
+    return "current_month";
+}
+
+[[nodiscard]] Json preference_json(const application::UserPreferenceDto& value) {
+    return Json{
+        {"baseCurrency", value.base_currency},
+        {"locale", value.locale},
+        {"timezone", value.timezone},
+        {"dateFormat", value.date_format},
+        {"numberFormat", value.number_format},
+        {"theme", theme_text(value.theme)},
+        {"defaultHomePage", home_page_text(value.default_home_page)},
+        {"defaultReportPeriod", report_period_text(value.default_report_period)}};
+}
+
+template <typename Enum>
+[[nodiscard]] application::Result<Enum> invalid_enum(const std::string& field) {
+    return application::err(application::Error::validation(
+        field + " has an unsupported value"));
+}
+
+[[nodiscard]] application::Result<domain::ThemeMode> parse_theme(
+    const std::string& value) {
+    if (value == "system") return domain::ThemeMode::System;
+    if (value == "light") return domain::ThemeMode::Light;
+    if (value == "dark") return domain::ThemeMode::Dark;
+    return invalid_enum<domain::ThemeMode>("theme");
+}
+
+[[nodiscard]] application::Result<domain::HomePage> parse_home_page(
+    const std::string& value) {
+    if (value == "dashboard") return domain::HomePage::Dashboard;
+    if (value == "transactions") return domain::HomePage::Transactions;
+    if (value == "reports") return domain::HomePage::Reports;
+    if (value == "accounts") return domain::HomePage::Accounts;
+    return invalid_enum<domain::HomePage>("defaultHomePage");
+}
+
+[[nodiscard]] application::Result<domain::ReportPeriod> parse_report_period(
+    const std::string& value) {
+    if (value == "current_month") return domain::ReportPeriod::CurrentMonth;
+    if (value == "last_month") return domain::ReportPeriod::LastMonth;
+    if (value == "last_3_months") return domain::ReportPeriod::Last3Months;
+    if (value == "current_year") return domain::ReportPeriod::CurrentYear;
+    if (value == "custom") return domain::ReportPeriod::Custom;
+    return invalid_enum<domain::ReportPeriod>("defaultReportPeriod");
+}
+
+[[nodiscard]] application::Result<int> parse_confirmations(
+    const HttpRequest& request) {
+    const auto found = request.query.find("confirmations");
+    if (found == request.query.end()) {
+        return application::err(application::Error::validation(
+            "confirmations query parameter is required"));
+    }
+    int value = 0;
+    const auto result = std::from_chars(
+        found->second.data(), found->second.data() + found->second.size(), value);
+    if (result.ec != std::errc{} ||
+        result.ptr != found->second.data() + found->second.size()) {
+        return application::err(application::Error::validation(
+            "confirmations must be an integer"));
+    }
+    return value;
+}
+
+} // namespace
+
+HttpResponse AccountController::list(const HttpRequest& request) {
+    auto user = require_user(request);
+    if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
+    auto result = service_.list_accounts(*user);
+    if (!result) return HttpResponseMapper::error(result.error(), request.trace_id);
+    Json body = Json::array();
+    for (const auto& account : *result) body.push_back(account_json(account));
+    return HttpResponseMapper::json(200, body);
+}
+
+HttpResponse AccountController::create(const HttpRequest& request) {
+    auto user = require_user(request);
+    if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
+    auto body = JsonRequestParser::parse_object(request);
+    if (!body) return HttpResponseMapper::error(body.error(), request.trace_id);
+    if (auto fields = JsonRequestParser::reject_unknown_fields(
+            *body, {"name", "type", "subtype", "currencyCode", "description"});
+        !fields) {
+        return HttpResponseMapper::error(fields.error(), request.trace_id);
+    }
+    auto name = JsonRequestParser::required_string(*body, "name", 128);
+    auto type_text = JsonRequestParser::required_string(*body, "type", 32);
+    auto subtype = JsonRequestParser::required_string(*body, "subtype", 64);
+    auto currency = JsonRequestParser::required_string(*body, "currencyCode", 10);
+    auto description = JsonRequestParser::optional_string_allow_empty(
+        *body, "description", 4096);
+    if (!name) return HttpResponseMapper::error(name.error(), request.trace_id);
+    if (!type_text) return HttpResponseMapper::error(type_text.error(), request.trace_id);
+    if (!subtype) return HttpResponseMapper::error(subtype.error(), request.trace_id);
+    if (!currency) return HttpResponseMapper::error(currency.error(), request.trace_id);
+    if (!description) return HttpResponseMapper::error(description.error(), request.trace_id);
+    auto type = parse_account_type(*type_text);
+    if (!type) return HttpResponseMapper::error(type.error(), request.trace_id);
+
+    auto result = service_.create_account(application::CreateAccountCommand{
+        *user, *name, *type, *subtype, *currency, description->value_or("")});
+    return result
+        ? HttpResponseMapper::json(201, account_json(*result))
+        : HttpResponseMapper::error(result.error(), request.trace_id);
+}
+
+HttpResponse AccountController::balance(
+    const HttpRequest& request, std::string_view account_id) {
+    auto user = require_user(request);
+    auto id = JsonRequestParser::path_id<domain::AccountId>(account_id, "accountId");
+    if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
+    if (!id) return HttpResponseMapper::error(id.error(), request.trace_id);
+    auto result = service_.account_balance(*user, *id);
+    if (!result) return HttpResponseMapper::error(result.error(), request.trace_id);
+    return HttpResponseMapper::json(200, Json{
+        {"accountId", result->account_id.value()},
+        {"currencyCode", result->currency_code},
+        {"balance", result->amount},
+        {"lastTransactionId", result->last_transaction_id.has_value()
+            ? Json(result->last_transaction_id->value()) : Json(nullptr)},
+        {"updatedAt", TimeCodec::format_rfc3339(result->updated_at)}});
+}
+
+HttpResponse AccountController::archive(
+    const HttpRequest& request, std::string_view account_id) {
+    auto user = require_user(request);
+    auto id = JsonRequestParser::path_id<domain::AccountId>(account_id, "accountId");
+    if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
+    if (!id) return HttpResponseMapper::error(id.error(), request.trace_id);
+    auto result = service_.archive_account(
+        application::ArchiveAccountCommand{*user, *id, std::nullopt});
+    return result ? HttpResponseMapper::no_content()
+                  : HttpResponseMapper::error(result.error(), request.trace_id);
+}
+
+HttpResponse AccountController::dangerous_delete(
+    const HttpRequest& request, std::string_view account_id) {
+    auto user = require_user(request);
+    auto id = JsonRequestParser::path_id<domain::AccountId>(account_id, "accountId");
+    auto confirmations = parse_confirmations(request);
+    if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
+    if (!id) return HttpResponseMapper::error(id.error(), request.trace_id);
+    if (!confirmations) {
+        return HttpResponseMapper::error(confirmations.error(), request.trace_id);
+    }
+    auto result = service_.delete_account(
+        application::DeleteAccountCommand{*user, *id, *confirmations});
+    return result ? HttpResponseMapper::no_content()
+                  : HttpResponseMapper::error(result.error(), request.trace_id);
+}
+
+HttpResponse CategoryController::list(const HttpRequest& request) {
+    auto user = require_user(request);
+    if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
+    std::optional<domain::CategoryBoard> board;
+    if (const auto found = request.query.find("board"); found != request.query.end()) {
+        auto parsed = parse_board(found->second);
+        if (!parsed) return HttpResponseMapper::error(parsed.error(), request.trace_id);
+        board = *parsed;
+    }
+    auto result = service_.list_categories(*user, board);
+    if (!result) return HttpResponseMapper::error(result.error(), request.trace_id);
+    Json body = Json::array();
+    for (const auto& category : *result) {
+        body.push_back(category_tree_json(category));
+    }
+    return HttpResponseMapper::json(200, body);
+}
+
+HttpResponse CategoryController::create(const HttpRequest& request) {
+    auto user = require_user(request);
+    if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
+    auto body = JsonRequestParser::parse_object(request);
+    if (!body) return HttpResponseMapper::error(body.error(), request.trace_id);
+    if (auto fields = JsonRequestParser::reject_unknown_fields(
+            *body, {"board", "name", "parentId", "templateId"}); !fields) {
+        return HttpResponseMapper::error(fields.error(), request.trace_id);
+    }
+    auto board_text_value = JsonRequestParser::optional_string(*body, "board", 16);
+    auto name = JsonRequestParser::optional_string(*body, "name", 128);
+    auto parent = JsonRequestParser::optional_id<domain::CategoryId>(*body, "parentId");
+    if (!board_text_value) return HttpResponseMapper::error(board_text_value.error(), request.trace_id);
+    if (!name) return HttpResponseMapper::error(name.error(), request.trace_id);
+    if (!parent) return HttpResponseMapper::error(parent.error(), request.trace_id);
+    std::optional<domain::CategoryBoard> board;
+    if (board_text_value->has_value()) {
+        auto parsed = parse_board(**board_text_value);
+        if (!parsed) return HttpResponseMapper::error(parsed.error(), request.trace_id);
+        board = *parsed;
+    }
+    std::optional<std::int64_t> template_id;
+    if (const auto found = body->find("templateId");
+        found != body->end() && !found->is_null()) {
+        auto value = JsonRequestParser::positive_integer(*found, "templateId");
+        if (!value) return HttpResponseMapper::error(value.error(), request.trace_id);
+        template_id = *value;
+    }
+    auto result = service_.create_category(application::CreateCategoryCommand{
+        *user, board, *name, *parent, template_id});
+    return result
+        ? HttpResponseMapper::json(201, category_json(*result))
+        : HttpResponseMapper::error(result.error(), request.trace_id);
+}
+
+HttpResponse CategoryController::remove(
+    const HttpRequest& request, std::string_view category_id) {
+    auto user = require_user(request);
+    auto id = JsonRequestParser::path_id<domain::CategoryId>(category_id, "categoryId");
+    if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
+    if (!id) return HttpResponseMapper::error(id.error(), request.trace_id);
+    auto result = service_.delete_category(
+        application::DeleteCategoryCommand{*user, *id, std::nullopt});
+    return result ? HttpResponseMapper::no_content()
+                  : HttpResponseMapper::error(result.error(), request.trace_id);
+}
+
+HttpResponse TagController::list(const HttpRequest& request) {
+    auto user = require_user(request);
+    if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
+    auto result = service_.list_tags(*user);
+    if (!result) return HttpResponseMapper::error(result.error(), request.trace_id);
+    Json body = Json::array();
+    for (const auto& tag : *result) body.push_back(tag_json(tag));
+    return HttpResponseMapper::json(200, body);
+}
+
+HttpResponse TagController::create(const HttpRequest& request) {
+    auto user = require_user(request);
+    if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
+    auto body = JsonRequestParser::parse_object(request);
+    if (!body) return HttpResponseMapper::error(body.error(), request.trace_id);
+    if (auto fields = JsonRequestParser::reject_unknown_fields(*body, {"name"});
+        !fields) {
+        return HttpResponseMapper::error(fields.error(), request.trace_id);
+    }
+    auto name = JsonRequestParser::required_string(*body, "name", 64);
+    if (!name) return HttpResponseMapper::error(name.error(), request.trace_id);
+    auto result = service_.create_tag(application::CreateTagCommand{*user, *name});
+    return result ? HttpResponseMapper::json(201, tag_json(*result))
+                  : HttpResponseMapper::error(result.error(), request.trace_id);
+}
+
+HttpResponse TagController::remove(
+    const HttpRequest& request, std::string_view tag_id) {
+    auto user = require_user(request);
+    auto id = JsonRequestParser::path_id<domain::TagId>(tag_id, "tagId");
+    if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
+    if (!id) return HttpResponseMapper::error(id.error(), request.trace_id);
+    auto result = service_.delete_tag(
+        application::DeleteTagCommand{*user, *id, std::nullopt});
+    return result ? HttpResponseMapper::no_content()
+                  : HttpResponseMapper::error(result.error(), request.trace_id);
+}
+
+HttpResponse TagController::replace_transaction_tags(
+    const HttpRequest& request, std::string_view transaction_id) {
+    auto user = require_user(request);
+    auto id = JsonRequestParser::path_id<domain::TransactionId>(
+        transaction_id, "transactionId");
+    if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
+    if (!id) return HttpResponseMapper::error(id.error(), request.trace_id);
+    auto body = JsonRequestParser::parse_object(request);
+    if (!body) return HttpResponseMapper::error(body.error(), request.trace_id);
+    if (auto fields = JsonRequestParser::reject_unknown_fields(*body, {"tagIds"});
+        !fields) {
+        return HttpResponseMapper::error(fields.error(), request.trace_id);
+    }
+    const auto found = body->find("tagIds");
+    if (found == body->end() || !found->is_array()) {
+        return HttpResponseMapper::error(
+            application::Error::validation("tagIds must be an array"),
+            request.trace_id);
+    }
+    std::vector<domain::TagId> tag_ids;
+    tag_ids.reserve(found->size());
+    for (const auto& item : *found) {
+        auto value = JsonRequestParser::positive_integer(item, "tagIds[]");
+        if (!value) return HttpResponseMapper::error(value.error(), request.trace_id);
+        tag_ids.push_back(domain::TagId(*value));
+    }
+    auto result = service_.replace_transaction_tags(
+        application::ReplaceTransactionTagsCommand{*user, *id, std::move(tag_ids)});
+    if (!result) return HttpResponseMapper::error(result.error(), request.trace_id);
+    Json response = Json::array();
+    for (const auto& tag : *result) response.push_back(tag_json(tag));
+    return HttpResponseMapper::json(200, response);
+}
+
+HttpResponse PreferenceController::get(const HttpRequest& request) {
+    auto user = require_user(request);
+    if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
+    auto result = service_.get_preferences(*user);
+    return result ? HttpResponseMapper::json(200, preference_json(*result))
+                  : HttpResponseMapper::error(result.error(), request.trace_id);
+}
+
+HttpResponse PreferenceController::update(const HttpRequest& request) {
+    auto user = require_user(request);
+    if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
+    auto body = JsonRequestParser::parse_object(request);
+    if (!body) return HttpResponseMapper::error(body.error(), request.trace_id);
+    if (auto fields = JsonRequestParser::reject_unknown_fields(
+            *body,
+            {"baseCurrency", "locale", "timezone", "dateFormat", "numberFormat",
+             "theme", "defaultHomePage", "defaultReportPeriod"});
+        !fields) {
+        return HttpResponseMapper::error(fields.error(), request.trace_id);
+    }
+    auto base = JsonRequestParser::required_string(*body, "baseCurrency", 10);
+    auto locale = JsonRequestParser::required_string(*body, "locale", 16);
+    auto timezone = JsonRequestParser::required_string(*body, "timezone", 64);
+    auto date = JsonRequestParser::required_string(*body, "dateFormat", 32);
+    auto number = JsonRequestParser::required_string(*body, "numberFormat", 32);
+    auto theme_value = JsonRequestParser::required_string(*body, "theme", 16);
+    auto home_value = JsonRequestParser::required_string(*body, "defaultHomePage", 32);
+    auto period_value = JsonRequestParser::required_string(
+        *body, "defaultReportPeriod", 32);
+    if (!base) return HttpResponseMapper::error(base.error(), request.trace_id);
+    if (!locale) return HttpResponseMapper::error(locale.error(), request.trace_id);
+    if (!timezone) return HttpResponseMapper::error(timezone.error(), request.trace_id);
+    if (!date) return HttpResponseMapper::error(date.error(), request.trace_id);
+    if (!number) return HttpResponseMapper::error(number.error(), request.trace_id);
+    if (!theme_value) return HttpResponseMapper::error(theme_value.error(), request.trace_id);
+    if (!home_value) return HttpResponseMapper::error(home_value.error(), request.trace_id);
+    if (!period_value) return HttpResponseMapper::error(period_value.error(), request.trace_id);
+    auto theme = parse_theme(*theme_value);
+    auto home = parse_home_page(*home_value);
+    auto period = parse_report_period(*period_value);
+    if (!theme) return HttpResponseMapper::error(theme.error(), request.trace_id);
+    if (!home) return HttpResponseMapper::error(home.error(), request.trace_id);
+    if (!period) return HttpResponseMapper::error(period.error(), request.trace_id);
+    auto result = service_.update_preferences(application::UpdateUserPreferenceCommand{
+        *user, *base, *locale, *timezone, *date, *number, *theme, *home, *period});
+    return result ? HttpResponseMapper::json(200, preference_json(*result))
+                  : HttpResponseMapper::error(result.error(), request.trace_id);
+}
+
+HttpResponse CurrencyController::list(const HttpRequest& request) {
+    auto result = service_.list_currencies();
+    if (!result) return HttpResponseMapper::error(result.error(), request.trace_id);
+    const auto etag = currency_catalog_etag(*result);
+    if (request.header("If-None-Match") ==
+        std::optional<std::string>(etag)) {
+        HttpResponse response;
+        response.status = 304;
+        response.headers.emplace("ETag", etag);
+        response.headers.emplace("Cache-Control", "public, max-age=86400");
+        return response;
+    }
+    Json body = Json::array();
+    for (const auto& currency : *result) {
+        body.push_back(Json{
+            {"code", currency.code},
+            {"symbol", currency.symbol},
+            {"precision", currency.precision},
+            {"displayName", currency.display_name},
+            {"isCrypto", currency.is_crypto}});
+    }
+    auto response = HttpResponseMapper::json(200, body);
+    response.headers.emplace("ETag", etag);
+    response.headers.emplace("Cache-Control", "public, max-age=86400");
+    return response;
+}
+
+} // namespace pfh::presentation

@@ -112,7 +112,7 @@ Decimal 不应该知道任何关于货币的信息。
 5. **负值支持**：必须允许负值，因为存在冲销和更正。
 6. **数值边界**：
    - 数据库中金额字段定义为 `NUMERIC(20,8)`，最大可表示 $999,999,999,999.99999999$。
-   - 数据库中汇率字段定义为 `NUMERIC(20,10)` 和 `DECIMAL(30,10)`。
+   - 数据库中的汇率历史值与转账汇率快照统一定义为 `NUMERIC(20,10)`；V1 中旧的 `NUMERIC(30,10)` 快照列由 V5 收紧，禁止继续新增其他精度口径。
    - 为了统一支持金额（8位小数）和汇率（10位小数）的无损计算，C++ 的 `Decimal` 底层**必须支持至少 10 位小数的精度**。
    - 用户输入的金额或汇率在进入内部 Decimal 舍入前，必须先校验目标数据库列的范围与有效小数位；超过金额 8 位或汇率 10 位的非零小数不得静默舍入后接受。
    - 跨币种转账中由金额与汇率**派生**的流水金额必须在领域层按 Half-Even 显式舍入到 8 位，再进入持久化；用户直接输入的金额不得走该派生舍入路径。
@@ -953,7 +953,7 @@ Net Worth = Σ(convert(account_balance_i, base_currency))
 - CreateTransactionUseCase
 - CreateTransferUseCase
 - DeleteTransactionUseCase
-- GenerateMonthlyReportUseCase
+- ReportQueryService
 - RefreshExchangeRatesUseCase
 
 ### 18.6 构建器

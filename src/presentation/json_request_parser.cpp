@@ -78,6 +78,58 @@ JsonRequestParser::optional_string(
     return std::optional<std::string>(*value);
 }
 
+application::Result<std::optional<std::string>>
+JsonRequestParser::optional_string_allow_empty(
+    const Json& object,
+    std::string_view field,
+    std::size_t max_length) {
+    const auto key = std::string(field);
+    const auto it = object.find(key);
+    if (it == object.end() || it->is_null()) {
+        return std::optional<std::string>{};
+    }
+    if (!it->is_string()) {
+        return application::err(application::Error(
+            application::ErrorCode::InvalidFormat,
+            key + " must be a string"));
+    }
+    auto value = it->get<std::string>();
+    if (value.size() > max_length) {
+        return application::err(application::Error::validation(
+            key + " exceeds the maximum length"));
+    }
+    return std::optional<std::string>(std::move(value));
+}
+
+application::Result<std::int64_t> JsonRequestParser::positive_integer(
+    const Json& value,
+    std::string_view field) {
+    const auto name = std::string(field);
+    if (value.is_number_unsigned()) {
+        const auto raw = value.get<std::uint64_t>();
+        if (raw == 0 ||
+            raw > static_cast<std::uint64_t>(
+                std::numeric_limits<std::int64_t>::max())) {
+            return application::err(application::Error(
+                application::ErrorCode::InvalidFormat,
+                name + " must be a positive 64-bit integer"));
+        }
+        return static_cast<std::int64_t>(raw);
+    }
+    if (!value.is_number_integer()) {
+        return application::err(application::Error(
+            application::ErrorCode::InvalidFormat,
+            name + " must be a positive integer"));
+    }
+    const auto raw = value.get<std::int64_t>();
+    if (raw <= 0) {
+        return application::err(application::Error(
+            application::ErrorCode::InvalidFormat,
+            name + " must be a positive integer"));
+    }
+    return raw;
+}
+
 application::Result<std::optional<std::chrono::system_clock::time_point>>
 JsonRequestParser::optional_rfc3339(
     const Json& object,

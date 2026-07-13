@@ -8,10 +8,13 @@
 #include "pfh/application/use_cases/delete_account_use_case.h"
 #include "pfh/application/use_cases/delete_transaction_use_case.h"
 #include "pfh/application/use_cases/refresh_exchange_rates_use_case.h"
+#include "pfh/application/use_cases/resource_use_cases.h"
 #include "pfh/infrastructure/persistence/in_memory_account_repository.h"
+#include "pfh/infrastructure/persistence/in_memory_audit_log_repository.h"
 #include "pfh/infrastructure/persistence/in_memory_category_repository.h"
 #include "pfh/infrastructure/persistence/in_memory_exchange_rate_repository.h"
 #include "pfh/infrastructure/persistence/in_memory_store.h"
+#include "pfh/infrastructure/persistence/in_memory_tag_repository.h"
 #include "pfh/infrastructure/persistence/in_memory_transaction_repository.h"
 #include "pfh/infrastructure/persistence/in_memory_unit_of_work.h"
 #include "pfh/infrastructure/persistence/in_memory_user_repository.h"
@@ -76,6 +79,7 @@ protected:
         account_repo_ = std::move(account_repo);
         rate_repo_ = std::make_unique<InMemoryExchangeRateRepository>(*store_);
         category_repo_ = std::make_unique<InMemoryCategoryRepository>(*store_);
+        audit_repo_ = std::make_unique<InMemoryAuditLogRepository>(*store_);
         provider_ = std::make_unique<MockExchangeRateProvider>();
     }
 
@@ -125,8 +129,76 @@ protected:
     IActiveCurrencyQuery* active_currency_query_ = nullptr;
     std::unique_ptr<IExchangeRateRepository> rate_repo_;
     std::unique_ptr<ICategoryRepository> category_repo_;
+    std::unique_ptr<IAuditLogRepository> audit_repo_;
     std::unique_ptr<MockExchangeRateProvider> provider_;
 };
+
+TEST_F(UseCaseTest, ApplicationBoundariesRejectInvalidIdsAndEnums) {
+    InMemoryTagRepository tags(*store_);
+
+    EXPECT_FALSE(ListAccountsUseCase(*account_repo_).execute(UserId{}).has_value());
+    EXPECT_FALSE(GetAccountBalanceUseCase(*account_repo_)
+                     .execute(UserId{}, AccountId{})
+                     .has_value());
+    EXPECT_FALSE(ListCategoriesUseCase(*category_repo_)
+                     .execute(UserId{}, std::nullopt)
+                     .has_value());
+    EXPECT_FALSE(ListTagsUseCase(tags).execute(UserId{}).has_value());
+    EXPECT_FALSE(GetUserPreferenceUseCase(*pref_repo_).execute(UserId{}).has_value());
+
+    const auto seeded = seed();
+    EXPECT_FALSE(ListCategoriesUseCase(*category_repo_)
+                     .execute(seeded.user, static_cast<CategoryBoard>(999))
+                     .has_value());
+
+    ReportQueryService reports(
+        *account_repo_, *tx_repo_, *rate_repo_, *pref_repo_);
+    EXPECT_FALSE(reports.net_worth(UserId{}).has_value());
+
+    CreateTransactionCommand transaction;
+    transaction.user_id = seeded.user;
+    transaction.account_id = seeded.cash;
+    transaction.type = static_cast<TransactionType>(999);
+    transaction.amount = "1";
+    transaction.currency_code = "USD";
+    auto invalid_transaction = CreateTransactionUseCase(
+        *account_repo_, *category_repo_, *tx_repo_, *uow_).execute(transaction);
+    ASSERT_FALSE(invalid_transaction.has_value());
+    EXPECT_EQ(invalid_transaction.error().code, ErrorCode::ValidationError);
+
+    CreateAccountCommand account;
+    account.user_id = seeded.user;
+    account.name = "Invalid enum";
+    account.type = static_cast<AccountType>(999);
+    account.subtype = "invalid";
+    account.currency_code = "USD";
+    auto invalid_account = CreateAccountUseCase(
+        *account_repo_, *audit_repo_, *uow_).execute(account);
+    ASSERT_FALSE(invalid_account.has_value());
+    EXPECT_EQ(invalid_account.error().code, ErrorCode::ValidationError);
+
+    CreateCategoryCommand category;
+    category.user_id = seeded.user;
+    category.board = static_cast<CategoryBoard>(999);
+    category.name = "Invalid enum";
+    auto invalid_category = CreateCategoryUseCase(
+        *category_repo_, *pref_repo_, *audit_repo_, *uow_).execute(category);
+    ASSERT_FALSE(invalid_category.has_value());
+    EXPECT_EQ(invalid_category.error().code, ErrorCode::ValidationError);
+
+    UpdateUserPreferenceCommand preference;
+    preference.user_id = seeded.user;
+    preference.base_currency = "USD";
+    preference.locale = "en-US";
+    preference.timezone = "UTC";
+    preference.date_format = "YYYY-MM-DD";
+    preference.number_format = "1,234.56";
+    preference.theme = static_cast<ThemeMode>(999);
+    auto invalid_preference = UpdateUserPreferenceUseCase(
+        *pref_repo_, *audit_repo_, *uow_).execute(preference);
+    ASSERT_FALSE(invalid_preference.has_value());
+    EXPECT_EQ(invalid_preference.error().code, ErrorCode::ValidationError);
+}
 
 TEST_F(UseCaseTest, CreateTransaction_WhenValidIncome_PersistsAndEmitsOutbox) {
     auto s = seed();
@@ -312,13 +384,18 @@ TEST_F(UseCaseTest, DeleteTransaction_WhenOwned_SoftDeletesAndEmitsOutbox) {
     ASSERT_TRUE(created.has_value());
     store_->outbox.clear();
 
-    DeleteTransactionUseCase del_uc(*tx_repo_, *uow_);
+    InMemoryUnitOfWork request_uow(*store_, s.user);
+    DeleteTransactionUseCase del_uc(*tx_repo_, *audit_repo_, request_uow);
     DeleteTransactionCommand dcmd;
     dcmd.user_id = s.user;
     dcmd.transaction_id = created->id;
     dcmd.deleted_at = sample_time();
     auto deleted = del_uc.execute(dcmd);
     ASSERT_TRUE(deleted.has_value()) << deleted.error().message;
+    ASSERT_EQ(store_->audit_logs.size(), 1u);
+    EXPECT_EQ(store_->audit_logs.front().action, AuditAction::Delete);
+    EXPECT_EQ(store_->audit_logs.front().resource_type, "Transaction");
+    EXPECT_EQ(store_->audit_logs.front().resource_id, created->id.to_string());
     EXPECT_EQ(store_->outbox.size(), 1u);
     EXPECT_EQ(store_->outbox.front().event_name, "TransactionDeleted");
 }
@@ -915,6 +992,16 @@ TEST(DomainEventTest, ExchangeRateEvents_EscapeStringsAsValidJson) {
     EXPECT_EQ(failed_json.at("provider"), "Provider\nB");
     EXPECT_EQ(failed_json.at("reason"), "timeout\tupstream");
     EXPECT_FALSE(failed_json.at("historicalAvailable").get<bool>());
+
+    // duration_cast truncates negative sub-second values toward zero. Event
+    // epoch seconds instead use floor so pre-epoch payloads remain correct.
+    const auto pre_epoch = std::chrono::system_clock::time_point{} -
+                           std::chrono::milliseconds(500);
+    TransactionCreatedEvent pre_epoch_event(
+        UserId{1}, TransactionId{2}, AccountId{3}, pre_epoch);
+    const auto pre_epoch_json =
+        nlohmann::json::parse(pre_epoch_event.payload_json());
+    EXPECT_EQ(pre_epoch_json.at("occurredAt"), -1);
 }
 
 TEST_F(UseCaseTest, ErrorMapping_WhenDatabaseError_DoesNotLeakDetails) {
@@ -1042,16 +1129,14 @@ TEST_F(UseCaseTest, Balance_ExposesLastTransactionIdAndUpdatedAt) {
 
 TEST_F(UseCaseTest, NetWorth_SplitsAssetsAndLiabilities) {
     auto s = seed();
-    // Add a Credit (liability) account and a USD->CNY rate (the seed's zero-
-    // balance CNY wallet still needs a rate to convert into the USD base).
+    // Add a Credit (liability) account. The seed's CNY wallet has zero balance,
+    // which must convert to zero USD without requiring an exchange-rate row.
     AccountId credit;
     auto add = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
         Account card(AccountId{}, s.user, "Card", AccountType::Credit, "credit", ccy("USD"));
         auto id = account_repo_->save(tx, card);
         if (!id) return std::unexpected(id.error());
         credit = *id;
-        auto r = rate_repo_->append(tx, rate("USD", "CNY", "7", 1000, "ECB"));
-        if (!r) return std::unexpected(r.error());
         return {};
     });
     ASSERT_TRUE(add.has_value());
@@ -1087,13 +1172,6 @@ TEST_F(UseCaseTest, NetWorth_SplitsAssetsAndLiabilities) {
 
 TEST_F(UseCaseTest, Dashboard_ScopesIncomeExpenseToCurrentMonth) {
     auto s = seed();
-    // Rate so the seed's zero-balance CNY wallet can convert into USD base.
-    auto rw = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
-        auto r = rate_repo_->append(tx, rate("USD", "CNY", "7", 1000, "ECB"));
-        if (!r) return std::unexpected(r.error());
-        return {};
-    });
-    ASSERT_TRUE(rw.has_value());
     CreateTransactionUseCase create_uc(
         *account_repo_, *category_repo_, *tx_repo_, *uow_);
 
@@ -1132,7 +1210,9 @@ TEST_F(UseCaseTest, Dashboard_ScopesIncomeExpenseToCurrentMonth) {
 
 TEST_F(UseCaseTest, DeleteAccount_WhenInsufficientConfirmations_Rejected) {
     auto s = seed();
-    DeleteAccountUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    InMemoryUnitOfWork request_uow(*store_, s.user);
+    DeleteAccountUseCase uc(
+        *account_repo_, *tx_repo_, request_uow, *audit_repo_);
     DeleteAccountCommand cmd;
     cmd.user_id = s.user;
     cmd.account_id = s.cash;
@@ -1157,7 +1237,9 @@ TEST_F(UseCaseTest, DeleteAccount_WhenConfirmed_PurgesAccountAndTransactions) {
     income.occurred_at = sample_time();
     ASSERT_TRUE(create_uc.execute(income).has_value());
 
-    DeleteAccountUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    InMemoryUnitOfWork request_uow(*store_, s.user);
+    DeleteAccountUseCase uc(
+        *account_repo_, *tx_repo_, request_uow, *audit_repo_);
     DeleteAccountCommand cmd;
     cmd.user_id = s.user;
     cmd.account_id = s.cash;
@@ -1169,6 +1251,8 @@ TEST_F(UseCaseTest, DeleteAccount_WhenConfirmed_PurgesAccountAndTransactions) {
     auto remaining = tx_repo_->find_by_account(s.cash);
     ASSERT_TRUE(remaining.has_value());
     EXPECT_TRUE(remaining->empty());
+    ASSERT_EQ(store_->audit_logs.size(), 1u);
+    EXPECT_EQ(store_->audit_logs.front().action, AuditAction::DangerousDelete);
     EXPECT_EQ(store_->outbox.back().event_name, "AccountDangerouslyDeleted");
 }
 
@@ -1183,7 +1267,9 @@ TEST_F(UseCaseTest, DeleteAccount_WhenOtherUsersAccount_ReturnsNotFound) {
     });
     ASSERT_TRUE(w.has_value());
 
-    DeleteAccountUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    InMemoryUnitOfWork request_uow(*store_, other);
+    DeleteAccountUseCase uc(
+        *account_repo_, *tx_repo_, request_uow, *audit_repo_);
     DeleteAccountCommand cmd;
     cmd.user_id = other;
     cmd.account_id = s.cash; // belongs to alice
@@ -1213,7 +1299,9 @@ TEST_F(UseCaseTest, DeleteAccount_WithTransfer_PurgesBothLegsAndGroup) {
     ASSERT_EQ(store_->transfer_groups.size(), 1u);
 
     // Delete the SOURCE account; the incoming leg lives on savings.
-    DeleteAccountUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    InMemoryUnitOfWork request_uow(*store_, s.user);
+    DeleteAccountUseCase uc(
+        *account_repo_, *tx_repo_, request_uow, *audit_repo_);
     DeleteAccountCommand cmd;
     cmd.user_id = s.user;
     cmd.account_id = s.cash;
@@ -1370,16 +1458,19 @@ TEST_F(UseCaseTest, DeleteTransaction_SecondDelete_ReturnsConflict) {
     auto created = create_uc.execute(expense);
     ASSERT_TRUE(created.has_value());
 
-    DeleteTransactionUseCase del(*tx_repo_, *uow_);
+    InMemoryUnitOfWork request_uow(*store_, s.user);
+    DeleteTransactionUseCase del(*tx_repo_, *audit_repo_, request_uow);
     DeleteTransactionCommand dc;
     dc.user_id = s.user;
     dc.transaction_id = created->id;
     dc.deleted_at = sample_time();
     ASSERT_TRUE(del.execute(dc).has_value());
+    ASSERT_EQ(store_->audit_logs.size(), 1u);
 
     auto second = del.execute(dc);
     ASSERT_FALSE(second.has_value());
     EXPECT_EQ(second.error().code, ErrorCode::Conflict);
+    EXPECT_EQ(store_->audit_logs.size(), 1u);
 }
 
 // Item 1: create-transaction builds its DTO from the persisted entity (id set)
@@ -1451,6 +1542,44 @@ TEST_F(UseCaseTest, Dashboard_AssetDistribution_AggregatesByAccountType) {
     EXPECT_EQ(savings_slices, 1);
 }
 
+TEST_F(UseCaseTest, Dashboard_PercentagesUseHalfEvenRounding) {
+    auto s = seed();
+    auto setup = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            auto id = rate_repo_->append(tx, rate("USD", "CNY", "7", 1000, "ECB"));
+            return id ? RepositoryVoidResult{}
+                      : RepositoryVoidResult(std::unexpected(id.error()));
+        });
+    ASSERT_TRUE(setup.has_value());
+    CreateTransactionUseCase create(
+        *account_repo_, *category_repo_, *tx_repo_, *uow_);
+    for (const auto& [account, amount] :
+         std::vector<std::pair<AccountId, std::string>>{
+             {s.cash, "1"}, {s.savings, "2"}}) {
+        CreateTransactionCommand command;
+        command.user_id = s.user;
+        command.account_id = account;
+        command.type = TransactionType::Income;
+        command.amount = amount;
+        command.currency_code = "USD";
+        command.occurred_at = sample_time();
+        ASSERT_TRUE(create.execute(command).has_value());
+    }
+    ReportQueryService reports(
+        *account_repo_, *tx_repo_, *rate_repo_, *pref_repo_);
+    auto dashboard = reports.dashboard_summary(
+        s.user, std::chrono::system_clock::from_time_t(1719400000));
+    ASSERT_TRUE(dashboard.has_value()) << dashboard.error().message;
+    for (const auto& slice : dashboard->asset_distribution) {
+        if (slice.label == "Cash") {
+            EXPECT_EQ(slice.percentage, "33.3%");
+        }
+        if (slice.label == "Savings") {
+            EXPECT_EQ(slice.percentage, "66.7%");
+        }
+    }
+}
+
 // ---- Item 10: amount exceeding DB NUMERIC(20,8) is rejected before write ----
 
 TEST_F(UseCaseTest, CreateTransaction_WhenAmountExceedsDbPrecision_Rejected) {
@@ -1489,6 +1618,65 @@ TEST_F(UseCaseTest, CreateTransaction_WhenAmountExceedsDbPrecision_Rejected) {
     EXPECT_EQ(r3.error().code, ErrorCode::ValidationError);
 }
 
+TEST_F(UseCaseTest, CreateTransaction_WhenDescriptionExceedsApplicationLimit_Rejected) {
+    auto s = seed();
+    CreateTransactionUseCase uc(*account_repo_, *category_repo_, *tx_repo_, *uow_);
+
+    CreateTransactionCommand command;
+    command.user_id = s.user;
+    command.account_id = s.cash;
+    command.type = TransactionType::Income;
+    command.amount = "1";
+    command.currency_code = "USD";
+    command.description = std::string(4097, 'x');
+    command.occurred_at = sample_time();
+
+    const auto result = uc.execute(command);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::ValidationError);
+    EXPECT_TRUE(store_->transactions.empty());
+}
+
+TEST_F(UseCaseTest, CreateTransaction_WhenDecimalTextIsNotPlain_Rejected) {
+    auto s = seed();
+    CreateTransactionUseCase uc(*account_repo_, *category_repo_, *tx_repo_, *uow_);
+
+    for (const auto& amount : {"+1", " 1", "1 ", ".5", "1."}) {
+        CreateTransactionCommand command;
+        command.user_id = s.user;
+        command.account_id = s.cash;
+        command.type = TransactionType::Income;
+        command.amount = amount;
+        command.currency_code = "USD";
+        command.occurred_at = sample_time();
+        const auto result = uc.execute(command);
+        ASSERT_FALSE(result.has_value()) << amount;
+        EXPECT_EQ(result.error().code, ErrorCode::ValidationError) << amount;
+    }
+    EXPECT_TRUE(store_->transactions.empty());
+}
+
+TEST_F(UseCaseTest, CreateTransfer_WhenDescriptionExceedsApplicationLimit_Rejected) {
+    auto s = seed();
+    CreateTransferUseCase uc(*account_repo_, *tx_repo_, *uow_);
+
+    CreateTransferCommand command;
+    command.user_id = s.user;
+    command.source_account_id = s.cash;
+    command.target_account_id = s.savings;
+    command.mode = TransferInputMode::BothAmounts;
+    command.outgoing_amount = "1";
+    command.incoming_amount = "1";
+    command.description = std::string(4097, 'x');
+    command.occurred_at = sample_time();
+
+    const auto result = uc.execute(command);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::ValidationError);
+    EXPECT_TRUE(store_->transactions.empty());
+    EXPECT_TRUE(store_->transfer_groups.empty());
+}
+
 TEST_F(UseCaseTest, CreateTransfer_EnforcesDbAmountScaleAndRoundsDerivedLeg) {
     auto s = seed();
     CreateTransferUseCase uc(*account_repo_, *tx_repo_, *uow_);
@@ -1515,7 +1703,7 @@ TEST_F(UseCaseTest, CreateTransfer_EnforcesDbAmountScaleAndRoundsDerivedLeg) {
     derived.occurred_at = sample_time();
     auto created = uc.execute(derived);
     ASSERT_TRUE(created.has_value()) << created.error().message;
-    EXPECT_EQ(created->incoming_amount, "7.12345679 CNY");
+    EXPECT_EQ(created->incoming_amount, "7.12345679");
     auto stored = tx_repo_->find_by_id(created->incoming_transaction_id);
     ASSERT_TRUE(stored.has_value());
     EXPECT_EQ(stored->amount().amount().to_string(), "7.12345679");
@@ -1657,6 +1845,52 @@ TEST_F(UseCaseTest, InMemoryRepositories_RejectTenantAndBoardReassignment) {
         });
     ASSERT_FALSE(board_move.has_value());
     EXPECT_EQ(board_move.error().status, RepositoryStatus::ValidationError);
+}
+
+TEST_F(UseCaseTest, CategoryRepository_RejectsTreesDeeperThanReadLimit) {
+    auto s = seed();
+    std::optional<CategoryId> parent;
+    for (int depth = 0; depth < kMaxCategoryTreeDepth; ++depth) {
+        CategoryId created;
+        auto write = uow_->execute_in_transaction(
+            [&](ITransactionContext& tx) -> RepositoryVoidResult {
+                auto saved = category_repo_->save(
+                    tx,
+                    Category(
+                        CategoryId{},
+                        s.user,
+                        "Level " + std::to_string(depth + 1),
+                        CategoryBoard::Expense,
+                        parent));
+                if (!saved) {
+                    return std::unexpected(saved.error());
+                }
+                created = *saved;
+                return {};
+            });
+        ASSERT_TRUE(write.has_value()) << write.error().message;
+        parent = created;
+    }
+
+    ASSERT_TRUE(parent.has_value());
+    auto root = category_repo_->resolve_root_id_for_user(*parent, s.user);
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+
+    auto too_deep = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            auto saved = category_repo_->save(
+                tx,
+                Category(
+                    CategoryId{},
+                    s.user,
+                    "Level 65",
+                    CategoryBoard::Expense,
+                    parent));
+            return saved ? RepositoryVoidResult{}
+                         : RepositoryVoidResult(std::unexpected(saved.error()));
+        });
+    ASSERT_FALSE(too_deep.has_value());
+    EXPECT_EQ(too_deep.error().status, RepositoryStatus::ValidationError);
 }
 
 // ---- Item 12: strongly-typed events carry userId/occurredAt; outbox stores time ----
@@ -1948,17 +2182,29 @@ TEST_F(UseCaseTest, Dashboard_WhenTimezoneIsUnknown_FailsInsteadOfUsingUtc) {
     EXPECT_EQ(dashboard.error().code, ErrorCode::ConfigurationError);
 }
 
+TEST_F(UseCaseTest, Dashboard_WhenTimezoneIsEmpty_FailsInsteadOfUsingUtc) {
+    auto s = seed();
+    auto setup = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            return pref_repo_->save(
+                tx, UserPreference(s.user, ccy("USD"), "en-US", ""));
+        });
+    ASSERT_TRUE(setup.has_value());
+
+    ReportQueryService reports(*account_repo_, *tx_repo_, *rate_repo_, *pref_repo_);
+    auto dashboard = reports.dashboard_summary(s.user, sample_time());
+    ASSERT_FALSE(dashboard.has_value());
+    EXPECT_EQ(dashboard.error().code, ErrorCode::ConfigurationError);
+}
+
 // Top expense categories roll sub-categories up to their first-level parent
 // when a category repository is supplied, and use the root's human name.
 TEST_F(UseCaseTest, TopExpenseCategories_RollUpToRootCategory) {
     auto s = seed();
     CategoryId food_root;
     CategoryId food_dining; // child of food_root
+    CategoryId transport_root;
     auto setup = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
-        // Rate so the seed's zero-balance CNY wallet can convert into USD base.
-        if (auto r = rate_repo_->append(tx, rate("USD", "CNY", "7", 1000, "ECB")); !r) {
-            return std::unexpected(r.error());
-        }
         Category root(CategoryId{}, s.user, "Food", CategoryBoard::Expense);
         auto rid = category_repo_->save(tx, root);
         if (!rid) return std::unexpected(rid.error());
@@ -1968,6 +2214,13 @@ TEST_F(UseCaseTest, TopExpenseCategories_RollUpToRootCategory) {
         auto cid = category_repo_->save(tx, child);
         if (!cid) return std::unexpected(cid.error());
         food_dining = *cid;
+
+        auto transport = category_repo_->save(
+            tx,
+            Category(
+                CategoryId{}, s.user, "Transport", CategoryBoard::Expense));
+        if (!transport) return std::unexpected(transport.error());
+        transport_root = *transport;
         return {};
     });
     ASSERT_TRUE(setup.has_value()) << setup.error().message;
@@ -1976,7 +2229,8 @@ TEST_F(UseCaseTest, TopExpenseCategories_RollUpToRootCategory) {
         *account_repo_, *category_repo_, *tx_repo_, *uow_);
     // Two expenses: one on the child, one on the root — both roll to "Food".
     for (auto [cat, amt] : std::vector<std::pair<CategoryId, std::string>>{
-             {food_dining, "30"}, {food_root, "20"}}) {
+             {food_dining, "30"}, {food_root, "20"},
+             {transport_root, "50"}}) {
         CreateTransactionCommand e;
         e.user_id = s.user;
         e.account_id = s.cash;
@@ -1995,13 +2249,15 @@ TEST_F(UseCaseTest, TopExpenseCategories_RollUpToRootCategory) {
     auto dash = reports.dashboard_summary(s.user, now);
     ASSERT_TRUE(dash.has_value()) << dash.error().message;
 
-    // A single "Food" slice aggregating 30 + 20 = 50.
-    ASSERT_EQ(dash->top_expense_categories.size(), 1u);
+    // Food aggregates 30 + 20 = 50. Transport also totals 50, so the stable
+    // descending sort must preserve the first-seen Food bucket as the tie-break.
+    ASSERT_EQ(dash->top_expense_categories.size(), 2u);
     const auto& slice = dash->top_expense_categories.front();
     EXPECT_EQ(slice.category_name, "Food");
     EXPECT_EQ(slice.amount, "50");
     ASSERT_TRUE(slice.category_id.has_value());
     EXPECT_EQ(slice.category_id->value(), food_root.value());
+    EXPECT_EQ(dash->top_expense_categories[1].category_name, "Transport");
 }
 
 } // namespace pfh::test

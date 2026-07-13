@@ -55,14 +55,22 @@ Configuration is loaded in this order: environment variables, JSON file, then bu
 | ------------- | ------------------------------ |
 | Runtime environment | `PFH_ENVIRONMENT` |
 | JWT secret | `PFH_JWT_SECRET` |
+| Password pepper | `PFH_PASSWORD_PEPPER` |
 | Database host | `PFH_DB_HOST` |
 | Database port | `PFH_DB_PORT` |
 | Database name | `PFH_DB_NAME` |
 | Database user | `PFH_DB_USER` |
 | Database password | `PFH_DB_PASSWORD` |
+| Background database host | `PFH_BACKGROUND_DB_HOST` |
+| Background database port | `PFH_BACKGROUND_DB_PORT` |
+| Background database name | `PFH_BACKGROUND_DB_NAME` |
+| Background database user | `PFH_BACKGROUND_DB_USER` |
+| Background database password | `PFH_BACKGROUND_DB_PASSWORD` |
 | Exchange-rate API key | `PFH_EXCHANGE_RATE_API_KEY` |
 
-`PFH_DB_PORT` must be an integer from 1 through 65535. Invalid environment values fail configuration loading instead of silently falling back to JSON. Environment-provided secrets are subject to the same placeholder and strength validation as JSON values.
+`PFH_DB_PORT` and `PFH_BACKGROUND_DB_PORT` must be integers from 1 through 65535. Invalid environment values fail configuration loading instead of silently falling back to JSON. Environment-provided secrets are subject to the same placeholder and strength validation as JSON values. `PFH_PASSWORD_PEPPER` is optional: leave it empty or provide a real secret; values beginning with `REPLACE_WITH_` are rejected. The request and background roles must be distinct; the background role is reserved for explicitly approved read-only cross-tenant jobs and is never injected into request handlers.
+
+Server settings, logging settings, JWT expiry values, connection-pool sizes, and provider selection currently remain JSON-configured. `.env.example` lists only overlays implemented by `JsonConfigLoader`.
 
 ## Environment-Specific Configs
 

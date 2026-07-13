@@ -2,7 +2,7 @@
 
 **更新日期**: 2026-07-14
 **阶段**: P1-S10 REST API 与认证基础
-**当前状态**: IN PROGRESS - P1-S10-01 至 S10-06 已完成实现与本地复核；S10-07 至 S10-11 待开发
+**当前状态**: LOCAL COMPLETE - P1-S10-01 至 S10-11 已完成实现、全量 review 与本地门禁；目标环境验证保留到 P1-S12
 
 ---
 
@@ -14,12 +14,14 @@
 - P1-S10-01 REST 契约、金额符号、流水并发策略和转账删除边界收口。
 - 转账手续费从 `CreateTransferCommand` 到 `TransferAggregate`、Repository 和报表语义的完整接线。
 - P1-S10-02 Drogon/PostgreSQL 依赖接入与分层 CMake 目标。
-- P1-S10-03 PostgreSQL Repository 与 `DrogonUnitOfWork` 适配器实现（本地静态门禁通过，外部连库验证留到 S10-04/S10-11 一并执行）。
+- P1-S10-03 PostgreSQL Repository 与 `DrogonUnitOfWork` 适配器实现（本地静态门禁通过，外部连库验证留到 P1-S12）。
 - P1-S10-04 production composition root、双角色 DbClient、注册 bootstrap tenant 绑定和启动安全校验。
 - P1-S10-05 framework-neutral HTTP parser/mapper、RFC 3339、统一错误响应、TraceId 与 Drogon 全局异常边界。
 - P1-S10-06 register/login/refresh/logout、Argon2id、HS256 JWT、refresh rotation/reuse detection、同步审计和 V4 session-family 撤销。
+- P1-S10-07 至 S10-10 基础资源、流水、转账和报表 Application/Controller/API，以及 Tag PostgreSQL adapter、request scope 和 V5 汇率精度迁移。
+- P1-S10-11 framework-neutral 全 API 回归、OpenAPI 3.1/路由契约门禁、币种目录一致性门禁和项目全量 review。
 
-以下内容尚未交付：S10-07 至 S10-10 资源/流水/转账/报表 Controller、S10-11 完整 API 回归、Outbox Publisher 和 Scheduler。因此本文不能作为 P1-S10 整体验收或真实持久化验收结论。真实 Drogon、Argon2/OpenSSL、V4 迁移和 PostgreSQL 双角色连接仍须在目标机器签署。
+本文可以作为 P1-S10 的本地实现与离线验收记录，但不能作为真实持久化或生产运行验收结论。Outbox Publisher 与 Scheduler 属于 P1-S11；真实 Drogon、Argon2/OpenSSL、V4/V5 迁移、PostgreSQL Repository/UoW/RLS、双角色连接池、Linux/Docker 与 API smoke 仍须在 P1-S12 目标机器签署。
 
 ---
 
@@ -94,7 +96,7 @@
 ### 3.4 已固定的其余边界
 
 - Income/Expense 请求使用正数 magnitude；Adjustment 请求使用 signed amount。
-- 对外响应使用业务金额，数据库 signed amount 不直接泄漏；Presentation mapper 仍在 P1-S10-05/S10-09 实现。
+- 对外响应使用业务金额，数据库 signed amount 不直接泄漏；Presentation mapper 已在 P1-S10-08/S10-09 完成并由 API 测试覆盖。
 - Phase 1 不注册转账删除路由；完整 `DeleteTransferUseCase` 落地前只支持创建与查询。
 - 流水采用追加 + 软删除，不提供普通更新，也不增加应用层行级乐观锁；账户并发继续使用 `Account.version`。
 
@@ -131,7 +133,7 @@ failed: 0
 
 相较外部 V3 复测时的 254 项基线，本次新增 17 项测试：6 个 Domain、8 个 Use Case、3 个 Repository integration 场景。
 
-S10-03 review 后本地基线增加 `postgresql_adapter_contracts`，并让 PostgreSQL 适配器在 OFF 模式下也通过 API stub 执行全源语法编译。该结果仍不包含真实 Drogon ABI 或 PostgreSQL 行为；S10-04 接入运行期 DbClient 后，必须用 PostgreSQL fixture 重跑聚合原子性、NUMERIC、RLS、行锁和连接池上下文场景。
+S10-03 review 后本地基线增加 `postgresql_adapter_contracts`，并让 PostgreSQL 适配器在 OFF 模式下也通过 API stub 执行全源语法编译。该结果仍不包含真实 Drogon ABI 或 PostgreSQL 行为；S10-04 已接入运行期 DbClient，PostgreSQL fixture 及聚合原子性、NUMERIC、RLS、行锁和连接池上下文复跑统一留在 P1-S12。
 
 ---
 
@@ -164,7 +166,7 @@ S10-03 review 后本地基线增加 `postgresql_adapter_contracts`，并让 Post
 
 **NUMERIC 映射与精度**：
 
-- schema 金额列使用 `NUMERIC(20,8)`，汇率列使用 `NUMERIC(20,10)`，Transfer 快照列使用 `NUMERIC(30,10)`；客户端通过字符串 round-trip 避免二进制浮点截断。
+- schema 金额列使用 `NUMERIC(20,8)`，所有汇率及 Transfer 快照列经 V5 统一使用 `NUMERIC(20,10)`；客户端通过字符串 round-trip 避免二进制浮点截断。
 - 应用层 `Decimal` 内部 `__int128` scale 固定 10^10，与数据库列 scale 一致。
 - 所有 SQL `INSERT`/`UPDATE` 使用参数化查询，传递十进制字符串；`SELECT` 结果以字符串读取后由 `Decimal::parse_numeric_20_8/20_10` 重建。
 - Repository 在写入前再次执行 `fits_numeric_20_8/20_10`，拒绝依赖数据库隐式舍入或溢出报错。
@@ -225,7 +227,7 @@ CTest: 273/273 PASS
 failed: 0
 ```
 
-该 stub 只验证项目源码语法和所用 API 形状，不替代真实 Drogon 头文件/ABI。真实 Repository/UoW 连库验证在 P1-S10-04 接线后与 fixture 一同执行，并在 S12 目标环境签署。
+该 stub 只验证项目源码语法和所用 API 形状，不替代真实 Drogon 头文件/ABI。P1-S10-04 已完成生产接线；真实 Repository/UoW fixture、连库验证与结果签署统一在 S12 目标环境执行。
 
 ### 6.4 主要新增文件
 
@@ -259,7 +261,7 @@ failed: 0
 
 - Application 和 Presentation 从 `INTERFACE` 目标转为真实静态库；HTTP 核心不依赖 Drogon，可由生产 adapter 和本地 API test 共用。
 - `JsonRequestParser` 强制 JSON object、字段白名单、精确 string/integer/null 类型和正数 TypedId；金额 JSON number 在进入 Use Case 前即返回 400。
-- `TimeCodec` 严格解析带 `Z`/offset 的 RFC 3339，拒绝非法日历日期、缺失时区和超长小数秒；响应统一输出 UTC `Z`。
+- `TimeCodec` 严格解析带 `Z`/offset 的 RFC 3339，拒绝非法日历日期、缺失时区、超长小数秒及平台 `system_clock` 不可表示的时间；响应统一输出 UTC `Z` 并保留非零小数秒。
 - `HttpResponseMapper` 固定 400/401/403/404/409/422/500/502 映射；500/502 和 401 响应不返回底层 `details`、SQL、路径或 token 解析原因。
 - `ApiApplication` 为每个成功/失败响应写 `X-Trace-Id`；错误 body 保持 `error_code/message/trace_id`。
 - Drogon adapter 只做请求/响应转换和路由注册；全局 exception handler 记录服务端上下文并返回脱敏 500。
@@ -293,7 +295,55 @@ PostgreSQL/production bootstrap/security compile gates: PASS
 
 ---
 
-## 8. 任务状态
+## 8. P1-S10-07 至 S10-11 交付与全量 Review
+
+### 8.1 Application 与 request scope
+
+- 新增 `IRequestScope` / `IRequestScopeFactory`，PostgreSQL 与 In-Memory 实现均在每个认证操作中提供同一 tenant 的 Account、Transaction、Category、Tag、Preference、ExchangeRate、AuditLog Repository 与 Unit of Work。
+- `FinanceApplicationService` 是资源 Controller 的 Application 入口；Presentation 只解析 HTTP 并调用 facade，不读取 Repository、打开事务或构造 Domain 金融对象。
+- Account、Category、Tag 和 Preference 写路径在同一事务保存业务事实与同步审计；账户归档/危险删除、分类创建/删除与偏好更新登记强类型领域事件。
+- 全量 review 补齐可独立调用 Use Case 的 ID 和枚举校验，防止其他 adapter 绕过 HTTP parser 注入非法 TypedId 或枚举值。
+
+### 8.2 资源、流水与转账 API
+
+- 完成 Account 列表/创建/余额/归档/危险删除，Category 树/创建/软删除，Tag 列表/创建/软删除/流水关系替换，Preference 读写和公开 Currency catalog。
+- Category Repository 的创建与更新路径均执行最大 64 层祖先遍历；创建父节点采用 `FOR UPDATE NOWAIT`，删除与并发创建不能绕过 active-child 规则。
+- 完成 Transaction 创建与软删除。Income/Expense 接受正数 magnitude，Adjustment 接受非零 signed amount；Application 与 Presentation 均限制说明 4096 字节和普通十进制输入 128 字节；普通删除接口拒绝 Transfer 双边及同组 Adjustment。
+- 完成 Transfer 创建与查询。三种输入模式、三类手续费来源、聚合原子性和 magnitude 响应均有测试；Phase 1 继续不注册 Transfer 删除路由。
+- 新增 `TagRepositoryImpl`，所有标签和关系 SQL 显式绑定 `user_id`；V5 将 `transfer_groups.exchange_rate` 从旧快照精度统一为 `NUMERIC(20,10)`。
+
+### 8.3 报表与 API 契约
+
+- 完成 net worth、最长 120 个月 cash flow trend 和当前月 dashboard summary API；Dashboard 不接受自定义日期范围，cash flow 月份在时区转换后缩窄为 `system_clock::time_point` 前执行范围检查。
+- 用户时区转换使用 IANA tzdb 和半开月窗；cash flow 排除 Transfer、按发生时间使用历史汇率，signed Adjustment 正数计收入、负数计支出。
+- top expense category 回溯到 root 聚合，并在分类软删除后继续读取历史名称；缺失分类行保留为未分类，数据库错误不被吞掉。
+- 同额 top expense category 使用稳定排序，保留首次出现顺序；事件负时间戳按 floor 取 epoch 秒，避免 1970 年前小数秒向零截断。
+- 跨币种零余额直接折算为基准币种零值，不再要求无财务影响的空账户必须存在历史汇率；非零金额仍严格执行 point-in-time 汇率错误语义。
+- 新增 OpenAPI 3.1 契约，`openapi_contract` 对照完整路由/HTTP 方法、金额字符串 schema、nullable 字段和 Drogon route table；`currency_catalog_parity` 逐项比较 Domain 33 币种与 V2 种子。
+- 最终 review 修正 `RegisterResponse` / `CategoryTree` 的 closed-object `allOf` 冲突，并为 locale 建立注册、偏好更新与 OpenAPI 共用规则。
+- 币种目录 ETag 改由完整响应内容稳定计算，catalog 变化后不会继续用固定 `v1` 错误返回 304；REST 时间响应统一记录为 UTC `Z`。
+- `DeleteTransactionUseCase` 现将软删除、同步 AuditLog 与 `TransactionDeleted` outbox 放在同一事务；事件设计明确禁止 S11 handler 重复写同一业务审计。
+- In-Memory 与 PostgreSQL Transaction Repository 统一 create-only、active、non-grouped、non-zero、Income/Expense magnitude 和 Transfer group-id 前置条件。
+- 配置安全收尾拒绝 `REPLACE_WITH_` 开头的 JWT/可选 password pepper 占位值；pepper 留空仍合法，JSON loader 与 production composition root 均独立 fail fast。
+- 最终文档复核将金额/汇率设计中的现行数据库汇率口径统一为 `NUMERIC(20,10)`；V1 的 `NUMERIC(30,10)` 仅作为 V5 迁移前历史结构保留。
+
+### 8.4 最终本地门禁
+
+```text
+configure/build (Windows GCC 16, PostgreSQL OFF): PASS
+unit/use-case: 272
+In-Memory integration: 16
+framework-neutral API: 29
+static gates: 4
+CTest: 321/321 PASS
+PostgreSQL/production bootstrap/security compile gates: PASS
+```
+
+本地 stub/静态门禁不证明真实 Drogon/OpenSSL/Argon2 ABI、V4/V5 SQL、PostgreSQL 行锁/RLS/事务提交、角色权限或连接池复用。上述范围继续由 #46/#57/P1-S12 阻断。
+
+---
+
+## 9. 任务状态
 
 | 任务 | 状态 | 说明 |
 | ---- | ---- | ---- |
@@ -301,8 +351,13 @@ PostgreSQL/production bootstrap/security compile gates: PASS
 | P1-S10-02 | 完成 | Drogon/PostgreSQL 依赖接入与分层 CMake 目标 |
 | P1-S10-03 | 完成 | PostgreSQL Repository 与 `DrogonUnitOfWork` 实现；本地静态门禁通过 |
 | P1-S10-04 | 实现完成、外部待验 | production composition root、双 DbClient 与 bootstrap tenant 绑定已完成；真实角色/连接池待 S12 |
-| P1-S10-05 | 通用边界完成 | HTTP parser/mapper、TraceId、异常脱敏完成；资源 DTO 随 S10-07 至 S10-10 接入 |
+| P1-S10-05 | 完成 | HTTP parser/mapper、TraceId、异常脱敏与全部资源 DTO 已接入 |
 | P1-S10-06 | 实现完成、外部待验 | 认证生命周期与本地 API 回归完成；真实安全库/数据库待 S12 |
+| P1-S10-07 | 完成 | 基础资源 Use Case、request scope、Controller、Tag adapter 与同步审计 |
+| P1-S10-08 | 完成 | Transaction 创建/软删除、严格金额与分类边界 |
+| P1-S10-09 | 完成 | Transfer 创建/查询、三模式与手续费 API |
+| P1-S10-10 | 完成 | Net worth、cash flow 与当前月 dashboard API |
+| P1-S10-11 | 本地完成、外部待验 | 321/321、OpenAPI/route 和 compile gates 通过；真实 runtime 待 S12 |
 | #48 | 完成 | 手续费 Application/Domain/Repository 路径已接通 |
 | #50 | 完成 | 流水并发策略已固定 |
 | #52 | 完成 | Phase 1 转账删除边界已固定 |
@@ -310,17 +365,18 @@ PostgreSQL/production bootstrap/security compile gates: PASS
 | #58 | 完成 | V3 PostgreSQL 16.14 空库复测通过 |
 | #28 | 部分完成 | 双 DbClient 与启动角色校验已接线；真实连接待 S12 |
 | #40 | 部分完成 | 认证实现及本地 API 回归完成；真实 Drogon/安全库/PostgreSQL 待 S12 |
-| #44/#45 | 部分完成 | 通用 HTTP 边界和 Drogon exception adapter 已实现；完整资源 API 与真实 Drogon runtime 待后续/S12 |
+| #14/#44 | 完成 | framework-neutral API 回归、完整 DTO/parser/mapper 与 OpenAPI 契约已交付 |
+| #45 | 部分完成 | Drogon exception adapter 已实现并静态复核；真实 Drogon runtime 待 S12 |
 | #46 | 部分完成 | 核心 Repository/UoW 与 composition root 已实现并静态复核；真实 fixture 和目标环境签署待 S12 |
-| #49 | 部分完成 | `IAuditLogRepository` 与认证同步审计已完成；Tag/资源审计和 S11 异步处理待后续 |
+| #49 | 部分完成 | Tag adapter/关系 API 与资源同步审计已完成；S11 异步处理器待实现 |
 | #51 | 部分完成 | `MAX(version)` + 最新流水 ID 与全写路径缓存失效已实现；真实 DB 复核待 S12 |
 | #53 | 完成 | Application/Infrastructure/Presentation 分层 CMake 目标已落地 |
 | #57 | 未完成 | P1-S12 完整外部环境门禁仍保留 |
 
 ---
 
-## 9. 后续顺序
+## 10. 后续顺序
 
-1. P1-S10-07：补齐 Account/Category/Tag/UserPreference Application 用例与基础资源 API。
-2. P1-S10-08 至 S10-10：接入流水、转账和报表 API，并复用 S10-05 的统一边界。
-3. P1-S10-11：完成全 API 回归并更新本文；P1-S12 在目标 Linux/Docker/PostgreSQL 环境作最终签署。
+1. P1-S11：完成 Outbox publisher、重试/死信、审计事件处理、真实汇率 Provider 与 Scheduler。
+2. P1-S12：在目标 Linux/Docker/PostgreSQL 环境执行 V4/V5、真实 Repository/UoW/RLS、双角色连接池、Drogon/安全库 ABI、API smoke 和后台任务 runtime。
+3. P1-S12 全部阻断门禁取得可追溯结果后，才允许签署 Phase 1 并合并到 `main`。

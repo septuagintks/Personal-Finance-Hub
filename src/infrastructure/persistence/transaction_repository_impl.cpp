@@ -259,6 +259,13 @@ TransactionRepositoryImpl::save_single(
         return std::unexpected(domain::RepositoryError::validation(
             "Grouped transactions must be written via save_transfer"));
     }
+    if (transaction.type() != domain::TransactionType::Income &&
+        transaction.type() != domain::TransactionType::Expense &&
+        transaction.type() != domain::TransactionType::Transfer &&
+        transaction.type() != domain::TransactionType::Adjustment) {
+        return std::unexpected(domain::RepositoryError::validation(
+            "Transaction type is invalid"));
+    }
     if (transaction.type() == domain::TransactionType::Transfer) {
         return std::unexpected(domain::RepositoryError::validation(
             "Transfer transactions must be written via save_transfer"));
@@ -392,7 +399,7 @@ TransactionRepositoryImpl::save_transfer(
             INSERT INTO transfer_groups (
                 user_id, note, transfer_mode, exchange_rate,
                 exchange_rate_provider, exchange_rate_snapshot_time, created_at)
-            VALUES ($1, $2, $3, $4::numeric(30,10), $5, $6, $7)
+            VALUES ($1, $2, $3, $4::numeric(20,10), $5, $6, $7)
             RETURNING id
         )SQL";
         std::optional<std::string> rate_value;
@@ -474,8 +481,8 @@ TransactionRepositoryImpl::find_by_account(
                 sql += " AND transaction_time >= $3";
             }
             if (to.has_value()) {
-                sql += from.has_value() ? " AND transaction_time <= $4"
-                                        : " AND transaction_time <= $3";
+                sql += from.has_value() ? " AND transaction_time < $4"
+                                        : " AND transaction_time < $3";
             }
             sql += " ORDER BY transaction_time, id";
 
@@ -551,6 +558,69 @@ TransactionRepositoryImpl::find_by_user(
             }
             return domain::RepositoryResult<std::vector<domain::Transaction>>(
                 std::move(transactions));
+        });
+}
+
+domain::RepositoryResult<domain::TransferSnapshot>
+TransactionRepositoryImpl::find_transfer_by_group(
+    domain::TransferGroupId group_id,
+    domain::UserId user_id) {
+    if (user_id != tenant_user_id_) {
+        return std::unexpected(domain::RepositoryError::not_found(
+            "Transfer not found for user"));
+    }
+    return postgres::execute_tenant_read<domain::TransferSnapshot>(
+        db_, tenant_user_id_, "find transfer", [&](const auto& transaction) {
+            constexpr const char* kGroupSql = R"SQL(
+                SELECT id, user_id, transfer_mode, exchange_rate::text
+                FROM transfer_groups
+                WHERE id = $1 AND user_id = $2
+            )SQL";
+            const auto group = transaction->execSqlSync(
+                kGroupSql, group_id.value(), user_id.value());
+            if (group.empty()) {
+                return domain::RepositoryResult<domain::TransferSnapshot>(
+                    std::unexpected(domain::RepositoryError::not_found(
+                        "Transfer not found for user")));
+            }
+            domain::TransferSnapshot snapshot;
+            snapshot.group_id = domain::TransferGroupId(
+                pg::getBigInt(group[0], 0));
+            snapshot.user_id = domain::UserId(pg::getBigInt(group[0], 1));
+            const auto mode = pg::getBigInt(group[0], 2);
+            if (mode < 1 || mode > 3) {
+                return domain::RepositoryResult<domain::TransferSnapshot>(
+                    std::unexpected(domain::RepositoryError::database(
+                        "Stored transfer mode is invalid")));
+            }
+            snapshot.transfer_mode = static_cast<int>(mode);
+            const auto rate_text = pg::getOptionalString(group[0], 3);
+            if (rate_text.has_value()) {
+                auto rate = domain::Decimal::parse_numeric_20_10(*rate_text);
+                if (!rate) {
+                    return domain::RepositoryResult<domain::TransferSnapshot>(
+                        std::unexpected(domain::RepositoryError::database(
+                            "Stored transfer rate is invalid")));
+                }
+                snapshot.exchange_rate = *rate;
+            }
+
+            const std::string sql = std::string("SELECT ") + kTransactionColumns +
+                " FROM transactions WHERE transfer_group_id = $1 "
+                "AND user_id = $2 AND deleted_at IS NULL ORDER BY id";
+            const auto rows = transaction->execSqlSync(
+                sql, group_id.value(), user_id.value());
+            snapshot.transactions.reserve(rows.size());
+            for (const auto& row : rows) {
+                auto mapped = map_transaction_row(row);
+                if (!mapped) {
+                    return domain::RepositoryResult<domain::TransferSnapshot>(
+                        std::unexpected(mapped.error()));
+                }
+                snapshot.transactions.push_back(std::move(*mapped));
+            }
+            return domain::RepositoryResult<domain::TransferSnapshot>(
+                std::move(snapshot));
         });
 }
 

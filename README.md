@@ -4,7 +4,7 @@ Version: 0.1.0-alpha
 Backend: C++23
 Architecture: Clean Architecture + Lightweight DDD
 
-Personal Finance Hub（PFH）是一个面向个人财务管理场景的聚合平台，目标是把账户、流水、转账、预算、报表、汇率和外部账单同步整合到一个高精度、可审计、可扩展的后端系统中。项目当前处于 **Phase 1 开发阶段**，P1-S01 至 P1-S09 及 P1-S10-01 至 S10-03 已完成实现，下一步进入 S10-04 production composition root。当前 Windows GCC 16 基线为 273/273；V3 已通过外部 PostgreSQL 16.14 空库复测，核心生产 Repository/UoW 已实现并通过离线编译门禁，但真实连库 fixture 与 API 仍待完成。详细开发规范见 [Docs/README.md](Docs/README.md)。
+Personal Finance Hub（PFH）是一个面向个人财务管理场景的聚合平台，目标是把账户、流水、转账、预算、报表、汇率和外部账单同步整合到一个高精度、可审计、可扩展的后端系统中。项目当前处于 **Phase 1 开发阶段**，P1-S01 至 P1-S10 已完成本地实现与全量 review，下一步进入 P1-S11 Outbox、调度和后台任务。当前 Windows GCC 16 / PostgreSQL OFF 基线为 321/321；V1-V3 已通过外部 PostgreSQL 16.14 空库复测，V4/V5、真实 PostgreSQL/Drogon/安全库、Linux/Docker 与运行时 API 门禁保留到 P1-S12。详细开发规范见 [Docs/README.md](Docs/README.md)。
 
 ## 主要功能
 
@@ -18,7 +18,7 @@ Personal Finance Hub（PFH）是一个面向个人财务管理场景的聚合平
 
 ## 实现方式和架构设计概述
 
-PFH 后端计划基于 **C++23 + Drogon + PostgreSQL 16+ + CMake** 构建，并采用 **Clean Architecture + 轻量级 DDD** 组织代码。系统以领域模型表达核心财务规则，让外部框架、数据库和第三方服务通过接口适配进入系统边界。
+PFH 后端基于 **C++23 + Drogon + PostgreSQL 16+ + CMake** 构建，并采用 **Clean Architecture + 轻量级 DDD** 组织代码。系统以领域模型表达核心财务规则，让外部框架、数据库和第三方服务通过接口适配进入系统边界。
 
 整体分层如下：
 
@@ -34,7 +34,7 @@ DTO Mapping       Transactions      Services     Scheduler / Outbox
 - **Infrastructure 层**：负责 PostgreSQL 持久化、Repository 实现、Unit of Work、Flyway 迁移、外部汇率 Provider、同步 Provider、后台调度任务和 Outbox 事件发布。
 - **Presentation 层**：通过 Drogon 暴露 REST API，处理 JWT 鉴权、请求校验、DTO 映射、错误码转换和全局异常边界。
 
-金额计算坚持不使用浮点数：金额使用 `NUMERIC(20,8)` 与强类型 `Money`，汇率使用更高精度快照并保留历史记录。写路径通过领域实体、Repository 和 Unit of Work 保证一致性；读路径在报表场景中可绕过领域实体，直接执行 SQL 聚合，再按用户基准货币完成折算。领域事件采用事务提交后的处理边界，并可结合 Outbox 方案保证副作用可重试、可审计。
+金额计算坚持不使用浮点数：金额使用 `NUMERIC(20,8)` 与强类型 `Money`，汇率统一使用 `NUMERIC(20,10)` 快照并保留历史记录。写路径通过领域实体、Repository 和 Unit of Work 保证一致性；Phase 1 报表通过 request-scoped Repository 读取并在 Application 层按用户基准货币完成折算，SQL 聚合端口作为后续性能优化。领域事件采用事务提交后的处理边界，并可结合 Outbox 方案保证副作用可重试、可审计。
 
 ## 快速开始
 
@@ -129,12 +129,12 @@ C++/PFH/
 
 ### Phase 1: 核心后端（进行中）
 
-- ✅ 项目骨架和构建系统
-- ⏳ 金融原语（Decimal、Money、Currency、ExchangeRate）
-- ⏳ 领域模型（Account、Transaction、Transfer）
-- ⏳ Repository 和持久化层
-- ⏳ REST API 和认证
-- ⏳ 基础报表
+- [x] 项目骨架、构建系统、金融原语和领域模型
+- [x] Repository/UoW 接口、In-Memory 语义实现与 PostgreSQL adapter
+- [x] REST API、认证、基础资源、流水、转账与报表的本地实现
+- [x] OpenAPI、framework-neutral API 回归与离线生产源码门禁
+- [ ] P1-S11 Outbox、Scheduler、汇率 Provider 与后台任务
+- [ ] P1-S12 真实 PostgreSQL/Drogon/Linux/Docker 验收与 Phase 分支交付
 
 ### Phase 2: 增强功能（计划中）
 
@@ -182,4 +182,5 @@ TransferAggregate_WhenOutgoingAndRateProvided_CalculatesIncoming
 - [数据库设计](Docs/Architecture/02_Database_Design.md)
 - [领域模型设计](Docs/Architecture/03_Domain_Model_Design.md)
 - [REST API 设计](Docs/Architecture/10_REST_API_Design.md)
+- [OpenAPI 3.1 契约](Docs/Architecture/10_REST_API_OpenAPI.json)
 - [测试策略](Docs/Architecture/16_Testing_Strategy.md)

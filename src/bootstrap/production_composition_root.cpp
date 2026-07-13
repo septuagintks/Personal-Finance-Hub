@@ -5,11 +5,13 @@
 #ifdef PFH_HAS_POSTGRESQL
 
 #include "pfh/application/services/auth_service.h"
+#include "pfh/application/services/finance_application_service.h"
 #include "pfh/bootstrap/database_client_factory.h"
 #include "pfh/infrastructure/persistence/audit_log_repository_impl.h"
 #include "pfh/infrastructure/persistence/auth_session_repository_impl.h"
 #include "pfh/infrastructure/persistence/drogon_unit_of_work_factory.h"
 #include "pfh/infrastructure/persistence/postgres_active_currency_query.h"
+#include "pfh/infrastructure/persistence/postgres_request_scope.h"
 #include "pfh/infrastructure/persistence/registration_defaults_repository_impl.h"
 #include "pfh/infrastructure/persistence/user_repository_impl.h"
 #include "pfh/infrastructure/security/argon2_password_hasher.h"
@@ -17,6 +19,10 @@
 #include "pfh/infrastructure/system_clock.h"
 #include "pfh/presentation/api_application.h"
 #include "pfh/presentation/controllers/auth_controller.h"
+#include "pfh/presentation/controllers/resource_controllers.h"
+#include "pfh/presentation/controllers/transaction_controller.h"
+#include "pfh/presentation/controllers/transfer_controller.h"
+#include "pfh/presentation/controllers/report_controller.h"
 #include "pfh/presentation/drogon_http_adapter.h"
 #include "pfh/presentation/security/jwt_filter.h"
 
@@ -65,10 +71,16 @@ application::VoidResult ProductionCompositionRoot::validate_config() const {
             application::ErrorCode::ConfigurationError,
             "Request and background database roles must be distinct"));
     }
-    if (config_.jwt.secret.size() < 32) {
+    if (missing_or_placeholder(config_.jwt.secret) ||
+        config_.jwt.secret.size() < 32) {
         return application::err(application::Error(
             application::ErrorCode::ConfigurationError,
             "JWT secret must contain at least 32 bytes"));
+    }
+    if (config_.security.password_pepper.starts_with("REPLACE_WITH_")) {
+        return application::err(application::Error(
+            application::ErrorCode::ConfigurationError,
+            "Password pepper must be replaced or left empty"));
     }
     if (config_.security.password_pepper.size() > 1024) {
         return application::err(application::Error(
@@ -144,14 +156,47 @@ application::VoidResult ProductionCompositionRoot::initialize() {
         *password_hasher_,
         *token_service_,
         *clock_);
+    request_scope_factory_ =
+        std::make_unique<infrastructure::PostgresRequestScopeFactory>(request_db_);
+    finance_service_ = std::make_unique<application::FinanceApplicationService>(
+        *request_scope_factory_, *clock_);
     auth_controller_ = std::make_unique<presentation::AuthController>(
         *auth_service_);
+    account_controller_ = std::make_unique<presentation::AccountController>(
+        *finance_service_);
+    category_controller_ = std::make_unique<presentation::CategoryController>(
+        *finance_service_);
+    tag_controller_ = std::make_unique<presentation::TagController>(
+        *finance_service_);
+    preference_controller_ = std::make_unique<presentation::PreferenceController>(
+        *finance_service_);
+    currency_controller_ = std::make_unique<presentation::CurrencyController>(
+        *finance_service_);
+    transaction_controller_ =
+        std::make_unique<presentation::TransactionController>(*finance_service_);
+    transfer_controller_ =
+        std::make_unique<presentation::TransferController>(*finance_service_);
+    report_controller_ =
+        std::make_unique<presentation::ReportController>(*finance_service_);
     jwt_filter_ = std::make_unique<presentation::JwtFilter>(
         *token_service_, *sessions_, *clock_);
     api_application_ = std::make_unique<presentation::ApiApplication>(
-        *auth_controller_, *jwt_filter_);
+        *auth_controller_,
+        *jwt_filter_,
+        *account_controller_,
+        *category_controller_,
+        *tag_controller_,
+        *preference_controller_,
+        *currency_controller_,
+        *transaction_controller_,
+        *transfer_controller_,
+        *report_controller_);
     http_adapter_ = std::make_unique<presentation::DrogonHttpAdapter>(
-        *api_application_, config_.server);
+        *api_application_,
+        presentation::HttpServerConfig{
+            config_.server.host,
+            config_.server.port,
+            config_.server.threads});
     http_adapter_->configure();
     return application::ok();
 }

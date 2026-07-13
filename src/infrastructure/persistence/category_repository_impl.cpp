@@ -95,6 +95,28 @@ CategoryRepositoryImpl::find_by_id_for_user(
 }
 
 domain::RepositoryResult<domain::Category>
+CategoryRepositoryImpl::find_by_id_for_user_including_deleted(
+    domain::CategoryId id,
+    domain::UserId user_id) {
+    if (user_id != tenant_user_id_) {
+        return std::unexpected(category_not_found());
+    }
+    return postgres::execute_tenant_read<domain::Category>(
+        db_, tenant_user_id_, "find historical category",
+        [&](const auto& transaction) {
+            const std::string sql = std::string("SELECT ") + kCategoryColumns +
+                " FROM categories WHERE id = $1 AND user_id = $2";
+            const auto result = transaction->execSqlSync(
+                sql, id.value(), user_id.value());
+            if (result.empty()) {
+                return domain::RepositoryResult<domain::Category>(
+                    std::unexpected(category_not_found()));
+            }
+            return map_category_row(result[0]);
+        });
+}
+
+domain::RepositoryResult<domain::Category>
 CategoryRepositoryImpl::find_by_id_for_user_for_update(
     domain::ITransactionContext& tx_iface,
     domain::CategoryId id,
@@ -191,12 +213,11 @@ CategoryRepositoryImpl::resolve_root_id_for_user(
             constexpr const char* kSql = R"SQL(
                 SELECT parent_id
                 FROM categories
-                WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL
+                WHERE id = $1 AND user_id = $2
             )SQL";
-            constexpr int kMaxDepth = 64;
             std::set<std::int64_t> visited;
             auto current = id;
-            for (int depth = 0; depth < kMaxDepth; ++depth) {
+            for (int depth = 0; depth < domain::kMaxCategoryTreeDepth; ++depth) {
                 if (!visited.insert(current.value()).second) {
                     return domain::RepositoryResult<domain::CategoryId>(
                         std::unexpected(domain::RepositoryError::database(
@@ -222,6 +243,60 @@ CategoryRepositoryImpl::resolve_root_id_for_user(
             return domain::RepositoryResult<domain::CategoryId>(
                 std::unexpected(domain::RepositoryError::database(
                     "Category parent chain exceeds 64 levels")));
+        });
+}
+
+domain::RepositoryResult<domain::SystemCategoryTemplate>
+CategoryRepositoryImpl::find_template_by_id(
+    std::int64_t template_id,
+    const std::string& locale) {
+    if (template_id <= 0 || locale.empty()) {
+        return std::unexpected(domain::RepositoryError::validation(
+            "Category template id and locale are required"));
+    }
+    return postgres::execute_tenant_read<domain::SystemCategoryTemplate>(
+        db_, tenant_user_id_, "find category template", [&](const auto& transaction) {
+            constexpr const char* kSql = R"SQL(
+                SELECT id, name, locale, group_name, parent_id,
+                       default_board::text, sort_order, is_selectable
+                FROM system_category_templates
+                WHERE id = $1 AND (locale = $2 OR locale = 'zh-CN')
+                ORDER BY CASE WHEN locale = $2 THEN 0 ELSE 1 END
+                LIMIT 1
+            )SQL";
+            const auto result = transaction->execSqlSync(kSql, template_id, locale);
+            if (result.empty()) {
+                return domain::RepositoryResult<domain::SystemCategoryTemplate>(
+                    std::unexpected(domain::RepositoryError::not_found(
+                        "Category template not found")));
+            }
+            try {
+                const auto raw_sort_order = pg::getBigInt(result[0], 6);
+                if (raw_sort_order < std::numeric_limits<int>::min() ||
+                    raw_sort_order > std::numeric_limits<int>::max()) {
+                    return domain::RepositoryResult<domain::SystemCategoryTemplate>(
+                        std::unexpected(domain::RepositoryError::database(
+                            "Stored category template sort order is invalid")));
+                }
+                domain::SystemCategoryTemplate value;
+                value.id = pg::getBigInt(result[0], 0);
+                value.name = pg::getString(result[0], 1);
+                value.locale = pg::getString(result[0], 2);
+                value.group_name = pg::getString(result[0], 3);
+                value.parent_id = pg::getOptionalBigInt(result[0], 4);
+                const auto board = pg::getOptionalString(result[0], 5);
+                if (board.has_value()) {
+                    value.default_board = pg::parseCategoryBoard(*board);
+                }
+                value.sort_order = static_cast<int>(raw_sort_order);
+                value.is_selectable = pg::getBool(result[0], 7);
+                return domain::RepositoryResult<domain::SystemCategoryTemplate>(
+                    std::move(value));
+            } catch (const std::exception&) {
+                return domain::RepositoryResult<domain::SystemCategoryTemplate>(
+                    std::unexpected(domain::RepositoryError::database(
+                        "Stored category template row is invalid")));
+            }
         });
 }
 
@@ -286,6 +361,7 @@ domain::RepositoryResult<domain::CategoryId> CategoryRepositoryImpl::save(
                 SELECT board::text
                 FROM categories
                 WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL
+                FOR UPDATE NOWAIT
             )SQL";
             const auto parent = (*context)->transaction().execSqlSync(
                 kParentSql,
@@ -299,6 +375,41 @@ domain::RepositoryResult<domain::CategoryId> CategoryRepositoryImpl::save(
                 category.board()) {
                 return std::unexpected(domain::RepositoryError::validation(
                     "Parent category must use the same board"));
+            }
+            constexpr const char* kAncestorSql = R"SQL(
+                SELECT parent_id
+                FROM categories
+                WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL
+            )SQL";
+            const bool updating = category.id().is_valid();
+            std::set<std::int64_t> visited;
+            auto current = *category.parent_id();
+            bool reached_root = false;
+            for (int ancestor_depth = 1;
+                 ancestor_depth < domain::kMaxCategoryTreeDepth;
+                 ++ancestor_depth) {
+                if ((updating && current == category.id()) ||
+                    !visited.insert(current.value()).second) {
+                    return std::unexpected(domain::RepositoryError::validation(
+                        "Category parent would create a cycle"));
+                }
+                const auto ancestor = (*context)->transaction().execSqlSync(
+                    kAncestorSql, current.value(), category.owner().value());
+                if (ancestor.empty()) {
+                    return std::unexpected(domain::RepositoryError::not_found(
+                        "Category ancestor not found for user"));
+                }
+                const auto next = pg::getOptionalBigInt(ancestor[0], 0);
+                if (!next.has_value()) {
+                    reached_root = true;
+                    break;
+                }
+                current = domain::CategoryId(*next);
+            }
+            if (!reached_root) {
+                return std::unexpected(domain::RepositoryError::validation(
+                    "Category tree cannot exceed " +
+                    std::to_string(domain::kMaxCategoryTreeDepth) + " levels"));
             }
         }
 
@@ -362,6 +473,44 @@ domain::RepositoryResult<domain::CategoryId> CategoryRepositoryImpl::save(
         return std::unexpected(postgres::database_error("save category", error));
     } catch (const std::exception& error) {
         return std::unexpected(postgres::unexpected_error("save category", error));
+    }
+}
+
+domain::RepositoryVoidResult CategoryRepositoryImpl::soft_delete(
+    domain::ITransactionContext& tx_iface,
+    domain::CategoryId id,
+    domain::UserId user_id,
+    std::chrono::system_clock::time_point deleted_at) {
+    if (user_id != tenant_user_id_) {
+        return std::unexpected(category_not_found());
+    }
+    auto context = postgres::require_transaction(tx_iface, tenant_user_id_);
+    if (!context) {
+        return std::unexpected(context.error());
+    }
+    try {
+        const auto children = (*context)->transaction().execSqlSync(
+            "SELECT 1 FROM categories "
+            "WHERE parent_id = $1 AND user_id = $2 AND deleted_at IS NULL LIMIT 1",
+            id.value(), user_id.value());
+        if (!children.empty()) {
+            return std::unexpected(domain::RepositoryError::conflict(
+                "Category has active child categories"));
+        }
+        const auto result = (*context)->transaction().execSqlSync(
+            "UPDATE categories SET deleted_at = $1, updated_at = $1 "
+            "WHERE id = $2 AND user_id = $3 AND deleted_at IS NULL",
+            pg::toDbTimestamp(deleted_at), id.value(), user_id.value());
+        if (result.affectedRows() == 0) {
+            return std::unexpected(category_not_found());
+        }
+        return {};
+    } catch (const drogon::orm::DrogonDbException& error) {
+        return std::unexpected(postgres::database_error(
+            "soft delete category", error));
+    } catch (const std::exception& error) {
+        return std::unexpected(postgres::unexpected_error(
+            "soft delete category", error));
     }
 }
 

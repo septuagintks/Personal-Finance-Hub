@@ -12,10 +12,19 @@
 #include "pfh/domain/domain_error.h"
 #include <array>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 
 namespace pfh::domain {
+
+struct CurrencyMetadata {
+    std::string_view code;
+    std::string_view symbol;
+    std::string_view display_name;
+    std::uint8_t precision = 2;
+    bool is_crypto = false;
+};
 
 /// @brief Immutable currency code value object.
 ///
@@ -32,6 +41,10 @@ public:
 
     /// @brief True if this is a whitelisted crypto currency code.
     [[nodiscard]] bool is_crypto() const noexcept;
+
+    /// @brief Stable public metadata catalog shared by validation and the API.
+    /// The entries intentionally mirror migrations/V2__seed_initial_currencies.sql.
+    [[nodiscard]] static std::span<const CurrencyMetadata> catalog() noexcept;
 
     [[nodiscard]] bool operator==(const Currency& other) const noexcept {
         return code_ == other.code_;

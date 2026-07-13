@@ -25,7 +25,7 @@ NUMERIC(20,8)
 
 Exchange rates use:
 
-NUMERIC(20,10) or DECIMAL(30,10)
+NUMERIC(20,10)
 
 Example:
 
@@ -693,10 +693,12 @@ CREATE TABLE transfer_groups (
     created_at TIMESTAMPTZ NOT NULL,
     note TEXT,
     transfer_mode SMALLINT NOT NULL,
-    exchange_rate NUMERIC(30,10),
+    exchange_rate NUMERIC(20,10),
     exchange_rate_provider VARCHAR(64),
     exchange_rate_snapshot_time TIMESTAMPTZ,
-    CONSTRAINT uq_transfer_groups_id_user UNIQUE (id, user_id)
+    CONSTRAINT uq_transfer_groups_id_user UNIQUE (id, user_id),
+    CONSTRAINT chk_transfer_groups_exchange_rate
+        CHECK (exchange_rate IS NULL OR exchange_rate > 0)
 );
 ```
 
@@ -1083,7 +1085,7 @@ Application Use Cases:
 CreateTransactionUseCase
 CreateTransferUseCase
 DeleteTransactionUseCase
-GenerateMonthlyReportUseCase
+ReportQueryService
 RefreshExchangeRatesUseCase
 
 Domain Services:
@@ -1213,11 +1215,10 @@ int main() {
 project/
 ├── migrations/
 │   ├── V1__initial_schema.sql
-│   ├── V2__add_user_preferences.sql
-│   ├── V3__add_refresh_tokens.sql
-│   ├── V4__add_locale_to_category_templates.sql
-│   ├── V5__add_exchange_rate_indices.sql
-│   └── R__seed_default_categories.sql  (可重复执行)
+│   ├── V2__seed_initial_currencies.sql
+│   ├── V3__seed_system_category_templates.sql
+│   ├── V4__authentication_session_security.sql
+│   └── V5__align_transfer_rate_precision.sql
 ├── src/
 ├── CMakeLists.txt
 └── flyway.conf
@@ -1227,7 +1228,7 @@ project/
 
 - **版本化迁移**：`V<版本号>__<描述>.sql`
   - `V1__initial_schema.sql`
-  - `V2.1__add_user_email.sql`（支持小数版本）
+  - `V5__align_transfer_rate_precision.sql`
 - **可重复迁移**：`R__<描述>.sql`
   - 每次 checksum 变化时重新执行
   - 适合视图、存储过程、种子数据

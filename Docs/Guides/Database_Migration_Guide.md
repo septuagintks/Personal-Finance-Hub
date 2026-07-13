@@ -1,6 +1,6 @@
 # Personal Finance Hub - Database Migration Guide
 
-Version: 1.0
+Version: 1.1
 Backend: C++23
 Database: PostgreSQL 16+
 Migration Tool: Flyway
@@ -35,6 +35,10 @@ Flyway enforces strict naming:
 | V1      | `V1__initial_schema.sql`               | Phase 1 core schema (all tables)       |
 | V2      | `V2__seed_initial_currencies.sql`      | Seed fiat + controlled crypto metadata |
 | V3      | `V3__seed_system_category_templates.sql` | Seed global category template pool     |
+| V4      | `V4__authentication_session_security.sql` | Revoked sessions and authentication audit actions |
+| V5      | `V5__align_transfer_rate_precision.sql` | Align transfer snapshot rate to `NUMERIC(20,10)` |
+
+Validation status as of 2026-07-14: V1-V3 passed external PostgreSQL 16.14 / Flyway 10.22.0 empty-schema `migrate`, `info`, `validate`, second-run no-op, and seed assertions. V4/V5 pass local static and compile gates but have not yet run on the target PostgreSQL environment; P1-S12 keeps them as blocking checks.
 
 > **Pre-release note on V1:** `V1__initial_schema.sql` was revised in place
 > during Phase 1 development (multi-tenant `user_id` constraints and Row Level
@@ -43,10 +47,10 @@ Flyway enforces strict naming:
 > database that applied the earlier V1 will fail startup with a **checksum
 > mismatch** on the current file. Because Phase 1 has not shipped, the intended
 > resolution is to **drop and recreate** the affected development database (all
-> V1–V3 re-run cleanly on an empty DB), or, if the data must be kept, run
+> V1-V5 re-run cleanly on an empty DB), or, if the data must be kept, run
 > `flyway repair` to re-baseline the checksum after confirming the schema
 > already matches the current V1. From the first released environment onward,
-> V1 is frozen: all further schema changes must be additive `V4+` migrations
+> V1-V5 are frozen: all further schema changes must be additive `V6+` migrations
 > (see §6, §7.1).
 
 ---
@@ -114,7 +118,8 @@ psql -U pfh_user -d pfh_dev -h localhost -f migrations/V1__initial_schema.sql
 flyway info
 ```
 
-Expected output:
+Target output after the P1-S12 empty-schema run (illustrative; this is not
+evidence that V4/V5 have already run):
 
 ```text
 +-----------+---------+------------------------------+------+---------------------+---------+
@@ -123,6 +128,8 @@ Expected output:
 |           | 1       | initial schema               | SQL  | 2026-07-09 12:00:00 | Success |
 |           | 2       | seed initial currencies      | SQL  | 2026-07-09 12:00:05 | Success |
 |           | 3       | seed system category templates | SQL | 2026-07-09 12:00:08 | Success |
+|           | 4       | authentication session security | SQL | 2026-07-14 12:00:00 | Success |
+|           | 5       | align transfer rate precision | SQL | 2026-07-14 12:00:02 | Success |
 +-----------+---------+------------------------------+------+---------------------+---------+
 ```
 
@@ -134,11 +141,11 @@ Expected output:
 
 ```bash
 # Example: add user email field
-touch migrations/V4__add_user_email.sql
+touch migrations/V6__add_user_email.sql
 ```
 
 ```sql
--- V4__add_user_email.sql
+-- V6__add_user_email.sql
 ALTER TABLE users ADD COLUMN email VARCHAR(255);
 CREATE UNIQUE INDEX idx_users_email ON users(email) WHERE email IS NOT NULL;
 ```
@@ -215,20 +222,20 @@ ctest
 Flyway automatically rolls back the failed migration transaction:
 
 ```text
-ERROR: Failed to execute migration V4__add_user_email.sql
+ERROR: Failed to execute migration V6__add_user_email.sql
 Database state: unchanged (V3 still current)
 ```
 
 ### 8.2 Manual Rollback (Post-Deployment Issue)
 
-**Scenario**: V4 deployed successfully but application breaks.
+**Scenario**: V6 deployed successfully but application breaks.
 
 **Option 1: Forward fix** (preferred)
 
-Create V5 to repair issue:
+Create V7 to repair issue:
 
 ```sql
--- V5__fix_user_email_constraint.sql
+-- V7__fix_user_email_constraint.sql
 ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
 ```
 
@@ -238,10 +245,10 @@ ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
 flyway undo
 ```
 
-Executes `U4__remove_user_email.sql`:
+Executes `U6__remove_user_email.sql`:
 
 ```sql
--- U4__remove_user_email.sql
+-- U6__remove_user_email.sql
 ALTER TABLE users DROP COLUMN email;
 DROP INDEX idx_users_email;
 ```
@@ -371,7 +378,7 @@ git checkout migrations/V2__seed_initial_currencies.sql
 **Error**:
 
 ```text
-Migration V4__add_user_email.sql failed
+Migration V6__add_user_email.sql failed
 Status: Failed
 ```
 

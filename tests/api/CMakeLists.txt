@@ -2,6 +2,7 @@
 
 add_executable(pfh_api_tests
     api_auth_test.cpp
+    api_resource_test.cpp
     http_boundary_test.cpp
 )
 

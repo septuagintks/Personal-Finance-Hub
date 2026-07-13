@@ -70,6 +70,18 @@ TEST(TransferDomainService, WhenBuildFromBothAmountsCrossCurrency_DerivesRate) {
     EXPECT_TRUE(transfer->rate().has_value());
     EXPECT_EQ(transfer->rate()->rate().to_string(), "7.18");
     EXPECT_EQ(transfer->rate()->source(), "DerivedFromAmounts");
+
+    auto oversized_rate = TransferDomainService::build_from_both_amounts(
+        money("1", "USD"),
+        money("10000000000", "CNY"),
+        AccountId(1),
+        AccountId(2),
+        UserId(100),
+        sample_time(),
+        "Rate boundary",
+        TransferGroupId(999));
+    ASSERT_FALSE(oversized_rate.has_value());
+    EXPECT_EQ(oversized_rate.error().code, DomainErrorCode::InvalidExchangeRate);
 }
 
 TEST(TransferDomainService, WhenBuildFromBothAmountsSameCurrency_NoRate) {

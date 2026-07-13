@@ -7,6 +7,7 @@
 #include "pfh/application/dto.h"
 #include "pfh/application/error.h"
 #include "pfh/application/error_mapping.h"
+#include "pfh/application/input_constraints.h"
 #include "pfh/application/persistence/i_unit_of_work.h"
 #include "pfh/domain/events/domain_events.h"
 #include "pfh/domain/repositories/i_account_repository.h"
@@ -31,8 +32,23 @@ public:
           transactions_(transactions), uow_(uow) {}
 
     [[nodiscard]] Result<TransactionDto> execute(const CreateTransactionCommand& cmd) {
-        if (cmd.amount.empty()) {
-            return err(Error::validation("amount is required"));
+        if (!cmd.user_id.is_valid() || !cmd.account_id.is_valid() ||
+            (cmd.category_id.has_value() && !cmd.category_id->is_valid())) {
+            return err(Error::validation(
+                "user, account, and category ids must be valid"));
+        }
+        if (cmd.type != domain::TransactionType::Income &&
+            cmd.type != domain::TransactionType::Expense &&
+            cmd.type != domain::TransactionType::Adjustment) {
+            return err(Error::validation("unsupported transaction type"));
+        }
+        if (cmd.description.size() > kMaxDescriptionLength) {
+            return err(Error::validation(
+                "description exceeds the maximum length"));
+        }
+        if (!is_plain_decimal_string(cmd.amount, true)) {
+            return err(Error::validation(
+                "amount must be a plain decimal string"));
         }
         if (cmd.type == domain::TransactionType::Transfer) {
             return err(Error::validation(

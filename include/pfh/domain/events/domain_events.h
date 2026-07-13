@@ -11,6 +11,7 @@
 #pragma once
 
 #include "pfh/domain/account.h"
+#include "pfh/domain/category.h"
 #include "pfh/domain/events/i_domain_event.h"
 #include "pfh/domain/transaction.h"
 #include "pfh/domain/typed_id.h"
@@ -28,8 +29,7 @@ namespace event_detail {
 // locale/format independent; consumers parse it back to a time_point.
 [[nodiscard]] inline std::int64_t epoch_seconds(
     std::chrono::system_clock::time_point tp) {
-    return std::chrono::duration_cast<std::chrono::seconds>(tp.time_since_epoch())
-        .count();
+    return std::chrono::floor<std::chrono::seconds>(tp.time_since_epoch()).count();
 }
 
 [[nodiscard]] inline std::string json_string(std::string_view value) {
@@ -192,6 +192,97 @@ public:
 
 private:
     AccountId account_id_;
+};
+
+class AccountArchivedEvent final : public UserScopedEvent {
+public:
+    AccountArchivedEvent(
+        UserId user_id, AccountId account_id,
+        std::chrono::system_clock::time_point occurred_at)
+        : UserScopedEvent(user_id, occurred_at), account_id_(account_id) {}
+
+    [[nodiscard]] std::string event_name() const override { return "AccountArchived"; }
+    [[nodiscard]] std::string aggregate_type() const override { return "Account"; }
+    [[nodiscard]] std::string aggregate_id() const override {
+        return account_id_.to_string();
+    }
+    [[nodiscard]] std::string payload_json() const override {
+        return "{" + base_payload() +
+               ",\"accountId\":" + std::to_string(account_id_.value()) + "}";
+    }
+
+private:
+    AccountId account_id_;
+};
+
+class CategoryCreatedEvent final : public UserScopedEvent {
+public:
+    CategoryCreatedEvent(
+        UserId user_id, CategoryId category_id, CategoryBoard board,
+        std::chrono::system_clock::time_point occurred_at)
+        : UserScopedEvent(user_id, occurred_at),
+          category_id_(category_id),
+          board_(board) {}
+
+    [[nodiscard]] std::string event_name() const override { return "CategoryCreated"; }
+    [[nodiscard]] std::string aggregate_type() const override { return "Category"; }
+    [[nodiscard]] std::string aggregate_id() const override {
+        return category_id_.to_string();
+    }
+    [[nodiscard]] std::string payload_json() const override {
+        return "{" + base_payload() +
+               ",\"categoryId\":" + std::to_string(category_id_.value()) +
+               ",\"board\":" + event_detail::json_string(
+                   board_ == CategoryBoard::Income ? "income" : "expense") + "}";
+    }
+
+private:
+    CategoryId category_id_;
+    CategoryBoard board_;
+};
+
+class CategoryDeletedEvent final : public UserScopedEvent {
+public:
+    CategoryDeletedEvent(
+        UserId user_id, CategoryId category_id, CategoryBoard board,
+        std::chrono::system_clock::time_point occurred_at)
+        : UserScopedEvent(user_id, occurred_at),
+          category_id_(category_id),
+          board_(board) {}
+
+    [[nodiscard]] std::string event_name() const override { return "CategoryDeleted"; }
+    [[nodiscard]] std::string aggregate_type() const override { return "Category"; }
+    [[nodiscard]] std::string aggregate_id() const override {
+        return category_id_.to_string();
+    }
+    [[nodiscard]] std::string payload_json() const override {
+        return "{" + base_payload() +
+               ",\"categoryId\":" + std::to_string(category_id_.value()) +
+               ",\"board\":" + event_detail::json_string(
+                   board_ == CategoryBoard::Income ? "income" : "expense") + "}";
+    }
+
+private:
+    CategoryId category_id_;
+    CategoryBoard board_;
+};
+
+class UserPreferenceUpdatedEvent final : public UserScopedEvent {
+public:
+    UserPreferenceUpdatedEvent(
+        UserId user_id, std::chrono::system_clock::time_point occurred_at)
+        : UserScopedEvent(user_id, occurred_at) {}
+
+    [[nodiscard]] std::string event_name() const override {
+        return "UserPreferenceUpdated";
+    }
+    [[nodiscard]] std::string aggregate_type() const override { return "UserPreference"; }
+    [[nodiscard]] std::string aggregate_id() const override {
+        return user_id_.to_string();
+    }
+    [[nodiscard]] std::string payload_json() const override {
+        return "{" + base_payload() + "}";
+    }
 };
 
 class UserRegisteredEvent final : public UserScopedEvent {

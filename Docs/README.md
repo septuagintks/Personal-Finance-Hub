@@ -22,6 +22,7 @@ Docs/
 │   ├── 08_Exchange_Rate_System_Design.md # 汇率系统设计（三角折算、降级策略）
 │   ├── 09_Reporting_and_Analytics_Design.md # 报表与分析设计（轻量级 CQRS、大数据折算优化）
 │   ├── 10_REST_API_Design.md           # REST API 接口规约 (JWT 认证、黑名单)
+│   ├── 10_REST_API_OpenAPI.json        # Phase 1 OpenAPI 3.1 可执行契约
 │   ├── 11_Sync_Framework_Design.md     # 外部平台同步框架设计
 │   ├── 12_Scheduler_Design.md          # 调度器与后台任务设计
 │   ├── 13_Frontend_Design.md           # 前端设计规约（Vue 3 + ECharts）
@@ -37,7 +38,7 @@ Docs/
 │   ├── Phase_1_S07_Delivery_Summary.md # Phase 1 S07 数据库迁移与持久化基础交付记录
 │   ├── Phase_1_S08_Delivery_Summary.md # Phase 1 S08 Repository 与 Unit of Work 交付记录
 │   ├── Phase_1_S09_Delivery_Summary.md # Phase 1 S09 Application Use Cases 交付记录
-│   ├── Phase_1_S10_Delivery_Summary.md # Phase 1 S10 累计交付记录（进行中）
+│   ├── Phase_1_S10_Delivery_Summary.md # Phase 1 S10 本地交付记录
 │   ├── Phase_1_S10_PostgreSQL_Persistence_Validation_Report.md # V3 外部复测最终报告
 │   └── tasks.md                        # 待办任务跟踪
 │
@@ -76,11 +77,11 @@ Docs/
 1. **后端技术栈**：C++23 + Drogon 框架 + CMake + PostgreSQL 16+ + spdlog。
 2. **金融原语**：绝不使用浮点数表示金额，统一采用高精度定点数 `Decimal`（`NUMERIC(20,8)`）与强类型 `Money`。
 3. **多币种与三角折算**：以 USD 为固定枢纽货币，非 USD 货币对通过 `CurrencyConversionService` 在纯内存中进行三角折算，数据库仅存储 N-1 条 USD 汇率对。
-4. **轻量级 CQRS**：写路径通过 Domain 实体和 Repository 保证强一致性；读路径（报表）绕过 Domain 实体，直接执行 SQL 聚合，并在 C++ 内存中进行汇率折算，针对大数据量提供 SQL 端提前折算优化。
-5. **事务后事件派发 (Post-Commit Dispatch)**：在 `DrogonUnitOfWork` 物理 Commit 成功后才派发领域事件，防止事务回滚导致事件错误派发。
+4. **轻量级 CQRS**：写路径通过 Domain 实体和 Repository 保证强一致性；Phase 1 报表由 Application `ReportQueryService` 通过 request-scoped Repository 读取并在 C++ 内完成精确折算，后续可在不改变 DTO 语义的前提下引入 SQL 聚合端口。
+5. **事务后事件派发 (Post-Commit Dispatch)**：`DrogonUnitOfWork` 将事件与业务事实同事务写入 outbox；物理 Commit 成功后再由 `OutboxPublisherJob` claim 并派发，防止回滚事务产生错误事件。
 6. **全局异常拦截**：通过 Drogon 全局异常处理器捕获非预期异常，生成唯一 `TraceId`，在保障生产环境安全（不泄露敏感信息）的同时提供完整的服务端日志追溯。
 
-当前进度（2026-07-14）：P1-S01 至 P1-S09 与 P1-S10-01 至 S10-03 已完成实现，下一步执行 S10-04 production composition root。Windows GCC 16 当前 273/273 通过，PostgreSQL 适配器在 OFF 模式也纳入离线全源编译门禁；V3 已在外部 PostgreSQL 16.14 + Flyway 10.22.0 空库复测通过。真实 Drogon/PostgreSQL fixture、REST API、后台任务和 P1-S12 完整环境验收尚未完成，不能据此视为 Phase 1 已完成。
+当前进度（2026-07-14）：P1-S01 至 P1-S10 已完成本地实现与全量 review，下一步进入 P1-S11 Outbox、调度和后台任务。Windows GCC 16 / PostgreSQL OFF 当前 321/321 通过，并覆盖 framework-neutral API、OpenAPI/路由、迁移和 PostgreSQL adapter 静态门禁；V1-V3 已在外部 PostgreSQL 16.14 + Flyway 10.22.0 空库复测通过。V4/V5、真实 Drogon/OpenSSL/Argon2 ABI、PostgreSQL Repository/RLS/连接池、Linux/Docker 和运行时 API 仍由 P1-S12 阻断，不能据此视为 Phase 1 已完成。
 
 ---
 
@@ -101,4 +102,4 @@ Docs/
 1. **阅读顺序推荐**：先看 [Architecture/01_Technical_Architecture.md](Architecture/01_Technical_Architecture.md) 和 [Architecture/07_Workflow_and_Lifecycle_Design.md](Architecture/07_Workflow_and_Lifecycle_Design.md)，再看 [Architecture/04_Money_Currency_System_Design.md](Architecture/04_Money_Currency_System_Design.md)、[Architecture/06_Service_and_Use_Case_Design.md](Architecture/06_Service_and_Use_Case_Design.md)、[Architecture/08_Exchange_Rate_System_Design.md](Architecture/08_Exchange_Rate_System_Design.md)，最后补齐 [Architecture/02_Database_Design.md](Architecture/02_Database_Design.md) 与 [Architecture/05_Repository_and_Persistence_Design.md](Architecture/05_Repository_and_Persistence_Design.md)。
 2. **阶段计划**：进入代码实现前，先阅读 [Development_Plans/Overall_Development_Plan.md](Development_Plans/Overall_Development_Plan.md) 与对应 Phase 开发计划，并以 [Development/tasks.md](Development/tasks.md) 跟踪进度。
 3. **开发规范**：新文档或修改文档时，请遵守 [Standards/Documents_Format_Standard.md](Standards/Documents_Format_Standard.md)；目录树变更时，请同步更新 [Guides/Directory_Guidance.md](Guides/Directory_Guidance.md)。
-4. **Linux 工作流**：最终部署目标为 Linux；P1-S10 开发期间按 [Guides/Linux_Development_Workflow.md](Guides/Linux_Development_Workflow.md) 保持可复现命令，并在 P1-S12 由另一台机器完成 Linux、Docker 与真实 PostgreSQL 阻断门禁。
+4. **Linux 工作流**：最终部署目标为 Linux；Phase 1 开发期间按 [Guides/Linux_Development_Workflow.md](Guides/Linux_Development_Workflow.md) 保持可复现命令，并在 P1-S12 由另一台机器完成 Linux、Docker 与真实 PostgreSQL 阻断门禁。

@@ -49,6 +49,9 @@ public:
         domain::UserId user_id,
         std::optional<std::chrono::system_clock::time_point> from = std::nullopt,
         std::optional<std::chrono::system_clock::time_point> to = std::nullopt) {
+        if (!user_id.is_valid()) {
+            return err(Error::validation("User id is invalid"));
+        }
         auto pref = preferences_.find_by_user(user_id);
         if (!pref) {
             return err(from_repository(pref.error()));
@@ -136,7 +139,13 @@ public:
         return dto;
     }
 
-    [[nodiscard]] Result<NetWorthDto> net_worth(domain::UserId user_id) {
+    [[nodiscard]] Result<NetWorthDto> net_worth(
+        domain::UserId user_id,
+        std::chrono::system_clock::time_point now =
+            std::chrono::system_clock::now()) {
+        if (!user_id.is_valid()) {
+            return err(Error::validation("User id is invalid"));
+        }
         auto pref = preferences_.find_by_user(user_id);
         if (!pref) {
             return err(from_repository(pref.error()));
@@ -154,8 +163,6 @@ public:
         }
         domain::Money assets(*zero, base);
         domain::Money liabilities(*zero, base);
-        const auto now = std::chrono::system_clock::now();
-
         for (const auto& account : *accounts) {
             auto snapshot = accounts_.balance_of(account.id());
             if (!snapshot) {
@@ -201,6 +208,9 @@ public:
     [[nodiscard]] Result<DashboardSummaryDto> dashboard_summary(
         domain::UserId user_id,
         std::chrono::system_clock::time_point now = std::chrono::system_clock::now()) {
+        if (!user_id.is_valid()) {
+            return err(Error::validation("User id is invalid"));
+        }
         // Month boundaries are computed in the user's own timezone so a
         // transaction near local midnight on the 1st/last of the month is filed
         // in the correct calendar month, not shifted by the UTC offset.
@@ -214,7 +224,7 @@ public:
         }
         const auto [period_start, period_end] = *window;
 
-        auto nw = net_worth(user_id);
+        auto nw = net_worth(user_id, now);
         if (!nw) {
             return err(nw.error());
         }
@@ -258,8 +268,76 @@ public:
         return dto;
     }
 
+    /// @brief Inclusive calendar-month trend in the user's configured timezone.
+    /// Each bucket is converted to the half-open UTC range [local month start,
+    /// next local month start), so DST/UTC offsets cannot move boundary rows.
+    [[nodiscard]] Result<CashFlowTrendDto> cash_flow_trend(
+        domain::UserId user_id,
+        int start_year,
+        unsigned start_month,
+        int end_year,
+        unsigned end_month) {
+        namespace ch = std::chrono;
+        if (!user_id.is_valid()) {
+            return err(Error::validation("User id is invalid"));
+        }
+        const ch::year_month start{
+            ch::year{start_year}, ch::month{start_month}};
+        const ch::year_month end{
+            ch::year{end_year}, ch::month{end_month}};
+        if (!start.ok() || !end.ok() || start > end) {
+            return err(Error::validation(
+                "Cash-flow month range is invalid"));
+        }
+        const int start_serial = start_year * 12 +
+            static_cast<int>(start_month) - 1;
+        const int end_serial = end_year * 12 +
+            static_cast<int>(end_month) - 1;
+        if (end_serial - start_serial >= 120) {
+            return err(Error::validation(
+                "Cash-flow month range cannot exceed 120 months"));
+        }
+
+        auto preference = preferences_.find_by_user(user_id);
+        if (!preference) {
+            return err(from_repository(preference.error()));
+        }
+        CashFlowTrendDto result;
+        result.base_currency = preference->base_currency().code();
+        for (auto current = start; current <= end; current += ch::months{1}) {
+            auto window = calendar_month_window(current, preference->timezone());
+            if (!window) {
+                return err(window.error());
+            }
+            auto flow = cash_flow(user_id, window->first, window->second);
+            if (!flow) {
+                return err(flow.error());
+            }
+            const auto month_number = static_cast<unsigned>(current.month());
+            std::string period = std::to_string(static_cast<int>(current.year())) + "-";
+            if (month_number < 10) period += "0";
+            period += std::to_string(month_number);
+            result.trends.push_back(CashFlowPeriodDto{
+                std::move(period), flow->income_total, flow->expense_total,
+                flow->net_total});
+        }
+        return result;
+    }
+
 private:
     using TimePoint = std::chrono::system_clock::time_point;
+
+    [[nodiscard]] static Result<TimePoint> checked_time_point(
+        std::chrono::sys_seconds value) {
+        namespace ch = std::chrono;
+        const auto minimum = ch::ceil<ch::seconds>(TimePoint::min());
+        const auto maximum = ch::floor<ch::seconds>(TimePoint::max());
+        if (value < minimum || value > maximum) {
+            return err(Error::validation(
+                "Reporting month is outside the supported system clock range"));
+        }
+        return ch::time_point_cast<TimePoint::duration>(value);
+    }
 
     // Compute the half-open UTC window [month_start, next_month_start) for the
     // calendar month that contains `now` AS OBSERVED IN `tz_name`. The month
@@ -275,14 +353,20 @@ private:
         TimePoint now, const std::string& tz_name) {
         namespace ch = std::chrono;
 
+        if (tz_name.empty()) {
+            return err(Error(
+                ErrorCode::ConfigurationError,
+                "Configured timezone is unavailable",
+                "timezone is empty"));
+        }
         const ch::time_zone* zone = nullptr;
         try {
-            zone = ch::locate_zone(tz_name.empty() ? "UTC" : tz_name);
+            zone = ch::locate_zone(tz_name);
         } catch (const std::exception&) {
             return err(Error(
                 ErrorCode::ConfigurationError,
                 "Configured timezone is unavailable",
-                tz_name.empty() ? "UTC" : tz_name));
+                tz_name));
         }
 
         // Local calendar date of `now`.
@@ -300,9 +384,45 @@ private:
         // Convert the two local midnights back to UTC instants.
         const auto start = zone->to_sys(first_local, ch::choose::earliest);
         const auto end = zone->to_sys(next_local, ch::choose::earliest);
-        return std::pair<TimePoint, TimePoint>{
-            TimePoint{start.time_since_epoch()},
-            TimePoint{end.time_since_epoch()}};
+        auto checked_start = checked_time_point(start);
+        auto checked_end = checked_time_point(end);
+        if (!checked_start) return err(checked_start.error());
+        if (!checked_end) return err(checked_end.error());
+        return std::pair<TimePoint, TimePoint>{*checked_start, *checked_end};
+    }
+
+    [[nodiscard]] static Result<std::pair<TimePoint, TimePoint>>
+    calendar_month_window(
+        std::chrono::year_month month,
+        const std::string& tz_name) {
+        namespace ch = std::chrono;
+        if (tz_name.empty()) {
+            return err(Error(
+                ErrorCode::ConfigurationError,
+                "Configured timezone is unavailable",
+                "timezone is empty"));
+        }
+        const ch::time_zone* zone = nullptr;
+        try {
+            zone = ch::locate_zone(tz_name);
+        } catch (const std::exception&) {
+            return err(Error(
+                ErrorCode::ConfigurationError,
+                "Configured timezone is unavailable",
+                tz_name));
+        }
+        const auto next = month + ch::months{1};
+        const ch::local_days start_local{
+            ch::year_month_day{month.year(), month.month(), ch::day{1}}};
+        const ch::local_days end_local{
+            ch::year_month_day{next.year(), next.month(), ch::day{1}}};
+        const auto start = zone->to_sys(start_local, ch::choose::earliest);
+        const auto end = zone->to_sys(end_local, ch::choose::earliest);
+        auto checked_start = checked_time_point(start);
+        auto checked_end = checked_time_point(end);
+        if (!checked_start) return err(checked_start.error());
+        if (!checked_end) return err(checked_end.error());
+        return std::pair<TimePoint, TimePoint>{*checked_start, *checked_end};
     }
 
     // Format `part / whole` as a one-decimal percentage string like "68.0%".
@@ -324,25 +444,23 @@ private:
         if (!pct) {
             return err(from_domain(pct.error()));
         }
-        // Round to one decimal place: multiply by 10, truncate to integer via
-        // string, then reinsert the decimal point. Decimal has no direct
-        // round-to-scale, so format from the canonical string.
-        return format_one_decimal(*pct) + "%";
+        auto rounded = pct->round_to_scale(1);
+        if (!rounded) {
+            return err(from_domain(rounded.error()));
+        }
+        return format_one_decimal(*rounded) + "%";
     }
 
     // Render a Decimal with exactly one fractional digit as a plain display
-    // string, e.g. 68 -> "68.0", 35.68 -> "35.6" (display-only truncation of
-    // extra digits; the canonical string is already trimmed and half-even
-    // rounded at the Decimal scale, so this only affects presentation).
+    // string, e.g. 68 -> "68.0", 35.7 -> "35.7". The caller has already
+    // applied Half-Even rounding to one fractional digit.
     [[nodiscard]] static std::string format_one_decimal(const domain::Decimal& d) {
         std::string s = d.to_string();
         const auto dot = s.find('.');
         if (dot == std::string::npos) {
             return s + ".0";
         }
-        if (dot + 2 < s.size()) {
-            s = s.substr(0, dot + 2); // keep exactly one fractional digit
-        } else if (dot + 2 > s.size()) {
+        if (dot + 2 > s.size()) {
             s += "0"; // pad to one fractional digit
         }
         return s;
@@ -509,15 +627,18 @@ private:
                 auto root = categories_->resolve_root_id_for_user(
                     *tx.category_id(), user_id);
                 if (!root) {
-                    // A real repository failure must surface, not be swallowed.
-                    if (root.error().status == domain::RepositoryStatus::DatabaseError) {
+                    if (root.error().status == domain::RepositoryStatus::NotFound) {
+                        // A physically missing historical category cannot be
+                        // named, but the report can still retain the amount.
+                        bucket = std::nullopt;
+                    } else {
                         return err(from_repository(root.error()));
                     }
-                    // NotFound (e.g. category deleted): treat as uncategorized.
-                    bucket = std::nullopt;
                 } else {
                     bucket = *root;
-                    auto root_cat = categories_->find_by_id_for_user(*root, user_id);
+                    auto root_cat =
+                        categories_->find_by_id_for_user_including_deleted(
+                            *root, user_id);
                     if (!root_cat) {
                         return err(from_repository(root_cat.error()));
                     }
@@ -565,15 +686,16 @@ private:
             result.push_back(std::move(dto));
         }
         // Largest amount first. Compare by parsed Decimal to avoid string order.
-        std::sort(result.begin(), result.end(),
-                  [](const CategoryBreakdownDto& a, const CategoryBreakdownDto& b) {
-                      auto da = domain::Decimal::parse(a.amount);
-                      auto db = domain::Decimal::parse(b.amount);
-                      if (!da || !db) {
-                          return false;
-                      }
-                      return *da > *db;
-                  });
+        std::stable_sort(
+            result.begin(), result.end(),
+            [](const CategoryBreakdownDto& a, const CategoryBreakdownDto& b) {
+                auto da = domain::Decimal::parse(a.amount);
+                auto db = domain::Decimal::parse(b.amount);
+                if (!da || !db) {
+                    return false;
+                }
+                return *da > *db;
+            });
         return result;
     }
 
@@ -581,10 +703,11 @@ private:
     //
     // Fallback chain (all point-in-time, never future rates):
     //   1. same currency               -> identity
-    //   2. direct   from -> base        -> multiply
-    //   3. reverse  base -> from        -> divide (avoids inverse rounding loss)
-    //   4. USD triangulation           -> USD->from & USD->base, cross-rate
-    //   5. otherwise                    -> error (missing rate; NOT latest)
+    //   2. zero amount                 -> zero in base (no rate required)
+    //   3. direct   from -> base        -> multiply
+    //   4. reverse  base -> from        -> divide (avoids inverse rounding loss)
+    //   5. USD triangulation           -> USD->from & USD->base, cross-rate
+    //   6. otherwise                    -> error (missing rate; NOT latest)
     //
     // Reproducibility: we only ever call find_historical(at). We deliberately do
     // NOT fall back to find_latest, which could return a rate fetched AFTER `at`
@@ -597,6 +720,9 @@ private:
         std::chrono::system_clock::time_point at) const {
         if (amount.currency() == base) {
             return amount;
+        }
+        if (amount.is_zero()) {
+            return domain::Money(amount.amount(), base);
         }
 
         // Look up a rate at-or-before `at`. Only a genuine NotFound may fall
@@ -615,7 +741,7 @@ private:
             return err(from_repository(r.error()));
         };
 
-        // 2. Direct rate: 1 from = rate base.
+        // 3. Direct rate: 1 from = rate base.
         auto direct = lookup(amount.currency(), base);
         if (!direct) {
             return err(direct.error());
@@ -624,7 +750,7 @@ private:
             return map_domain(domain::CurrencyConversionService::convert(amount, **direct));
         }
 
-        // 3. Reverse pair: 1 base = rate from. Convert by division to avoid the
+        // 4. Reverse pair: 1 base = rate from. Convert by division to avoid the
         //    rounding loss of inverting the rate first
         //    (e.g. 700 CNY / 7 = 100 USD exactly).
         auto reverse = lookup(base, amount.currency());
@@ -639,7 +765,7 @@ private:
             return domain::Money(*converted, base);
         }
 
-        // 4. USD triangulation for non-USD <-> non-USD pairs.
+        // 5. USD triangulation for non-USD <-> non-USD pairs.
         auto usd = domain::Currency::create("USD");
         if (!usd) {
             return err(from_domain(usd.error()));
@@ -667,7 +793,7 @@ private:
             }
         }
 
-        // 5. No usable point-in-time rate. Do not guess with a future/latest rate.
+        // 6. No usable point-in-time rate. Do not guess with a future/latest rate.
         return err(Error(ErrorCode::InvalidExchangeRate,
                          "Missing exchange rate for report conversion at the requested time",
                          amount.currency().code() + "->" + base.code()));

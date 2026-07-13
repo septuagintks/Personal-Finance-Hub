@@ -10,6 +10,7 @@
 
 #include "pfh/domain/repositories/i_category_repository.h"
 #include "pfh/infrastructure/persistence/in_memory_store.h"
+#include <algorithm>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -37,6 +38,18 @@ public:
     }
 
     [[nodiscard]] domain::RepositoryResult<domain::Category>
+    find_by_id_for_user_including_deleted(
+        domain::CategoryId id,
+        domain::UserId user_id) override {
+        auto category = lookup(id.value());
+        if (!category.has_value() || category->owner() != user_id) {
+            return std::unexpected(domain::RepositoryError::not_found(
+                "Category not found for user"));
+        }
+        return *category;
+    }
+
+    [[nodiscard]] domain::RepositoryResult<domain::Category>
     find_by_id_for_user_for_update(
         domain::ITransactionContext& /*tx*/,
         domain::CategoryId id,
@@ -57,6 +70,12 @@ public:
                 result.push_back(cat);
             }
         }
+        std::sort(result.begin(), result.end(), [](const auto& lhs, const auto& rhs) {
+            if (lhs.sort_order() != rhs.sort_order()) {
+                return lhs.sort_order() < rhs.sort_order();
+            }
+            return lhs.id() < rhs.id();
+        });
         return result;
     }
 
@@ -68,25 +87,34 @@ public:
                 result.push_back(cat);
             }
         }
+        std::sort(result.begin(), result.end(), [](const auto& lhs, const auto& rhs) {
+            if (lhs.board() != rhs.board()) {
+                return static_cast<int>(lhs.board()) < static_cast<int>(rhs.board());
+            }
+            if (lhs.sort_order() != rhs.sort_order()) {
+                return lhs.sort_order() < rhs.sort_order();
+            }
+            return lhs.id() < rhs.id();
+        });
         return result;
     }
 
     [[nodiscard]] domain::RepositoryResult<domain::CategoryId> resolve_root_id_for_user(
         domain::CategoryId id,
         domain::UserId user_id) override {
-        auto current = find_by_id_for_user(id, user_id);
+        auto current = find_by_id_for_user_including_deleted(id, user_id);
         if (!current) {
             return std::unexpected(current.error());
         }
         // Walk parents to the root, guarding against cycles / broken chains with
         // a bound (a user cannot realistically have this many nesting levels).
-        constexpr int kMaxDepth = 64;
         domain::Category node = *current;
-        for (int depth = 0; depth < kMaxDepth; ++depth) {
+        for (int depth = 0; depth < domain::kMaxCategoryTreeDepth; ++depth) {
             if (node.is_root()) {
                 return node.id();
             }
-            auto parent = find_by_id_for_user(*node.parent_id(), user_id);
+            auto parent = find_by_id_for_user_including_deleted(
+                *node.parent_id(), user_id);
             if (!parent) {
                 return std::unexpected(domain::RepositoryError::database(
                     "Broken category parent chain for " + id.to_string()));
@@ -95,6 +123,19 @@ public:
         }
         return std::unexpected(domain::RepositoryError::database(
             "Category parent chain too deep (possible cycle) for " + id.to_string()));
+    }
+
+    [[nodiscard]] domain::RepositoryResult<domain::SystemCategoryTemplate>
+    find_template_by_id(
+        std::int64_t template_id,
+        const std::string& locale) override {
+        const auto found = store_.category_templates.find(template_id);
+        if (found == store_.category_templates.end() ||
+            (found->second.locale != locale && found->second.locale != "zh-CN")) {
+            return std::unexpected(domain::RepositoryError::not_found(
+                "Category template not found"));
+        }
+        return found->second;
     }
 
     [[nodiscard]] domain::RepositoryResult<domain::CategoryId> save(
@@ -124,6 +165,33 @@ public:
             if (parent->board() != category.board()) {
                 return std::unexpected(domain::RepositoryError::validation(
                     "Parent category must use the same board"));
+            }
+            std::set<std::int64_t> visited;
+            auto ancestor = *parent;
+            bool reached_root = false;
+            for (int ancestor_depth = 1;
+                 ancestor_depth < domain::kMaxCategoryTreeDepth;
+                 ++ancestor_depth) {
+                if ((category.id().is_valid() && ancestor.id() == category.id()) ||
+                    !visited.insert(ancestor.id().value()).second) {
+                    return std::unexpected(domain::RepositoryError::validation(
+                        "Category parent would create a cycle"));
+                }
+                if (!ancestor.parent_id().has_value()) {
+                    reached_root = true;
+                    break;
+                }
+                auto next = find_by_id_for_user(
+                    *ancestor.parent_id(), category.owner());
+                if (!next) {
+                    return std::unexpected(next.error());
+                }
+                ancestor = *next;
+            }
+            if (!reached_root) {
+                return std::unexpected(domain::RepositoryError::validation(
+                    "Category tree cannot exceed " +
+                    std::to_string(domain::kMaxCategoryTreeDepth) + " levels"));
             }
         }
 
@@ -176,6 +244,34 @@ public:
         }
         store_.staged_categories.insert_or_assign(id, category);
         return category.id();
+    }
+
+    [[nodiscard]] domain::RepositoryVoidResult soft_delete(
+        domain::ITransactionContext& /*tx*/,
+        domain::CategoryId id,
+        domain::UserId user_id,
+        std::chrono::system_clock::time_point deleted_at) override {
+        if (!store_.in_transaction) {
+            return std::unexpected(domain::RepositoryError::database(
+                "soft_delete requires an active transaction"));
+        }
+        auto category = find_by_id_for_user(id, user_id);
+        if (!category) {
+            return std::unexpected(category.error());
+        }
+        for (const auto& [_, candidate] : merged()) {
+            if (!candidate.is_deleted() &&
+                candidate.parent_id() == std::optional<domain::CategoryId>(id)) {
+                return std::unexpected(domain::RepositoryError::conflict(
+                    "Category has active child categories"));
+            }
+        }
+        domain::Category deleted(
+            category->id(), category->owner(), category->name(), category->board(),
+            category->parent_id(), category->source(), category->template_id(),
+            category->sort_order(), deleted_at, category->created_at(), deleted_at);
+        store_.staged_categories.insert_or_assign(id.value(), std::move(deleted));
+        return {};
     }
 
 private:

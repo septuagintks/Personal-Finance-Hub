@@ -46,7 +46,7 @@
 **关键约束：**
 
 - 金额：`NUMERIC(20,8)`
-- 汇率：`NUMERIC(20,10)` / `NUMERIC(30,10)`
+- 汇率：V1 原始快照列为 `NUMERIC(30,10)`；P1-S10 的 V5 已统一收紧为 `NUMERIC(20,10)`，真实 V5 迁移验证留到 P1-S12
 - 跨用户表含 `user_id` 或通过 FK 强约束用户边界
 - `exchange_rates` 禁止 UPDATE/DELETE（append-only）
 - `currencies.code` 使用 `VARCHAR(10)`，兼容 crypto ticker

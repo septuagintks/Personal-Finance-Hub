@@ -22,16 +22,29 @@ class AuthSessionRepositoryImpl;
 class DrogonUnitOfWorkFactory;
 class OpenSslTokenService;
 class PostgresActiveCurrencyQuery;
+class PostgresRequestScopeFactory;
 class RegistrationDefaultsRepositoryImpl;
 class SystemClock;
 class UserRepositoryImpl;
 }
 
 namespace pfh::presentation {
+class AccountController;
 class ApiApplication;
 class AuthController;
+class CategoryController;
+class CurrencyController;
 class DrogonHttpAdapter;
 class JwtFilter;
+class PreferenceController;
+class TagController;
+class TransactionController;
+class TransferController;
+class ReportController;
+}
+
+namespace pfh::application {
+class FinanceApplicationService;
 }
 
 namespace pfh::bootstrap {
@@ -63,7 +76,18 @@ private:
     std::unique_ptr<infrastructure::PostgresActiveCurrencyQuery>
         background_currency_query_;
     std::unique_ptr<application::AuthService> auth_service_;
+    std::unique_ptr<infrastructure::PostgresRequestScopeFactory>
+        request_scope_factory_;
+    std::unique_ptr<application::FinanceApplicationService> finance_service_;
     std::unique_ptr<presentation::AuthController> auth_controller_;
+    std::unique_ptr<presentation::AccountController> account_controller_;
+    std::unique_ptr<presentation::CategoryController> category_controller_;
+    std::unique_ptr<presentation::TagController> tag_controller_;
+    std::unique_ptr<presentation::PreferenceController> preference_controller_;
+    std::unique_ptr<presentation::CurrencyController> currency_controller_;
+    std::unique_ptr<presentation::TransactionController> transaction_controller_;
+    std::unique_ptr<presentation::TransferController> transfer_controller_;
+    std::unique_ptr<presentation::ReportController> report_controller_;
     std::unique_ptr<presentation::JwtFilter> jwt_filter_;
     std::unique_ptr<presentation::ApiApplication> api_application_;
     std::unique_ptr<presentation::DrogonHttpAdapter> http_adapter_;

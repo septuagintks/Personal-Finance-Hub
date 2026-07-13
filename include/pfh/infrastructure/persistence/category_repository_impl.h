@@ -27,6 +27,11 @@ public:
         domain::CategoryId id,
         domain::UserId user_id) override;
 
+    [[nodiscard]] domain::RepositoryResult<domain::Category>
+    find_by_id_for_user_including_deleted(
+        domain::CategoryId id,
+        domain::UserId user_id) override;
+
     [[nodiscard]] domain::RepositoryResult<domain::Category> find_by_id_for_user_for_update(
         domain::ITransactionContext& tx,
         domain::CategoryId id,
@@ -43,9 +48,20 @@ public:
         domain::CategoryId id,
         domain::UserId user_id) override;
 
+    [[nodiscard]] domain::RepositoryResult<domain::SystemCategoryTemplate>
+    find_template_by_id(
+        std::int64_t template_id,
+        const std::string& locale) override;
+
     [[nodiscard]] domain::RepositoryResult<domain::CategoryId> save(
         domain::ITransactionContext& tx,
         const domain::Category& category) override;
+
+    [[nodiscard]] domain::RepositoryVoidResult soft_delete(
+        domain::ITransactionContext& tx,
+        domain::CategoryId id,
+        domain::UserId user_id,
+        std::chrono::system_clock::time_point deleted_at) override;
 
 private:
     drogon::orm::DbClientPtr db_;

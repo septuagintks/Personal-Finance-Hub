@@ -49,6 +49,11 @@ public:
         domain::UserId user_id,
         bool include_deleted = false) override;
 
+    [[nodiscard]] domain::RepositoryResult<domain::TransferSnapshot>
+    find_transfer_by_group(
+        domain::TransferGroupId group_id,
+        domain::UserId user_id) override;
+
     [[nodiscard]] domain::RepositoryVoidResult soft_delete(
         domain::ITransactionContext& tx,
         domain::TransactionId id,

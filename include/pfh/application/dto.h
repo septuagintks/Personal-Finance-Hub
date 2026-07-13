@@ -9,9 +9,11 @@
 #include "pfh/domain/account.h"
 #include "pfh/domain/category.h"
 #include "pfh/domain/money.h"
+#include "pfh/domain/tag.h"
 #include "pfh/domain/transaction.h"
 #include "pfh/domain/transfer_aggregate.h"
 #include "pfh/domain/user.h"
+#include "pfh/domain/user_preference.h"
 #include <chrono>
 #include <cstdint>
 #include <optional>
@@ -31,6 +33,21 @@ struct AccountDto {
     std::string description;
     bool is_archived = false;
     std::int64_t version = 1;
+};
+
+struct CreateAccountCommand {
+    domain::UserId user_id;
+    std::string name;
+    domain::AccountType type = domain::AccountType::Other;
+    std::string subtype;
+    std::string currency_code;
+    std::string description;
+};
+
+struct ArchiveAccountCommand {
+    domain::UserId user_id;
+    domain::AccountId account_id;
+    std::optional<std::chrono::system_clock::time_point> archived_at;
 };
 
 struct BalanceDto {
@@ -111,6 +128,107 @@ struct TransferResultDto {
     std::string incoming_amount;
     std::optional<std::string> rate;
     std::optional<std::string> fee_amount;
+};
+
+struct CategoryDto {
+    domain::CategoryId id;
+    std::string name;
+    domain::CategoryBoard board = domain::CategoryBoard::Expense;
+    domain::CategorySource source = domain::CategorySource::User;
+    std::optional<domain::CategoryId> parent_id;
+    std::optional<std::int64_t> template_id;
+    int sort_order = 0;
+};
+
+struct CategoryTreeDto : CategoryDto {
+    std::vector<CategoryTreeDto> children;
+};
+
+struct CreateCategoryCommand {
+    domain::UserId user_id;
+    std::optional<domain::CategoryBoard> board;
+    std::optional<std::string> name;
+    std::optional<domain::CategoryId> parent_id;
+    std::optional<std::int64_t> template_id;
+};
+
+struct DeleteCategoryCommand {
+    domain::UserId user_id;
+    domain::CategoryId category_id;
+    std::optional<std::chrono::system_clock::time_point> deleted_at;
+};
+
+struct TagDto {
+    domain::TagId id;
+    std::string name;
+};
+
+struct CreateTagCommand {
+    domain::UserId user_id;
+    std::string name;
+};
+
+struct DeleteTagCommand {
+    domain::UserId user_id;
+    domain::TagId tag_id;
+    std::optional<std::chrono::system_clock::time_point> deleted_at;
+};
+
+struct ReplaceTransactionTagsCommand {
+    domain::UserId user_id;
+    domain::TransactionId transaction_id;
+    std::vector<domain::TagId> tag_ids;
+};
+
+struct UserPreferenceDto {
+    std::string base_currency;
+    std::string locale;
+    std::string timezone;
+    std::string date_format;
+    std::string number_format;
+    domain::ThemeMode theme = domain::ThemeMode::System;
+    domain::HomePage default_home_page = domain::HomePage::Dashboard;
+    domain::ReportPeriod default_report_period = domain::ReportPeriod::CurrentMonth;
+};
+
+struct UpdateUserPreferenceCommand {
+    domain::UserId user_id;
+    std::string base_currency;
+    std::string locale;
+    std::string timezone;
+    std::string date_format;
+    std::string number_format;
+    domain::ThemeMode theme = domain::ThemeMode::System;
+    domain::HomePage default_home_page = domain::HomePage::Dashboard;
+    domain::ReportPeriod default_report_period = domain::ReportPeriod::CurrentMonth;
+};
+
+struct CurrencyMetadataDto {
+    std::string code;
+    std::string symbol;
+    int precision = 2;
+    std::string display_name;
+    bool is_crypto = false;
+};
+
+struct CashFlowPeriodDto {
+    std::string period;
+    std::string income;
+    std::string expense;
+    std::string net;
+};
+
+struct CashFlowTrendDto {
+    std::string base_currency;
+    std::vector<CashFlowPeriodDto> trends;
+};
+
+struct CashFlowTrendQuery {
+    domain::UserId user_id;
+    int start_year = 0;
+    unsigned start_month = 0;
+    int end_year = 0;
+    unsigned end_month = 0;
 };
 
 struct CashFlowDto {

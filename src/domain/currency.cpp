@@ -11,37 +11,53 @@ namespace pfh::domain {
 
 namespace {
 
-// Controlled crypto whitelist (non ISO-4217). Crypto tickers are commonly
-// 3-5 uppercase letters, so they are NOT subject to the strict 3-letter
-// ISO-4217 shape rule; they only need to appear here.
-//
-// IMPORTANT: this list MUST stay in sync with the currencies seeded by
-// migrations/V2__seed_initial_currencies.sql. Domain and database share one
-// supported-currency set; a code accepted here but absent from the DB (or vice
-// versa) would let an account be created that cannot be persisted, or a stored
-// currency the domain rejects on read. When adding a currency, update BOTH.
-constexpr std::array<std::string_view, 13> kCryptoWhitelist = {
-    "ADA", "BNB", "BTC", "DOGE", "DOT",
-    "ETH", "MATIC", "SOL", "TRX", "USDC",
-    "USDT", "WBTC", "XRP"
-};
+// Keep this catalog in the same order and with the same values as V2. It is the
+// single Domain source for both validation and the public metadata endpoint.
+constexpr std::array<CurrencyMetadata, 33> kCurrencyCatalog = {{
+    {"USD", "$", "US Dollar", 2, false},
+    {"CNY", "\xC2\xA5", "Chinese Yuan", 2, false},
+    {"EUR", "\xE2\x82\xAC", "Euro", 2, false},
+    {"GBP", "\xC2\xA3", "British Pound", 2, false},
+    {"JPY", "\xC2\xA5", "Japanese Yen", 0, false},
+    {"HKD", "HK$", "Hong Kong Dollar", 2, false},
+    {"AUD", "A$", "Australian Dollar", 2, false},
+    {"CAD", "C$", "Canadian Dollar", 2, false},
+    {"CHF", "CHF", "Swiss Franc", 2, false},
+    {"SGD", "S$", "Singapore Dollar", 2, false},
+    {"KRW", "\xE2\x82\xA9", "South Korean Won", 0, false},
+    {"INR", "\xE2\x82\xB9", "Indian Rupee", 2, false},
+    {"RUB", "\xE2\x82\xBD", "Russian Ruble", 2, false},
+    {"BRL", "R$", "Brazilian Real", 2, false},
+    {"ZAR", "R", "South African Rand", 2, false},
+    {"MXN", "Mex$", "Mexican Peso", 2, false},
+    {"NZD", "NZ$", "New Zealand Dollar", 2, false},
+    {"SEK", "kr", "Swedish Krona", 2, false},
+    {"NOK", "kr", "Norwegian Krone", 2, false},
+    {"TWD", "NT$", "Taiwan Dollar", 2, false},
+    {"BTC", "\xE2\x82\xBF", "Bitcoin", 8, true},
+    {"ETH", "\xCE\x9E", "Ethereum", 8, true},
+    {"USDT", "USDT", "Tether", 8, true},
+    {"USDC", "USDC", "USD Coin", 8, true},
+    {"BNB", "BNB", "Binance Coin", 8, true},
+    {"XRP", "XRP", "Ripple", 6, true},
+    {"ADA", "ADA", "Cardano", 6, true},
+    {"DOGE", "\xC3\x90", "Dogecoin", 8, true},
+    {"SOL", "SOL", "Solana", 8, true},
+    {"TRX", "TRX", "TRON", 6, true},
+    {"MATIC", "MATIC", "Polygon", 8, true},
+    {"DOT", "DOT", "Polkadot", 8, true},
+    {"WBTC", "WBTC", "Wrapped Bitcoin", 8, true}
+}};
 
 // Bounds for a crypto ticker's letter count.
 constexpr std::size_t kCryptoMinLen = 3;
 constexpr std::size_t kCryptoMaxLen = 5;
 
-// A pragmatic subset of ISO-4217 fiat codes relevant to the project. This is
-// not the full ISO table; it is the exact set seeded by V2 (see the sync note
-// above). Kept sorted for readability.
-constexpr std::array<std::string_view, 20> kFiatCodes = {
-    "AUD", "BRL", "CAD", "CHF", "CNY",
-    "EUR", "GBP", "HKD", "INR", "JPY",
-    "KRW", "MXN", "NOK", "NZD", "RUB",
-    "SEK", "SGD", "TWD", "USD", "ZAR"
-};
-
-[[nodiscard]] bool is_in(const auto& table, std::string_view code) {
-    return std::ranges::find(table, code) != table.end();
+[[nodiscard]] const CurrencyMetadata* find_metadata(std::string_view code) {
+    const auto found = std::ranges::find_if(
+        kCurrencyCatalog,
+        [code](const CurrencyMetadata& metadata) { return metadata.code == code; });
+    return found == kCurrencyCatalog.end() ? nullptr : &*found;
 }
 
 } // namespace
@@ -69,10 +85,7 @@ DomainResult<Currency> Currency::create(std::string_view code) {
         }
     }
 
-    // A 3-letter code may be fiat or crypto; a 4-5 letter code must be crypto.
-    const bool is_fiat = (upper.size() == 3) && is_in(kFiatCodes, upper);
-    const bool is_crypto = is_in(kCryptoWhitelist, upper);
-    if (!is_fiat && !is_crypto) {
+    if (find_metadata(upper) == nullptr) {
         return std::unexpected(DomainError::invalid_currency(
             "unsupported currency code: '" + upper + "'"));
     }
@@ -81,7 +94,12 @@ DomainResult<Currency> Currency::create(std::string_view code) {
 }
 
 bool Currency::is_crypto() const noexcept {
-    return is_in(kCryptoWhitelist, code_);
+    const auto* metadata = find_metadata(code_);
+    return metadata != nullptr && metadata->is_crypto;
+}
+
+std::span<const CurrencyMetadata> Currency::catalog() noexcept {
+    return kCurrencyCatalog;
 }
 
 } // namespace pfh::domain

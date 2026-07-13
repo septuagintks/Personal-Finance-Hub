@@ -1,6 +1,6 @@
 # Personal Finance Hub - Testing Strategy
 
-Version: 1.1
+Version: 1.2
 Backend: C++23
 Architecture: Clean Architecture + GoogleTest
 
@@ -21,8 +21,8 @@ Architecture: Clean Architecture + GoogleTest
 
 ### 1.1 Phase 1 当前基线与最终门禁
 
-- 截至 2026-07-14，Windows GCC 16 已通过 255 个 unit/use-case、16 个 In-Memory integration scenarios、1 个 migration gate 与 1 个 PostgreSQL adapter contract gate，共 273/273；PostgreSQL 翻译单元另由 OFF 模式 compile gate 覆盖。
-- V3 已在外部 PostgreSQL 16.14 + Flyway 10.22.0 全新空库完成 `migrate/info/validate`、第二次 no-op 与种子断言；该结果不包含 PostgreSQL Repository fixture。
+- 截至 2026-07-14，Windows GCC 16 / PostgreSQL OFF 已通过 272 个 unit/use-case、16 个 In-Memory integration scenarios、29 个 framework-neutral API tests 和 4 个静态契约门禁，共 321/321；PostgreSQL、production bootstrap 与 security 翻译单元另由窄 API stub compile gate 覆盖。
+- V1-V3 已在外部 PostgreSQL 16.14 + Flyway 10.22.0 全新空库完成 `migrate/info/validate`、第二次 no-op 与种子断言；V4/V5 和当前 PostgreSQL Repository fixture 尚未在真实数据库执行。
 - In-Memory scenarios 用于快速固定 Repository/UoW 语义，不是 PostgreSQL Repository Integration Test 的替代品。
 - P1-S12 必须在另一台机器完成 Linux、Docker、PostgreSQL 16+、Debug/Release、真实 Repository/UoW/RLS、API 和后台任务测试；取得可追溯结果前，Phase 1 不得签署完成或合并到 `main`。
 
@@ -117,7 +117,7 @@ Repository Integration Test 必须使用真实 PostgreSQL 16+ 测试库。Phase 
 
 ## 5. API Tests
 
-API Test 启动测试版 Drogon App，使用测试数据库。
+S10 本地快速 API Test 直接驱动 framework-neutral `ApiApplication`，覆盖 Controller、JWT filter、DTO、路由分派和错误映射；同时用 OpenAPI/route 静态门禁及 Drogon stub compile gate 校验生产 adapter 形状。P1-S12 必须再启动真实 Drogon App 并连接 PostgreSQL 测试库，执行同一批核心场景与 smoke test，前者不能替代后者。
 
 必须覆盖：
 
@@ -142,7 +142,8 @@ API Test 启动测试版 Drogon App，使用测试数据库。
 | -------------------- | ---------- |
 | JSON 非法            | 400        |
 | 未登录               | 401        |
-| 访问其他用户资源     | 403        |
+| 访问其他用户私有资源 | 404（防枚举） |
+| 缺少全局角色权限     | 403        |
 | 账户不存在           | 404        |
 | 重复分类名或版本冲突 | 409        |
 | 转账金额不平衡       | 422        |

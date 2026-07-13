@@ -60,6 +60,21 @@ public:
                 "save_single requires an active transaction"));
         }
 
+        if (transaction.id().is_valid() || transaction.is_deleted()) {
+            return std::unexpected(domain::RepositoryError::validation(
+                "save_single only accepts new active transactions"));
+        }
+        if (transaction.transfer_group_id().has_value()) {
+            return std::unexpected(domain::RepositoryError::validation(
+                "Grouped transactions must be written via save_transfer"));
+        }
+        if (transaction.type() != domain::TransactionType::Income &&
+            transaction.type() != domain::TransactionType::Expense &&
+            transaction.type() != domain::TransactionType::Transfer &&
+            transaction.type() != domain::TransactionType::Adjustment) {
+            return std::unexpected(domain::RepositoryError::validation(
+                "Transaction type is invalid"));
+        }
         // Transfer legs may ONLY be written via save_transfer (as a validated
         // aggregate). Reject standalone Transfer rows so no orphan leg can be
         // created that bypasses the aggregate consistency rules.
@@ -67,9 +82,9 @@ public:
             return std::unexpected(domain::RepositoryError::validation(
                 "Transfer transactions must be written via save_transfer, not save_single"));
         }
-        if (!transaction.amount().amount().fits_numeric_20_8()) {
-            return std::unexpected(domain::RepositoryError::validation(
-                "Transaction amount does not fit NUMERIC(20,8)"));
+        if (auto valid = validate_amount_for_storage(transaction.amount());
+            !valid.has_value()) {
+            return std::unexpected(valid.error());
         }
 
         // Ownership and currency isolation: every transaction amount is
@@ -83,26 +98,22 @@ public:
             return std::unexpected(category_check.error());
         }
 
-        auto id_value = transaction.id().is_valid()
-            ? transaction.id().value()
-            : store_.next_transaction_id++;
-        if (transaction.id().is_valid() && id_value >= store_.next_transaction_id) {
-            store_.next_transaction_id = id_value + 1;
-        }
-
-        // Normalize storage sign for domain-constructed positive magnitudes.
-        // If amount is already signed (e.g. loaded then re-saved), keep it.
+        // Normalize the public positive-magnitude convention at the mapping
+        // boundary. Persisted entities are never accepted by this create API.
         domain::Money storage_amount = transaction.amount();
-        if (transaction.type() == domain::TransactionType::Expense &&
-            storage_amount.is_positive()) {
+        if (transaction.type() == domain::TransactionType::Expense) {
+            if (!storage_amount.is_positive()) {
+                return std::unexpected(domain::RepositoryError::validation(
+                    "Expense amount must be a positive magnitude"));
+            }
             storage_amount = storage_amount.negated();
         } else if (transaction.type() == domain::TransactionType::Income &&
-                   storage_amount.is_negative()) {
-            // Income should not be negative; reject.
+                   !storage_amount.is_positive()) {
             return std::unexpected(domain::RepositoryError::validation(
-                "Income amount must not be negative"));
+                "Income amount must be a positive magnitude"));
         }
 
+        const auto id_value = store_.next_transaction_id++;
         domain::Transaction stored(
             domain::TransactionId(id_value),
             transaction.user_id(),
@@ -124,7 +135,7 @@ public:
     }
 
     [[nodiscard]] domain::RepositoryResult<domain::TransferPersistResult> save_transfer(
-        domain::ITransactionContext& tx,
+        domain::ITransactionContext& /*tx*/,
         const domain::TransferAggregate& transfer) override {
         if (!store_.in_transaction) {
             return std::unexpected(domain::RepositoryError::database(
@@ -134,10 +145,34 @@ public:
         const auto& outgoing = transfer.outgoing();
         const auto& incoming = transfer.incoming();
 
-        if (!outgoing.amount().amount().fits_numeric_20_8() ||
-            !incoming.amount().amount().fits_numeric_20_8()) {
+        if (outgoing.id().is_valid() || incoming.id().is_valid() ||
+            outgoing.is_deleted() || incoming.is_deleted()) {
             return std::unexpected(domain::RepositoryError::validation(
-                "Transfer leg amount does not fit NUMERIC(20,8)"));
+                "save_transfer only accepts new active transactions"));
+        }
+        if ((outgoing.transfer_group_id().has_value() &&
+             outgoing.transfer_group_id()->is_valid()) ||
+            (incoming.transfer_group_id().has_value() &&
+             incoming.transfer_group_id()->is_valid())) {
+            return std::unexpected(domain::RepositoryError::validation(
+                "New transfer must not carry a persisted group identifier"));
+        }
+        if (outgoing.type() != domain::TransactionType::Transfer ||
+            incoming.type() != domain::TransactionType::Transfer ||
+            outgoing.account_id() == incoming.account_id() ||
+            outgoing.user_id() != incoming.user_id() ||
+            !outgoing.amount().is_positive() ||
+            !incoming.amount().is_positive()) {
+            return std::unexpected(domain::RepositoryError::validation(
+                "Transfer aggregate invariants are invalid"));
+        }
+        if (auto valid = validate_amount_for_storage(outgoing.amount());
+            !valid.has_value()) {
+            return std::unexpected(valid.error());
+        }
+        if (auto valid = validate_amount_for_storage(incoming.amount());
+            !valid.has_value()) {
+            return std::unexpected(valid.error());
         }
         if (transfer.rate().has_value() &&
             !transfer.rate()->rate().fits_numeric_20_10()) {
@@ -145,47 +180,26 @@ public:
                 "Transfer rate does not fit NUMERIC(20,10)"));
         }
         for (const auto& adjustment : transfer.adjustments()) {
-            if (!adjustment.amount().amount().fits_numeric_20_8()) {
-                return std::unexpected(domain::RepositoryError::validation(
-                    "Transfer adjustment does not fit NUMERIC(20,8)"));
-            }
-            if (adjustment.type() != domain::TransactionType::Adjustment ||
-                adjustment.user_id() != outgoing.user_id()) {
-                return std::unexpected(domain::RepositoryError::validation(
-                    "Transfer adjustments must be Adjustment rows owned by the transfer user"));
-            }
-            if (adjustment.transfer_group_id().has_value() &&
-                adjustment.transfer_group_id()->is_valid() &&
-                outgoing.transfer_group_id().has_value() &&
-                outgoing.transfer_group_id()->is_valid() &&
+            if (adjustment.user_id() != outgoing.user_id() ||
+                adjustment.type() != domain::TransactionType::Adjustment ||
+                adjustment.id().is_valid() || adjustment.is_deleted() ||
+                adjustment.occurred_at() != outgoing.occurred_at() ||
                 adjustment.transfer_group_id() != outgoing.transfer_group_id()) {
                 return std::unexpected(domain::RepositoryError::validation(
-                    "Transfer adjustment must share transfer_group_id"));
+                    "Transfer adjustment invariants are invalid"));
+            }
+            if (auto valid = validate_amount_for_storage(adjustment.amount());
+                !valid.has_value()) {
+                return std::unexpected(valid.error());
             }
             if (auto check = ensure_account_matches_transaction(adjustment);
                 !check.has_value()) {
                 return std::unexpected(check.error());
             }
-        }
-
-        if (outgoing.type() != domain::TransactionType::Transfer ||
-            incoming.type() != domain::TransactionType::Transfer) {
-            return std::unexpected(domain::RepositoryError::validation(
-                "Transfer sides must be TransactionType::Transfer"));
-        }
-        if (outgoing.user_id() != incoming.user_id()) {
-            return std::unexpected(domain::RepositoryError::validation(
-                "Transfer sides must belong to the same user"));
-        }
-        // transfer_group_id may be invalid (placeholder) at create time; repository assigns it.
-        // If both sides provide a valid id, they must match.
-        if (outgoing.transfer_group_id().has_value() &&
-            incoming.transfer_group_id().has_value() &&
-            outgoing.transfer_group_id()->is_valid() &&
-            incoming.transfer_group_id()->is_valid() &&
-            outgoing.transfer_group_id() != incoming.transfer_group_id()) {
-            return std::unexpected(domain::RepositoryError::validation(
-                "Transfer sides must share transfer_group_id"));
+            if (auto check = ensure_category_matches_transaction(adjustment);
+                !check.has_value()) {
+                return std::unexpected(check.error());
+            }
         }
 
         // Both accounts must exist, belong to the user, and their currency must
@@ -199,16 +213,18 @@ public:
             !check.has_value()) {
             return std::unexpected(check.error());
         }
-
-        // Assign / reuse transfer group id.
-        // Domain service may pass invalid id (0) as placeholder; repository assigns real id.
-        std::int64_t group_value = 0;
-        if (outgoing.transfer_group_id().has_value() &&
-            outgoing.transfer_group_id()->is_valid()) {
-            group_value = outgoing.transfer_group_id()->value();
-        } else {
-            group_value = store_.next_transfer_group_id++;
+        if (auto check = ensure_category_matches_transaction(outgoing);
+            !check.has_value()) {
+            return std::unexpected(check.error());
         }
+        if (auto check = ensure_category_matches_transaction(incoming);
+            !check.has_value()) {
+            return std::unexpected(check.error());
+        }
+
+        // A create always receives a fresh persistence identifier. Domain may
+        // carry an invalid placeholder, but a valid id is rejected above.
+        const auto group_value = store_.next_transfer_group_id++;
         domain::TransferGroupId assigned_group(group_value);
 
         InMemoryTransferGroup group{
@@ -228,12 +244,7 @@ public:
         auto out_amount = outgoing.amount().negated();
         auto in_amount = incoming.amount();
 
-        auto out_id = outgoing.id().is_valid()
-            ? outgoing.id()
-            : domain::TransactionId(store_.next_transaction_id++);
-        if (outgoing.id().is_valid() && out_id.value() >= store_.next_transaction_id) {
-            store_.next_transaction_id = out_id.value() + 1;
-        }
+        const domain::TransactionId out_id(store_.next_transaction_id++);
         domain::Transaction out_tx(
             out_id,
             outgoing.user_id(),
@@ -248,12 +259,7 @@ public:
             outgoing.deleted_at());
         store_.staged_transactions.insert_or_assign(out_tx.id().value(), out_tx);
 
-        auto in_id = incoming.id().is_valid()
-            ? incoming.id()
-            : domain::TransactionId(store_.next_transaction_id++);
-        if (incoming.id().is_valid() && in_id.value() >= store_.next_transaction_id) {
-            store_.next_transaction_id = in_id.value() + 1;
-        }
+        const domain::TransactionId in_id(store_.next_transaction_id++);
         domain::Transaction in_tx(
             in_id,
             incoming.user_id(),
@@ -268,12 +274,12 @@ public:
             incoming.deleted_at());
         store_.staged_transactions.insert_or_assign(in_tx.id().value(), in_tx);
 
-        // Persist adjustments as independent rows in the assigned aggregate.
-        // Domain instances carry an invalid placeholder group id at create
-        // time, so reconstruct each row with the database-assigned id first.
+        // Persist grouped adjustments through this aggregate-only insertion
+        // path. Calling public save_single would violate its deliberate rule
+        // that no grouped transaction can be inserted independently.
         for (const auto& adj : transfer.adjustments()) {
             domain::Transaction grouped_adjustment(
-                adj.id(),
+                domain::TransactionId(store_.next_transaction_id++),
                 adj.user_id(),
                 adj.account_id(),
                 adj.amount(),
@@ -284,10 +290,11 @@ public:
                 assigned_group,
                 adj.created_at(),
                 adj.deleted_at());
-            auto adj_result = save_single(tx, grouped_adjustment);
-            if (!adj_result.has_value()) {
-                return std::unexpected(adj_result.error());
-            }
+            store_.staged_transactions.insert_or_assign(
+                grouped_adjustment.id().value(), grouped_adjustment);
+            store_.staged_balance_cache.erase(adj.account_id().value());
+            store_.staged_deleted_balance_cache.push_back(
+                adj.account_id().value());
         }
 
         // Invalidate balance caches for both accounts.
@@ -316,7 +323,7 @@ public:
             if (from.has_value() && tx.occurred_at() < *from) {
                 continue;
             }
-            if (to.has_value() && tx.occurred_at() > *to) {
+            if (to.has_value() && tx.occurred_at() >= *to) {
                 continue;
             }
             result.push_back(tx);
@@ -344,7 +351,51 @@ public:
             }
             result.push_back(tx);
         }
+        std::sort(result.begin(), result.end(), [](const auto& lhs, const auto& rhs) {
+            if (lhs.occurred_at() != rhs.occurred_at()) {
+                return lhs.occurred_at() < rhs.occurred_at();
+            }
+            return lhs.id() < rhs.id();
+        });
         return result;
+    }
+
+    [[nodiscard]] domain::RepositoryResult<domain::TransferSnapshot>
+    find_transfer_by_group(
+        domain::TransferGroupId group_id,
+        domain::UserId user_id) override {
+        const InMemoryTransferGroup* group = nullptr;
+        if (store_.in_transaction) {
+            if (const auto found = store_.staged_transfer_groups.find(group_id.value());
+                found != store_.staged_transfer_groups.end()) {
+                group = &found->second;
+            }
+        }
+        if (group == nullptr) {
+            if (const auto found = store_.transfer_groups.find(group_id.value());
+                found != store_.transfer_groups.end()) {
+                group = &found->second;
+            }
+        }
+        if (group == nullptr || group->user_id != user_id) {
+            return std::unexpected(domain::RepositoryError::not_found(
+                "Transfer not found for user"));
+        }
+        domain::TransferSnapshot snapshot;
+        snapshot.group_id = group_id;
+        snapshot.user_id = user_id;
+        snapshot.transfer_mode = group->transfer_mode;
+        if (group->rate.has_value()) {
+            snapshot.exchange_rate = group->rate->rate();
+        }
+        for (const auto& [_, transaction] : merge_transactions()) {
+            if (transaction.transfer_group_id() ==
+                    std::optional<domain::TransferGroupId>(group_id) &&
+                !transaction.is_deleted()) {
+                snapshot.transactions.push_back(transaction);
+            }
+        }
+        return snapshot;
     }
 
     [[nodiscard]] domain::RepositoryVoidResult soft_delete(
@@ -388,6 +439,8 @@ public:
                 tx.type() != domain::TransactionType::Transfer) {
                 store_.staged_transactions.erase(id);
                 store_.staged_deleted_transactions.push_back(id);
+                store_.staged_transaction_tag_relations.insert_or_assign(
+                    id, std::set<std::int64_t>{});
             }
         }
         return {};
@@ -421,6 +474,8 @@ public:
                 group_ids.count(tx.transfer_group_id()->value()) > 0) {
                 store_.staged_transactions.erase(id);
                 store_.staged_deleted_transactions.push_back(id);
+                store_.staged_transaction_tag_relations.insert_or_assign(
+                    id, std::set<std::int64_t>{});
                 // Invalidate the counterpart account's balance cache too.
                 store_.staged_balance_cache.erase(tx.account_id().value());
                 store_.staged_deleted_balance_cache.push_back(tx.account_id().value());
@@ -434,6 +489,19 @@ public:
     }
 
 private:
+    [[nodiscard]] static domain::RepositoryVoidResult validate_amount_for_storage(
+        const domain::Money& amount) {
+        if (amount.is_zero()) {
+            return std::unexpected(domain::RepositoryError::validation(
+                "Transaction amount must be non-zero"));
+        }
+        if (!amount.amount().fits_numeric_20_8()) {
+            return std::unexpected(domain::RepositoryError::validation(
+                "Transaction amount does not fit NUMERIC(20,8)"));
+        }
+        return {};
+    }
+
     [[nodiscard]] std::map<std::int64_t, domain::Transaction> merge_transactions() const {
         std::map<std::int64_t, domain::Transaction> merged = store_.transactions;
         if (store_.in_transaction) {

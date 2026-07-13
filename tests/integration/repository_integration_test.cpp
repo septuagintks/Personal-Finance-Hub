@@ -216,6 +216,30 @@ TEST_F(RepositoryIntegrationTest, TransactionRepository_WhenQueryingByUser_Retur
     EXPECT_EQ(alice_txs->front().description(), "Alice salary");
 }
 
+TEST_F(RepositoryIntegrationTest, TransactionRepository_TimeRangeIsHalfOpen) {
+    const auto ids = seed_user_with_accounts();
+    const auto start = sample_time();
+    const auto end = start + std::chrono::hours(1);
+    auto write = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            for (const auto at : {start, end}) {
+                auto saved = tx_repo_->save_single(
+                    tx,
+                    Transaction(
+                        TransactionId{}, ids.user, ids.cash,
+                        money("1", "USD"), TransactionType::Income, at));
+                if (!saved) return std::unexpected(saved.error());
+            }
+            return {};
+        });
+    ASSERT_TRUE(write.has_value());
+
+    auto result = tx_repo_->find_by_account(ids.cash, start, end);
+    ASSERT_TRUE(result.has_value());
+    ASSERT_EQ(result->size(), 1U);
+    EXPECT_EQ(result->front().occurred_at(), start);
+}
+
 // ---- Optimistic locking ----
 
 TEST_F(RepositoryIntegrationTest, AccountRepository_WhenVersionMismatch_ReturnsConflict) {
@@ -405,28 +429,69 @@ TEST_F(RepositoryIntegrationTest, TransactionRepository_WhenSavingTransfer_Persi
               static_cast<int>(TransferMode::OutgoingAndIncoming));
 }
 
-TEST_F(RepositoryIntegrationTest, TransactionRepository_WhenSaveSingleTransferType_Rejected) {
+TEST_F(RepositoryIntegrationTest, TransactionRepository_RejectsInvalidCreateShapes) {
     auto ids = seed_user_with_accounts();
 
-    auto write = uow_->execute_in_transaction([&](ITransactionContext& tx) -> RepositoryVoidResult {
-        // Attempt to write an orphan Transfer leg directly, bypassing the
-        // aggregate. This MUST be rejected.
-        Transaction orphan(
-            TransactionId{},
-            ids.user,
-            ids.cash,
-            money("100", "USD"),
-            TransactionType::Transfer,
-            sample_time(),
-            "orphan transfer leg");
-        auto saved = tx_repo_->save_single(tx, orphan);
-        if (!saved) {
-            return std::unexpected(saved.error());
-        }
-        return {};
-    });
-    ASSERT_FALSE(write.has_value());
-    EXPECT_EQ(write.error().status, RepositoryStatus::ValidationError);
+    const auto expect_single_rejected = [&](const Transaction& candidate) {
+        auto write = uow_->execute_in_transaction(
+            [&](ITransactionContext& tx) -> RepositoryVoidResult {
+                auto saved = tx_repo_->save_single(tx, candidate);
+                return saved ? RepositoryVoidResult{}
+                             : RepositoryVoidResult(std::unexpected(saved.error()));
+            });
+        ASSERT_FALSE(write.has_value());
+        EXPECT_EQ(write.error().status, RepositoryStatus::ValidationError);
+        EXPECT_TRUE(store_->transactions.empty());
+    };
+
+    // Public single-row persistence is create-only, non-grouped and non-zero;
+    // Income/Expense accept positive magnitudes before storage sign mapping.
+    expect_single_rejected(Transaction(
+        TransactionId{}, ids.user, ids.cash, money("100", "USD"),
+        TransactionType::Transfer, sample_time(), "orphan transfer leg"));
+    expect_single_rejected(Transaction(
+        TransactionId{99}, ids.user, ids.cash, money("1", "USD"),
+        TransactionType::Income, sample_time(), "persisted id"));
+
+    Transaction deleted(
+        TransactionId{}, ids.user, ids.cash, money("1", "USD"),
+        TransactionType::Income, sample_time(), "deleted row");
+    deleted.mark_deleted(sample_time());
+    expect_single_rejected(deleted);
+
+    expect_single_rejected(Transaction(
+        TransactionId{}, ids.user, ids.cash, money("-1", "USD"),
+        TransactionType::Adjustment, sample_time(), "grouped adjustment",
+        std::nullopt, TransferGroupId{}));
+    expect_single_rejected(Transaction(
+        TransactionId{}, ids.user, ids.cash, money("0", "USD"),
+        TransactionType::Adjustment, sample_time(), "zero adjustment"));
+    expect_single_rejected(Transaction(
+        TransactionId{}, ids.user, ids.cash, money("-1", "USD"),
+        TransactionType::Expense, sample_time(), "signed expense"));
+    expect_single_rejected(Transaction(
+        TransactionId{}, ids.user, ids.cash, money("-1", "USD"),
+        TransactionType::Income, sample_time(), "negative income"));
+    expect_single_rejected(Transaction(
+        TransactionId{}, ids.user, ids.cash, money("1", "USD"),
+        static_cast<TransactionType>(999), sample_time(), "invalid type"));
+
+    // A valid group id denotes a persisted aggregate and must not be reused by
+    // the create path, even when the Domain aggregate itself is consistent.
+    auto persisted_group = TransferDomainService::build_from_both_amounts(
+        money("10", "USD"), money("10", "USD"), ids.cash, ids.savings,
+        ids.user, sample_time(), "persisted group", TransferGroupId{77});
+    ASSERT_TRUE(persisted_group.has_value());
+    auto group_write = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            auto saved = tx_repo_->save_transfer(tx, *persisted_group);
+            return saved ? RepositoryVoidResult{}
+                         : RepositoryVoidResult(std::unexpected(saved.error()));
+        });
+    ASSERT_FALSE(group_write.has_value());
+    EXPECT_EQ(group_write.error().status, RepositoryStatus::ValidationError);
+    EXPECT_TRUE(store_->transfer_groups.empty());
+    EXPECT_TRUE(store_->transactions.empty());
 }
 
 TEST_F(RepositoryIntegrationTest, TransactionRepository_WhenSavingCrossCurrencyMode1_PersistsMode1) {

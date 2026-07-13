@@ -179,6 +179,10 @@ public:
                 return std::unexpected(Error(application::ErrorCode::ConfigurationError,
                     "Password pepper exceeds 1024 bytes"));
             }
+            if (config.security.password_pepper.starts_with("REPLACE_WITH_")) {
+                return std::unexpected(Error(application::ErrorCode::ConfigurationError,
+                    "Password pepper still holds a placeholder value; set a real pepper or leave it empty"));
+            }
             if (config.server.threads == 0 || config.database.pool_size == 0 ||
                 config.background_database.pool_size == 0) {
                 return std::unexpected(Error(application::ErrorCode::ConfigurationError,
@@ -223,11 +227,17 @@ private:
     /// for backward compatibility with earlier tests/docs):
     /// - PFH_ENVIRONMENT / ENVIRONMENT
     /// - PFH_JWT_SECRET / JWT_SECRET
+    /// - PFH_PASSWORD_PEPPER
     /// - PFH_DB_HOST / DB_HOST
     /// - PFH_DB_PORT / DB_PORT
     /// - PFH_DB_NAME / DB_NAME
     /// - PFH_DB_USER / DB_USER
     /// - PFH_DB_PASSWORD / DB_PASSWORD
+    /// - PFH_BACKGROUND_DB_HOST
+    /// - PFH_BACKGROUND_DB_PORT
+    /// - PFH_BACKGROUND_DB_NAME
+    /// - PFH_BACKGROUND_DB_USER
+    /// - PFH_BACKGROUND_DB_PASSWORD
     /// - PFH_EXCHANGE_RATE_API_KEY / EXCHANGE_RATE_API_KEY
     ///
     /// @param config Configuration to apply overrides to (modified in-place).

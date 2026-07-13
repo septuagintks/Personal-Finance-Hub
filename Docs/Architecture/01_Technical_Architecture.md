@@ -56,7 +56,8 @@ Build a personal finance aggregation platform focused on learning modern C++ bac
 │  CreateTransactionUseCase   │
 │  CreateTransferUseCase      │
 │  DeleteTransactionUseCase   │
-│  GenerateMonthlyReportUseCase │
+│  FinanceApplicationService  │
+│  ReportQueryService         │
 │  RefreshExchangeRatesUseCase │
 └─────────────┬───────────────┘
               │
@@ -141,11 +142,15 @@ application/use_cases/
 ├── CreateTransactionUseCase
 ├── CreateTransferUseCase
 ├── DeleteTransactionUseCase
-├── GenerateMonthlyReportUseCase
+├── ResourceUseCases
+├── FinanceApplicationService
+├── ReportQueryService
 └── RefreshExchangeRatesUseCase
 ```
 
 Application Layer must not define generic services named `AccountingService`, `ExchangeRateService`, or `ReportService`.
+
+Presentation 不直接持有或编排 Repository。资源 Controller 统一调用 `FinanceApplicationService`；该门面通过 `IRequestScopeFactory` 为每次认证操作创建与 JWT `UserId` 一致的 request scope，再从 scope 取得 tenant-bound Repository 与 Unit of Work。`IRequestScope` 是 Application 端口，PostgreSQL/In-Memory 构造细节只存在于 Infrastructure。
 
 ### 4.3 Domain Layer
 
@@ -321,7 +326,7 @@ Transactions remain the single source of truth.
 
 ```
 
-分类支持无限层级，并通过 `CategoryBoard` 区分收入板块和支出板块。
+分类最多支持 64 层（根节点与当前节点均计入），并通过 `CategoryBoard` 区分收入板块和支出板块。Repository 的创建、更新、root 回溯和列表建树必须使用同一上限，禁止写入随后无法读取的树。
 
 ### 5.6 Tag
 
@@ -403,14 +408,15 @@ Application Layer 只放具体 Use Case，负责调用 Repository、开启事务
 - 写入 AuditLog
 - 发布 TransactionDeleted 事件
 
-### 6.4 GenerateMonthlyReportUseCase
+### 6.4 ReportQueryService
 
 **职责：**
 
 - 查询 Repository
 - 显式排除 `TransactionType::Transfer`
 - 调用 `CurrencyConversionService`
-- 生成月度报表 DTO
+- 生成 net worth、cash flow trend 与 dashboard DTO
+- 以用户时区计算半开月窗，并由调用方注入 `IClock` 的当前时间
 
 统计月度总收入或月度总支出时，查询条件必须显式排除 `TransactionType::Transfer`。
 转账只表示资产在账户之间移动，不参与收入/支出聚合。

@@ -11,6 +11,8 @@
 #include "pfh/domain/category.h"
 #include "pfh/domain/repositories/i_transaction_context.h"
 #include "pfh/domain/repositories/repository_error.h"
+#include <chrono>
+#include <string>
 #include <vector>
 
 namespace pfh::domain {
@@ -22,6 +24,13 @@ public:
     /// @brief Find a category by id, enforcing ownership (user isolation).
     /// Returns NotFound for a foreign or absent category (no existence leak).
     [[nodiscard]] virtual RepositoryResult<Category> find_by_id_for_user(
+        CategoryId id,
+        UserId user_id) = 0;
+
+    /// @brief Historical read that also returns soft-deleted categories.
+    /// Transaction creation must use the active-only method above.
+    [[nodiscard]] virtual RepositoryResult<Category>
+    find_by_id_for_user_including_deleted(
         CategoryId id,
         UserId user_id) = 0;
 
@@ -43,16 +52,30 @@ public:
 
     /// @brief Resolve the first-level (root) category id that `id` rolls up to.
     /// If `id` is already a root, returns it unchanged. Used by reporting to
-    /// aggregate spend under top-level categories. Enforces ownership; a broken
-    /// parent chain surfaces as a DatabaseError rather than an infinite walk.
+    /// aggregate historical spend under top-level categories. Soft-deleted
+    /// nodes remain resolvable so old transactions retain their category name.
+    /// Enforces ownership; a broken parent chain surfaces as a DatabaseError.
     [[nodiscard]] virtual RepositoryResult<CategoryId> resolve_root_id_for_user(
         CategoryId id,
         UserId user_id) = 0;
+
+    /// @brief Read a global system template. The requested locale is preferred;
+    /// implementations may fall back to zh-CN only when the same template id
+    /// exists in that locale.
+    [[nodiscard]] virtual RepositoryResult<SystemCategoryTemplate> find_template_by_id(
+        std::int64_t template_id,
+        const std::string& locale) = 0;
 
     /// @brief Insert or update a category (create when id is invalid).
     [[nodiscard]] virtual RepositoryResult<CategoryId> save(
         ITransactionContext& tx,
         const Category& category) = 0;
+
+    [[nodiscard]] virtual RepositoryVoidResult soft_delete(
+        ITransactionContext& tx,
+        CategoryId id,
+        UserId user_id,
+        std::chrono::system_clock::time_point deleted_at) = 0;
 };
 
 } // namespace pfh::domain

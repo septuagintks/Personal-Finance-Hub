@@ -1,0 +1,246 @@
+// Personal Finance Hub - Authenticated Finance Application Facade
+
+#include "pfh/application/services/finance_application_service.h"
+
+#include "pfh/application/use_cases/account_query_use_cases.h"
+#include "pfh/application/use_cases/delete_account_use_case.h"
+#include "pfh/application/use_cases/create_transaction_use_case.h"
+#include "pfh/application/use_cases/delete_transaction_use_case.h"
+#include "pfh/application/use_cases/create_transfer_use_case.h"
+#include "pfh/application/use_cases/get_transfer_use_case.h"
+#include "pfh/application/query/report_query_service.h"
+#include "pfh/application/use_cases/resource_use_cases.h"
+
+#include <utility>
+
+namespace pfh::application {
+
+Result<std::unique_ptr<IRequestScope>> FinanceApplicationService::open_scope(
+    domain::UserId user_id) {
+    if (!user_id.is_valid()) {
+        return err(Error::unauthorized());
+    }
+    auto scope = scopes_.create(user_id);
+    if (!scope || scope->user_id() != user_id) {
+        return err(Error::infrastructure_failure(
+            "Authenticated request scope could not be created"));
+    }
+    return scope;
+}
+
+Result<std::vector<AccountDto>> FinanceApplicationService::list_accounts(
+    domain::UserId user_id) {
+    auto scope = open_scope(user_id);
+    if (!scope) return err(scope.error());
+    return ListAccountsUseCase((*scope)->accounts()).execute(user_id);
+}
+
+Result<AccountDto> FinanceApplicationService::create_account(
+    const CreateAccountCommand& command) {
+    auto scope = open_scope(command.user_id);
+    if (!scope) return err(scope.error());
+    return CreateAccountUseCase(
+        (*scope)->accounts(), (*scope)->audit_logs(), (*scope)->unit_of_work())
+        .execute(command);
+}
+
+Result<BalanceDto> FinanceApplicationService::account_balance(
+    domain::UserId user_id,
+    domain::AccountId account_id) {
+    auto scope = open_scope(user_id);
+    if (!scope) return err(scope.error());
+    return GetAccountBalanceUseCase((*scope)->accounts()).execute(user_id, account_id);
+}
+
+VoidResult FinanceApplicationService::archive_account(
+    const ArchiveAccountCommand& command) {
+    auto scope = open_scope(command.user_id);
+    if (!scope) return err(scope.error());
+    return ArchiveAccountUseCase(
+        (*scope)->accounts(), (*scope)->audit_logs(), (*scope)->unit_of_work())
+        .execute(command);
+}
+
+VoidResult FinanceApplicationService::delete_account(
+    const DeleteAccountCommand& command) {
+    auto scope = open_scope(command.user_id);
+    if (!scope) return err(scope.error());
+    return DeleteAccountUseCase(
+        (*scope)->accounts(),
+        (*scope)->transactions(),
+        (*scope)->unit_of_work(),
+        (*scope)->audit_logs())
+        .execute(command);
+}
+
+Result<std::vector<CategoryTreeDto>> FinanceApplicationService::list_categories(
+    domain::UserId user_id,
+    std::optional<domain::CategoryBoard> board) {
+    auto scope = open_scope(user_id);
+    if (!scope) return err(scope.error());
+    return ListCategoriesUseCase((*scope)->categories()).execute(user_id, board);
+}
+
+Result<CategoryDto> FinanceApplicationService::create_category(
+    const CreateCategoryCommand& command) {
+    auto scope = open_scope(command.user_id);
+    if (!scope) return err(scope.error());
+    return CreateCategoryUseCase(
+        (*scope)->categories(),
+        (*scope)->preferences(),
+        (*scope)->audit_logs(),
+        (*scope)->unit_of_work())
+        .execute(command);
+}
+
+VoidResult FinanceApplicationService::delete_category(
+    const DeleteCategoryCommand& command) {
+    auto scope = open_scope(command.user_id);
+    if (!scope) return err(scope.error());
+    return DeleteCategoryUseCase(
+        (*scope)->categories(), (*scope)->audit_logs(), (*scope)->unit_of_work())
+        .execute(command);
+}
+
+Result<std::vector<TagDto>> FinanceApplicationService::list_tags(
+    domain::UserId user_id) {
+    auto scope = open_scope(user_id);
+    if (!scope) return err(scope.error());
+    return ListTagsUseCase((*scope)->tags()).execute(user_id);
+}
+
+Result<TagDto> FinanceApplicationService::create_tag(
+    const CreateTagCommand& command) {
+    auto scope = open_scope(command.user_id);
+    if (!scope) return err(scope.error());
+    return CreateTagUseCase(
+        (*scope)->tags(), (*scope)->audit_logs(), (*scope)->unit_of_work())
+        .execute(command);
+}
+
+VoidResult FinanceApplicationService::delete_tag(
+    const DeleteTagCommand& command) {
+    auto scope = open_scope(command.user_id);
+    if (!scope) return err(scope.error());
+    return DeleteTagUseCase(
+        (*scope)->tags(), (*scope)->audit_logs(), (*scope)->unit_of_work())
+        .execute(command);
+}
+
+Result<std::vector<TagDto>> FinanceApplicationService::replace_transaction_tags(
+    const ReplaceTransactionTagsCommand& command) {
+    auto scope = open_scope(command.user_id);
+    if (!scope) return err(scope.error());
+    return ReplaceTransactionTagsUseCase(
+        (*scope)->tags(), (*scope)->audit_logs(), (*scope)->unit_of_work())
+        .execute(command);
+}
+
+Result<UserPreferenceDto> FinanceApplicationService::get_preferences(
+    domain::UserId user_id) {
+    auto scope = open_scope(user_id);
+    if (!scope) return err(scope.error());
+    return GetUserPreferenceUseCase((*scope)->preferences()).execute(user_id);
+}
+
+Result<UserPreferenceDto> FinanceApplicationService::update_preferences(
+    const UpdateUserPreferenceCommand& command) {
+    auto scope = open_scope(command.user_id);
+    if (!scope) return err(scope.error());
+    return UpdateUserPreferenceUseCase(
+        (*scope)->preferences(), (*scope)->audit_logs(), (*scope)->unit_of_work())
+        .execute(command);
+}
+
+Result<std::vector<CurrencyMetadataDto>>
+FinanceApplicationService::list_currencies() const {
+    return ListCurrenciesUseCase().execute();
+}
+
+Result<TransactionDto> FinanceApplicationService::create_transaction(
+    const CreateTransactionCommand& command) {
+    auto scope = open_scope(command.user_id);
+    if (!scope) return err(scope.error());
+    return CreateTransactionUseCase(
+        (*scope)->accounts(),
+        (*scope)->categories(),
+        (*scope)->transactions(),
+        (*scope)->unit_of_work())
+        .execute(command);
+}
+
+VoidResult FinanceApplicationService::delete_transaction(
+    const DeleteTransactionCommand& command) {
+    auto scope = open_scope(command.user_id);
+    if (!scope) return err(scope.error());
+    return DeleteTransactionUseCase(
+        (*scope)->transactions(),
+        (*scope)->audit_logs(),
+        (*scope)->unit_of_work())
+        .execute(command);
+}
+
+Result<TransferResultDto> FinanceApplicationService::create_transfer(
+    const CreateTransferCommand& command) {
+    auto scope = open_scope(command.user_id);
+    if (!scope) return err(scope.error());
+    return CreateTransferUseCase(
+        (*scope)->accounts(),
+        (*scope)->transactions(),
+        (*scope)->unit_of_work())
+        .execute(command);
+}
+
+Result<TransferResultDto> FinanceApplicationService::get_transfer(
+    domain::UserId user_id,
+    domain::TransferGroupId group_id) {
+    auto scope = open_scope(user_id);
+    if (!scope) return err(scope.error());
+    return GetTransferUseCase((*scope)->transactions()).execute(user_id, group_id);
+}
+
+Result<NetWorthDto> FinanceApplicationService::net_worth(
+    domain::UserId user_id) {
+    auto scope = open_scope(user_id);
+    if (!scope) return err(scope.error());
+    ReportQueryService reports(
+        (*scope)->accounts(),
+        (*scope)->transactions(),
+        (*scope)->exchange_rates(),
+        (*scope)->preferences(),
+        &(*scope)->categories());
+    return reports.net_worth(user_id, clock_.now());
+}
+
+Result<CashFlowTrendDto> FinanceApplicationService::cash_flow_trend(
+    const CashFlowTrendQuery& query) {
+    auto scope = open_scope(query.user_id);
+    if (!scope) return err(scope.error());
+    ReportQueryService reports(
+        (*scope)->accounts(),
+        (*scope)->transactions(),
+        (*scope)->exchange_rates(),
+        (*scope)->preferences(),
+        &(*scope)->categories());
+    return reports.cash_flow_trend(
+        query.user_id,
+        query.start_year,
+        query.start_month,
+        query.end_year,
+        query.end_month);
+}
+
+Result<DashboardSummaryDto> FinanceApplicationService::dashboard_summary(
+    domain::UserId user_id) {
+    auto scope = open_scope(user_id);
+    if (!scope) return err(scope.error());
+    ReportQueryService reports(
+        (*scope)->accounts(),
+        (*scope)->transactions(),
+        (*scope)->exchange_rates(),
+        (*scope)->preferences(),
+        &(*scope)->categories());
+    return reports.dashboard_summary(user_id, clock_.now());
+}
+
+} // namespace pfh::application

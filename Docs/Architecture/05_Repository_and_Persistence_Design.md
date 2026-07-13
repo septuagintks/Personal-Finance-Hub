@@ -24,6 +24,7 @@ Architecture: Clean Architecture + Lightweight DDD
 10. **以提交回调确认成功**：Drogon `Transaction` 没有供业务代码直接调用的 `commit()`。成功路径应释放最后一个 Transaction owner 触发提交，并以 `newTransaction` / `setCommitCallback` 的布尔结果作为提交是否成功的依据；禁止通过 `execSqlSync("COMMIT")` 绕过 Drogon 生命周期。
 11. **事务内读取必须显式传递上下文**：需要 read-your-writes 的 User/UserPreference 等流程必须调用接收 `ITransactionContext&` 的 Repository 重载；无上下文读取会创建独立短事务，不能用于观察当前 UoW 尚未提交的写入。
 12. **注册 tenant 只能绑定一次**：注册使用未绑定 tenant 的 bootstrap UoW，只允许先访问 `users` 和系统模板。User INSERT 返回新 ID 后，必须在同一 Transaction 上调用 `bind_tenant_once(newUserId)`，由它执行 `SET LOCAL`；重复绑定、切换 ID 或在绑定前访问租户表均失败。不得拆成“创建用户一次提交 + 默认数据另一次提交”。
+13. **请求作用域由 Application 定义**：`IRequestScopeFactory::create(UserId)` 每次返回独立 scope；scope 暴露 Account、Transaction、Category、Tag、Preference、ExchangeRate、AuditLog Repository 与同租户 Unit of Work。Presentation 只能调用 `FinanceApplicationService`，不得包含 Infrastructure 配置或自行 new Repository。
 
 ---
 
@@ -117,24 +118,33 @@ class ITransactionRepository {
 public:
     virtual ~ITransactionRepository() = default;
 
-    // 保存单笔常规收支流水（Income/Expense/Adjustment），返回持久化后的 TransactionId
-    virtual std::expected<TransactionId, RepositoryError> saveSingle(const Transaction& transaction) = 0;
-
-    // 保存转账聚合（自动拆分为多笔底层流水和一条 transfer_groups 记录），返回持久化后的 TransferGroupId
-    virtual std::expected<TransferGroupId, RepositoryError> saveTransfer(const TransferAggregate& transfer) = 0;
-
-    // 按条件查询流水，支持分页。内部自动过滤/包含软删除状态
-    virtual std::expected<std::vector<Transaction>, RepositoryError> findByAccount(
-        AccountId accountId,
-        const DateRange& range,
-        bool includeDeleted = false
-    ) = 0;
-
-    // 危险删除辅助：物理删除某个账户下的所有流水
-    virtual std::expected<void, RepositoryError> physicalDeleteByAccount(
+    virtual RepositoryResult<Transaction> save_single(
         ITransactionContext& tx,
-        AccountId accountId
-    ) = 0;
+        const Transaction& transaction) = 0;
+
+    virtual RepositoryResult<TransferPersistResult> save_transfer(
+        ITransactionContext& tx,
+        const TransferAggregate& transfer) = 0;
+
+    virtual RepositoryResult<std::vector<Transaction>> find_by_account(
+        AccountId account_id,
+        std::optional<TimePoint> from,
+        std::optional<TimePoint> to,
+        bool include_deleted = false) = 0;
+
+    virtual RepositoryResult<std::vector<Transaction>> find_by_user(
+        UserId user_id,
+        bool include_deleted = false) = 0;
+
+    virtual RepositoryResult<TransferSnapshot> find_transfer_by_group(
+        TransferGroupId group_id,
+        UserId user_id) = 0;
+
+    virtual RepositoryVoidResult soft_delete(
+        ITransactionContext& tx,
+        TransactionId id,
+        UserId user_id,
+        TimePoint deleted_at) = 0;
 };
 
 ```
@@ -153,19 +163,23 @@ class ICategoryRepository {
 public:
     virtual ~ICategoryRepository() = default;
 
-    virtual std::expected<std::vector<Category>, RepositoryError> findTreeByUser(
-        UserId userId,
-        CategoryBoard board,
-        bool includeDeleted = false
-    ) = 0;
-
-    virtual std::expected<Category, RepositoryError> findById(CategoryId id) = 0;
-
-    virtual std::expected<void, RepositoryError> save(const Category& category) = 0;
-
-    virtual std::expected<void, RepositoryError> softDelete(CategoryId id, UserId userId) = 0;
-
-    virtual std::expected<void, RepositoryError> initializeDefaultsForUser(UserId userId) = 0;
+    virtual RepositoryResult<Category> find_by_id_for_user(
+        CategoryId id, UserId user_id) = 0;
+    virtual RepositoryResult<Category> find_by_id_for_user_including_deleted(
+        CategoryId id, UserId user_id) = 0;
+    virtual RepositoryResult<Category> find_by_id_for_user_for_update(
+        ITransactionContext& tx, CategoryId id, UserId user_id) = 0;
+    virtual RepositoryResult<std::vector<Category>> find_by_board(
+        UserId user_id, CategoryBoard board) = 0;
+    virtual RepositoryResult<std::vector<Category>> find_all_for_user(
+        UserId user_id) = 0;
+    virtual RepositoryResult<CategoryId> resolve_root_id_for_user(
+        CategoryId id, UserId user_id) = 0;
+    virtual RepositoryResult<CategoryId> save(
+        ITransactionContext& tx, const Category& category) = 0;
+    virtual RepositoryVoidResult soft_delete(
+        ITransactionContext& tx, CategoryId id, UserId user_id,
+        TimePoint deleted_at) = 0;
 };
 ```
 
@@ -191,21 +205,18 @@ class ITagRepository {
 public:
     virtual ~ITagRepository() = default;
 
-    virtual std::expected<std::vector<Tag>, RepositoryError> findByUser(
-        UserId userId,
-        bool includeDeleted = false
-    ) = 0;
-
-    virtual std::expected<Tag, RepositoryError> create(UserId userId, const std::string& name) = 0;
-
-    virtual std::expected<void, RepositoryError> softDelete(TagId tagId, UserId userId) = 0;
-
-    virtual std::expected<void, RepositoryError> attachToTransaction(
-        TransactionId transactionId,
-        const std::vector<TagId>& tagIds
-    ) = 0;
-
-    virtual std::expected<std::vector<Tag>, RepositoryError> findByTransaction(TransactionId transactionId) = 0;
+    virtual RepositoryResult<std::vector<Tag>> find_by_user(
+        UserId user_id, bool include_deleted = false) = 0;
+    virtual RepositoryResult<Tag> find_by_id_for_user_for_update(
+        ITransactionContext& tx, TagId tag_id, UserId user_id) = 0;
+    virtual RepositoryResult<TagId> save(
+        ITransactionContext& tx, const Tag& tag) = 0;
+    virtual RepositoryVoidResult soft_delete(
+        ITransactionContext& tx, TagId tag_id, UserId user_id,
+        TimePoint deleted_at) = 0;
+    virtual RepositoryResult<std::vector<Tag>> replace_transaction_tags(
+        ITransactionContext& tx, TransactionId transaction_id,
+        UserId user_id, const std::vector<TagId>& tag_ids) = 0;
 };
 ```
 
@@ -213,7 +224,8 @@ public:
 
 1. 同一用户下 Tag 名称唯一
 2. Tag 软删除后，历史流水关系保留
-3. `attachToTransaction` 必须校验流水和 Tag 属于同一用户
+3. `replace_transaction_tags` 必须锁定流水、校验流水和全部 Tag 属于同一用户，并在同一事务替换完整关系集合
+4. 删除 Tag 前必须使用 `find_by_id_for_user_for_update` 在当前 UoW 中取得审计快照，禁止提交前跨事务重读
 
 ### 2.6 用户偏好仓储接口
 

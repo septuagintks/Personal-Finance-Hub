@@ -3,6 +3,7 @@
 #include "pfh/application/services/auth_service.h"
 
 #include "pfh/application/error_mapping.h"
+#include "pfh/application/input_constraints.h"
 #include "pfh/domain/events/domain_events.h"
 
 #include <algorithm>
@@ -26,16 +27,6 @@ constexpr std::size_t kMaxRefreshTokenLength = 1024;
 
 [[nodiscard]] Error invalid_token() {
     return Error(ErrorCode::InvalidToken, "Invalid or expired token");
-}
-
-[[nodiscard]] bool valid_locale(std::string_view locale) {
-    if (locale.empty() || locale.size() > 16) {
-        return false;
-    }
-    return std::all_of(locale.begin(), locale.end(), [](const char raw) {
-        const auto c = static_cast<unsigned char>(raw);
-        return std::isalnum(c) != 0 || c == '-';
-    });
 }
 
 [[nodiscard]] domain::AuditLogEntry auth_audit(
@@ -145,7 +136,7 @@ Result<RegisterResultDto> AuthService::register_user(
         return err(Error::validation(
             "password must contain 12 to 128 characters"));
     }
-    if (!valid_locale(command.preferred_locale)) {
+    if (!is_locale_tag(command.preferred_locale)) {
         return err(Error::validation("preferredLocale is invalid"));
     }
     auto currency = domain::Currency::create(command.base_currency_code);
@@ -206,8 +197,10 @@ Result<RegisterResultDto> AuthService::register_user(
                 domain::AuditAction::Register,
                 "User",
                 created->to_string(),
-                "{\"locale\":\"" + defaults->resolved_locale +
-                    "\",\"categoryCount\":" +
+                "{\"locale\":" +
+                    domain::event_detail::json_string(
+                        defaults->resolved_locale) +
+                    ",\"categoryCount\":" +
                     std::to_string(defaults->category_count) + "}",
                 now);
             if (auto appended = audit_logs_.append(tx, audit); !appended) {

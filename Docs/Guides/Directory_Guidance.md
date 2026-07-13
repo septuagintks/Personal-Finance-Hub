@@ -17,6 +17,7 @@ Docs/
 │   ├── 08_Exchange_Rate_System_Design.md
 │   ├── 09_Reporting_and_Analytics_Design.md
 │   ├── 10_REST_API_Design.md
+│   ├── 10_REST_API_OpenAPI.json
 │   ├── 11_Sync_Framework_Design.md
 │   ├── 12_Scheduler_Design.md
 │   ├── 13_Frontend_Design.md

@@ -5,6 +5,7 @@
 
 #include <functional>
 #include <memory>
+#include <map>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -18,6 +19,11 @@ class HttpRequest {
 public:
     [[nodiscard]] std::string_view body() const noexcept { return {}; }
     [[nodiscard]] std::string getHeader(const std::string&) const { return {}; }
+    [[nodiscard]] std::string getParameter(const std::string&) const { return {}; }
+    [[nodiscard]] const std::map<std::string, std::string>& getParameters() const {
+        static const std::map<std::string, std::string> parameters;
+        return parameters;
+    }
     [[nodiscard]] std::string methodString() const { return "GET"; }
     [[nodiscard]] std::string path() const { return "/"; }
 };

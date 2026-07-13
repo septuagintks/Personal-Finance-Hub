@@ -36,6 +36,23 @@ enum class CategorySource {
     User    ///< Created directly by the user.
 };
 
+/// Maximum number of nodes from a category to its root, including both ends.
+/// Writes and reads enforce one bound so accepted trees remain traversable.
+inline constexpr int kMaxCategoryTreeDepth = 64;
+
+/// @brief Global category template read model. It is materialized as a
+/// user-owned Category before it can be used by transactions.
+struct SystemCategoryTemplate {
+    std::int64_t id = 0;
+    std::string name;
+    std::string locale;
+    std::string group_name;
+    std::optional<std::int64_t> parent_id;
+    std::optional<CategoryBoard> default_board;
+    int sort_order = 0;
+    bool is_selectable = true;
+};
+
 /// @brief Category entity — organizes transactions.
 ///
 /// Fields mirror the `categories` table (02_Database_Design / V1 schema):

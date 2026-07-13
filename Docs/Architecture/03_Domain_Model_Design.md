@@ -558,7 +558,7 @@ private:
 };
 ```
 
-Support unlimited hierarchy.
+分类树最多包含 64 层（含根节点和当前节点）。`kMaxCategoryTreeDepth` 是 Domain、In-Memory、PostgreSQL 与报表 root 回溯共享的唯一上限；创建第 65 层必须返回校验错误。
 
 ```cpp
 enum class CategorySource
@@ -673,6 +673,7 @@ private:
     UserId owner;
     std::string name;
     Timestamp createdAt;
+    Timestamp updatedAt;
     std::optional<Timestamp> deletedAt;
 };
 ```
@@ -1193,7 +1194,7 @@ Application Layer 使用 `application/use_cases/` 下的具体 Use Case：
 CreateTransactionUseCase
 CreateTransferUseCase
 DeleteTransactionUseCase
-GenerateMonthlyReportUseCase
+ReportQueryService
 RefreshExchangeRatesUseCase
 ```
 
@@ -1315,7 +1316,7 @@ struct AccountId
 | Account                | accounts                  | 已对齐   | 已补齐 description、isArchived、archivedAt、createdAt、updatedAt |
 | Category               | categories                | 已对齐   | 已补齐 sortOrder、deletedAt、createdAt、updatedAt                |
 | Transaction            | transactions              | 已对齐   | 已补齐 userId、transferGroupId                                   |
-| Tag                    | tags                      | 待补充   | 当前文档仅定义值对象语义，尚未展开持久化字段                     |
+| Tag                    | transaction_tags          | 已对齐   | `Tag` 承载 id/owner/name/deletedAt/createdAt/updatedAt；多对多关系位于 `transaction_tag_relations` |
 | AuditLog               | audit_logs                | 基本对齐 | 资源 ID 允许字符串以兼容 UUID / 复合 ID                          |
 | SystemCategoryTemplate | system_category_templates | 基本对齐 | 主要由分类模板与初始化流程使用                                   |
 

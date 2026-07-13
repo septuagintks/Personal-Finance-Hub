@@ -14,7 +14,7 @@ Architecture: Clean Architecture (Event-Driven)
 
 **核心设计原则：**
 
-1. **解耦副作用（Decoupling Side Effects）**：核心 Use Case 只负责主业务（如扣款），后续的附属操作（如刷新统计缓存、写日志）由事件处理器（Event Handlers）异步或同步接管。
+1. **解耦非关键副作用（Decoupling Side Effects）**：核心 Use Case 负责主业务，以及必须与业务事实原子提交的同步 AuditLog；通知、报表缓存失效和补充型运维记录等非关键副作用由事件处理器接管。
 2. **事务外发箱（Transactional Outbox）**：业务事务内只写业务事实和 outbox 记录，绝不在提交前直接对外派发事件。只有当同一数据库事务中的 outbox 记录与业务数据一起成功提交后，事件才具备可投递资格。
 3. **进程内总线（In-Process Bus）**：目前阶段不引入 Kafka 或 RabbitMQ 等沉重的外部消息中间件，仍然使用 C++23 在进程内实现轻量级 Pub/Sub；但它只负责消费 outbox 已提交事件，不参与业务事务提交路径。
 
@@ -50,10 +50,10 @@ struct IDomainEvent {
 | Event                     | 必备字段                                                              | 触发来源                                                   | 典型订阅者                                                 |
 | ------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------- |
 | TransactionCreated        | userId, transactionId, accountId, occurredAt                          | CreateTransactionUseCase                                   | BalanceCacheInvalidator, ReportCacheInvalidator            |
-| TransactionDeleted        | userId, transactionId, accountId, occurredAt                          | DeleteTransactionUseCase                                   | BalanceCacheInvalidator, AuditLogHandler                   |
+| TransactionDeleted        | userId, transactionId, accountId, occurredAt                          | DeleteTransactionUseCase                                   | BalanceCacheInvalidator, ReportCacheInvalidator            |
 | TransferCompleted         | userId, transferGroupId, sourceAccountId, targetAccountId, occurredAt | CreateTransferUseCase                                      | BalanceCacheInvalidator, ReportCacheInvalidator            |
-| AccountArchived           | userId, accountId, occurredAt                                         | ArchiveAccountUseCase                                      | DashboardCacheInvalidator, AuditLogHandler                 |
-| AccountDangerouslyDeleted | userId, accountId, occurredAt                                         | DangerousDeleteAccountUseCase                              | AuditLogHandler, SecurityNotificationHandler               |
+| AccountArchived           | userId, accountId, occurredAt                                         | ArchiveAccountUseCase                                      | DashboardCacheInvalidator                                  |
+| AccountDangerouslyDeleted | userId, accountId, occurredAt                                         | DangerousDeleteAccountUseCase                              | SecurityNotificationHandler                                |
 | CategoryCreated           | userId, categoryId, board, occurredAt                                 | CreateCategoryUseCase / InitializeDefaultCategoriesUseCase | CategoryTreeCacheInvalidator                               |
 | CategoryDeleted           | userId, categoryId, board, occurredAt                                 | DeleteCategoryUseCase                                      | CategoryTreeCacheInvalidator, ReportCacheInvalidator       |
 | ExchangeRateRefreshed     | provider, baseCurrency, targetCurrency, fetchedAt                     | RefreshExchangeRatesUseCase                                | LatestRateCacheInvalidator, AuditLogHandler                |
@@ -73,6 +73,17 @@ struct IDomainEvent {
 `ExchangeRateRefreshed` 按成功返回的币种对逐条登记，不使用批次计数替代
 `targetCurrency`。`ExchangeRateRefreshFailed.historicalAvailable` 只有在本次请求的
 全部目标币种对均存在历史汇率时才为 `true`。
+
+### 2.4 AuditLog 与事件处理器边界
+
+以下审计属于业务事实的一部分，必须由 Use Case 通过 `IAuditLogRepository` 在同一
+事务内同步写入：认证生命周期，以及账户、流水、分类、标签、偏好等用户发起的
+关键资源变更。业务写入、AuditLog 和 outbox 任一失败时，整个事务回滚。
+
+`AuditLogHandler` 只允许记录没有同步业务审计的系统事件、投递失败/dead-letter、
+安全告警处置等补充事实。它不得根据 `TransactionDeleted`、`AccountArchived`、
+`AccountDangerouslyDeleted` 等事件重复写入同一业务动作的 AuditLog。补充审计必须
+使用 `outbox_id + handler_name`（或等价键）保证幂等。
 
 ```cpp
 // domain/events/TransferCompletedEvent.hpp
@@ -264,8 +275,9 @@ public:
    - 业务事务 Commit 成功后，不直接调用 handler；由 Scheduler 中的 `OutboxPublisherJob` 扫描 `pending/failed` 事件并投递到 `IEventBus`。
 2. **处理器分层**：
    - `IEventBus` 内部仍可使用 Drogon 的线程池或自定义工作线程池，以避免单个 handler 阻塞 outbox publisher。
-   - 区分**同步订阅者**（如 `BalanceCacheInvalidator`，需要尽快更新缓存）和**异步订阅者**（如 `AuditLogHandler`、`SecurityNotificationHandler`）。
-   - 无论同步还是异步，handler 都必须幂等，因为 outbox 允许重试。
+   - 处理器可按优先级区分快速本地处理（如缓存失效）和后台处理（如安全通知），但二者都发生在业务事务提交之后。
+   - 业务 AuditLog 不由 post-commit handler 补写；只有 2.4 节定义的补充审计可以进入 `AuditLogHandler`。
+   - 所有 handler 都必须幂等，因为 outbox 允许重试。
 
 ```cpp
 // infrastructure/persistence/DrogonUnitOfWork.cpp (改造片段)
@@ -314,6 +326,11 @@ return {};
 
 return uow_->executeInTransaction([&](ITransactionContext& tx) -> std::expected<void, RepositoryError> {
 
+    auto auditRes = auditRepo_->append(tx, makeDangerousDeleteAudit(
+        userId, accountId, confirmations
+    ));
+    if (!auditRes) return auditRes;
+
     auto delTxRes = txRepo_->physicalDeleteByAccount(tx, accountId);
     if (!delTxRes) return delTxRes;
 
@@ -323,8 +340,7 @@ return uow_->executeInTransaction([&](ITransactionContext& tx) -> std::expected<
     auto delAccRes = accountRepo_->physicalDelete(tx, accountId);
     if (!delAccRes) return delAccRes;
 
-    // 原来的审计日志写入和缓存清理去掉了！
-    // 替换为：向 UoW 注册一个事件
+    // AuditLog 已与删除事实处于同一事务；事件只承载提交后的副作用。
     uow_->registerEvent(std::make_shared<AccountDangerouslyDeletedEvent>(
         accountId, userId
     ));
@@ -339,12 +355,7 @@ return uow_->executeInTransaction([&](ITransactionContext& tx) -> std::expected<
 在系统启动时（例如在 `main.cpp` 中），我们将处理器注册到总线上。这些处理器由 `OutboxPublisherJob` 在成功 claim outbox 事件后触发。
 
 ```cpp
-// 处理器 1：负责写高危审计日志
-eventBus->subscribe<AccountDangerouslyDeletedEvent>([auditRepo](const auto& ev) {
-    auditRepo->record(/* 由 AccountDangerouslyDeletedEvent 生成的 AuditLog */);
-});
-
-// 处理器 2：负责发预警邮件给用户
+// 业务审计已同步提交；事件处理器只负责安全通知，不重复写 AuditLog。
 eventBus->subscribe<AccountDangerouslyDeletedEvent>([emailService](const auto& ev) {
     emailService->sendWarningEmail(ev->userId, "您刚刚彻底删除了一个账户及其所有流水。");
 });

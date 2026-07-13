@@ -29,6 +29,10 @@ def main() -> int:
     transaction = read(
         "src/infrastructure/persistence/transaction_repository_impl.cpp"
     )
+    category = read(
+        "src/infrastructure/persistence/category_repository_impl.cpp"
+    )
+    tag = read("src/infrastructure/persistence/tag_repository_impl.cpp")
     user = read("src/infrastructure/persistence/user_repository_impl.cpp")
     preference = read(
         "src/infrastructure/persistence/user_preference_repository_impl.cpp"
@@ -50,6 +54,9 @@ def main() -> int:
         "src/infrastructure/security/argon2_password_hasher.cpp"
     )
     auth_migration = read("migrations/V4__authentication_session_security.sql")
+    transfer_rate_migration = read(
+        "migrations/V5__align_transfer_rate_precision.sql"
+    )
 
     required_sources = [
         "drogon_unit_of_work.cpp",
@@ -59,6 +66,7 @@ def main() -> int:
         "account_repository_impl.cpp",
         "transaction_repository_impl.cpp",
         "category_repository_impl.cpp",
+        "tag_repository_impl.cpp",
         "user_repository_impl.cpp",
         "user_preference_repository_impl.cpp",
         "exchange_rate_repository_impl.cpp",
@@ -110,6 +118,7 @@ def main() -> int:
         "src/infrastructure/persistence/transaction_repository_impl.cpp",
         "src/infrastructure/persistence/category_repository_impl.cpp",
         "src/infrastructure/persistence/user_preference_repository_impl.cpp",
+        "src/infrastructure/persistence/tag_repository_impl.cpp",
     ]
     for path in tenant_sources:
         require(
@@ -169,6 +178,19 @@ def main() -> int:
         failures,
     )
     require(
+        "find_by_id_for_user_for_update" in tag
+        and "AND deleted_at IS NULL FOR UPDATE NOWAIT" in tag,
+        "Tag delete audit snapshot must be locked in the active transaction",
+        failures,
+    )
+    require(
+        "const bool updating = category.id().is_valid();" in category
+        and "ancestor_depth < domain::kMaxCategoryTreeDepth" in category
+        and "FOR UPDATE NOWAIT" in category,
+        "Category creates and updates must share the depth and parent-lock contract",
+        failures,
+    )
+    require(
         "bind_tenant_once" in read(
             "src/infrastructure/persistence/drogon_transaction_context.cpp"
         )
@@ -204,6 +226,13 @@ def main() -> int:
         "CREATE TABLE revoked_sessions" in auth_migration
         and "security_event" in auth_migration,
         "V4 must persist session-family revocation and authentication audit actions",
+        failures,
+    )
+    require(
+        "NUMERIC(20, 10)" in transfer_rate_migration
+        and "chk_transfer_groups_exchange_rate" in transfer_rate_migration
+        and "$4::numeric(20,10)" in transaction,
+        "Transfer snapshot rates must match the Domain NUMERIC(20,10) boundary",
         failures,
     )
 

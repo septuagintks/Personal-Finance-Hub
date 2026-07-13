@@ -351,7 +351,7 @@ INSERT INTO system_category_templates (name, locale, group_name, default_board, 
 
 8.   [UserRepository / AuditLogRepository / UnitOfWork]
      - 将 users.categories_initialized 更新为 TRUE
-     - 写入 Action=Create, Resource=UserDefaults
+     - 写入 Action=Register, Resource=User
      - metadata 包含 locale 和初始化的分类数量
      - 在提交前登记 UserRegistered 事件，由同一事务写入 outbox
 

@@ -10,7 +10,11 @@
 #include <nlohmann/json.hpp>
 
 #include <chrono>
+#include <charconv>
+#include <cstdint>
+#include <system_error>
 #include <optional>
+#include <limits>
 #include <set>
 #include <string>
 #include <string_view>
@@ -39,6 +43,34 @@ public:
         std::string_view field,
         std::size_t max_length = 4096);
 
+    [[nodiscard]] static application::Result<std::optional<std::string>>
+    optional_string_allow_empty(
+        const Json& object,
+        std::string_view field,
+        std::size_t max_length = 4096);
+
+    [[nodiscard]] static application::Result<std::int64_t> positive_integer(
+        const Json& value,
+        std::string_view field);
+
+    template <typename TypedId>
+    [[nodiscard]] static application::Result<TypedId> path_id(
+        std::string_view value,
+        std::string_view field) {
+        std::int64_t parsed = 0;
+        const auto* begin = value.data();
+        const auto* end = begin + value.size();
+        const auto result = std::from_chars(begin, end, parsed);
+        TypedId id(parsed);
+        if (value.empty() || result.ec != std::errc{} || result.ptr != end ||
+            !id.is_valid()) {
+            return application::err(application::Error(
+                application::ErrorCode::InvalidFormat,
+                std::string(field) + " must be a positive integer"));
+        }
+        return id;
+    }
+
     template <typename TypedId>
     [[nodiscard]] static application::Result<TypedId> required_id(
         const Json& object,
@@ -50,13 +82,11 @@ public:
                 application::ErrorCode::MissingRequiredField,
                 key + " is required"));
         }
-        if (!it->is_number_integer()) {
-            return application::err(application::Error(
-                application::ErrorCode::InvalidFormat,
-                key + " must be a positive integer"));
+        auto value = positive_integer(*it, field);
+        if (!value) {
+            return application::err(value.error());
         }
-        const auto value = it->get<std::int64_t>();
-        TypedId id(value);
+        TypedId id(*value);
         if (!id.is_valid()) {
             return application::err(application::Error(
                 application::ErrorCode::InvalidFormat,

@@ -43,7 +43,7 @@ Phase 1 的具体开发顺序、目录结构、实现步骤和测试收尾清单
 
 ### 1.4 当前进度
 
-截至 2026-07-14，P1-S01 至 P1-S09 与 P1-S10-01 至 S10-03 已完成实现，Windows GCC 16 基线为 273/273。V3 已通过外部 PostgreSQL 16.14 空库迁移复测，当前继续 P1-S10-04 production composition root 及后续 REST API 与认证基础开发。
+截至 2026-07-14，P1-S01 至 P1-S10 已完成本地实现与全量 review，Windows GCC 16 / PostgreSQL OFF 基线为 321/321。V1-V3 已通过外部 PostgreSQL 16.14 空库迁移复测，当前进入 P1-S11；V4/V5、真实 PostgreSQL/Drogon/安全库及 Linux/Docker 门禁保留到 P1-S12。
 
 以下内容尚未完成，不能由现有 In-Memory 测试替代：
 
@@ -173,7 +173,7 @@ Presentation
 - `DrogonUnitOfWork` 与 `OutboxPublisherJob`。
 - Repository 集成测试。
 
-当前状态：迁移脚本、接口、In-Memory 事务语义、16 个 integration scenarios，以及核心 PostgreSQL Repository / `DrogonUnitOfWork` 已交付；S10-04 继续完成 production composition root 与 DbClient 装配，真实连库测试在 S10-11/P1-S12 签署，`OutboxPublisherJob` 在 P1-S11 完成。
+当前状态：迁移脚本、接口、In-Memory 事务语义、16 个 integration scenarios、核心 PostgreSQL Repository / `DrogonUnitOfWork`、production composition root 与双 DbClient 装配均已完成本地实现和离线门禁；真实连库与运行期验收统一在 P1-S12 签署，`OutboxPublisherJob` 在 P1-S11 完成。
 
 验收标准：
 

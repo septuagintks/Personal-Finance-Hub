@@ -11,7 +11,7 @@ Status: Active
 
 本文档是 `Phase_1_Development_Plan.md` 的细化子计划，用于描述 Phase 1 从创建工程目录结构开始，到第一阶段测试收尾为止的具体开发顺序、交付物和验收口径。
 
-当前进度（2026-07-14）：P1-S01 至 P1-S09 与 P1-S10-01 至 S10-06 已完成实现和本地离线复核，下一步进入 S10-07 基础资源 API。S10-06 检查点的 Windows GCC 16 基线为 265 个 unit/use-case、16 个 In-Memory integration、11 个 framework-neutral API、1 个 migration gate 与 1 个 PostgreSQL adapter contract gate，共 294/294；PostgreSQL、production bootstrap 与 Argon2/OpenSSL 安全源均在 OFF 构建中通过窄 API stub 执行语法编译。V3 已在外部 PostgreSQL 16.14 空库复测通过；V4、真实 Drogon/PostgreSQL/Argon2/OpenSSL ABI、连接池隔离及完整 P1-S12 门禁尚未在目标机器签署。
+当前进度（2026-07-14）：P1-S01 至 P1-S10 已完成本地实现与全量 review，下一步进入 P1-S11。当前 Windows GCC 16 / PostgreSQL OFF 基线为 272 个 unit/use-case、16 个 In-Memory integration、29 个 framework-neutral API 和 4 个静态门禁，共 321/321；PostgreSQL、production bootstrap 与 Argon2/OpenSSL 安全源均在 OFF 构建中通过窄 API stub 执行语法编译。V1-V3 已在外部 PostgreSQL 16.14 空库复测通过；V4/V5、真实 Drogon/PostgreSQL/Argon2/OpenSSL ABI、连接池隔离、Linux/Docker 及完整 P1-S12 门禁尚未在目标机器签署。
 
 ### 1.1 执行原则
 
@@ -391,15 +391,15 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S10-03 PostgreSQL Repository 与 DrogonUnitOfWork
 
-状态：**核心适配器实现与离线编译/结构门禁已完成（2026-07-14）；真实连库签署保留到 S10-04/S12**。
+状态：**核心适配器实现、S10-04 装配与离线编译/结构门禁已完成（2026-07-14）；真实连库签署保留到 P1-S12**。
 
 - 实现 `DrogonUnitOfWork`，把同一 `Transaction` 上下文显式传给所有写 Repository 和 outbox。
 - 实现 PostgreSQL 版 User、UserPreference、Account、Transaction（含 Transfer + Adjustment 聚合持久化）、ExchangeRate、Category 核心适配器，以及供无用户后台任务使用的 `PostgresActiveCurrencyQuery`。
 - 完成任务 #46/#47/#51：真实分类解析、事务内 read-your-writes、余额缓存 `source_version` 与 schema `version` 语义严格一致。
 - 以迁移 schema 为事实来源，所有租户查询和约束显式包含 `user_id`；唯一跨租户查询通过独立系统端口/后台只读连接实现，不混入 tenant Repository。不得照搬 In-Memory 的简化字段或计数规则。
-- Tag 适配器随 S10-07 的 Tag Application 用例实现；RefreshToken/RevokedToken 随 S10-06 认证生命周期实现；AuditLog 端口与高危同步审计写入随 S10-06/S10-07，异步审计处理器随 S11-03 实现。它们不再提前塞入缺少 Application 契约的 S10-03。
+- Tag 适配器随 S10-07 的 Tag Application 用例实现；RefreshToken/RevokedToken 随 S10-06 认证生命周期实现；AuditLog 端口与关键业务同步审计随 S10-06 至 S10-08 实现。S11-03 只处理没有同步审计的系统事件和投递失败等补充事实，不重复记录同一业务动作。
 
-产物：可供 composition root 装配的核心生产持久化适配器、离线全源编译门禁与 PostgreSQL adapter contract gate。可复用的真实 PostgreSQL integration fixture/scenarios 在 S10-04 接入运行期 DbClient 后落地，并在 S12 目标环境签署。
+产物：可供 composition root 装配的核心生产持久化适配器、离线全源编译门禁与 PostgreSQL adapter contract gate。真实 PostgreSQL integration fixture、同批 scenarios 复跑和结果签署统一在具备目标数据库环境的 P1-S12 落地。
 
 #### P1-S10-04 Composition Root、DbClient 与 RLS 上下文
 
@@ -415,7 +415,7 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S10-05 HTTP DTO、解析与统一响应
 
-状态：**通用 HTTP 边界与认证 DTO 已完成（2026-07-14）；资源 DTO 随 S10-07 至 S10-10 接入同一 mapper**。
+状态：**已完成（2026-07-14）**。通用 HTTP 边界、认证与资源 DTO、统一 mapper、TraceId 和异常脱敏均已接入。
 
 - 实现 JSON 到 Application Command 的防御性映射，ID、枚举、可选时间和字符串金额逐字段校验。
 - 实现 Application DTO 到响应 JSON 的映射，统一金额、RFC 3339 时间、空值和分页口径。
@@ -439,6 +439,8 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S10-07 基础资源 API
 
+状态：**已完成实现与本地回归（2026-07-14）**。真实 PostgreSQL/Drogon runtime 验证保留到 P1-S12。
+
 - 在 Controller 前补齐 CreateAccount、ArchiveAccount、Category、Tag 和 UserPreference 所需的 Application Command/Use Case；Presentation 不直接编排 Repository。
 - 按 Account、Category、Tag、UserPreference、Currency metadata 的顺序接入 API。
 - 所有资源读取、更新和删除均验证当前 `user_id`；系统模板与用户自定义分类边界保持清晰。
@@ -448,13 +450,17 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S10-08 Transaction API
 
-- 接入创建和软删除流水；禁止直接创建 Transfer 派生流水。
+状态：**已完成实现与本地回归（2026-07-14）**。Application 与 HTTP 双层校验普通十进制字符串、4096 字节说明、ID、币种、分类 board 和 `NUMERIC(20,8)` 边界。
+
+- 接入创建和软删除流水；禁止直接创建 Transfer 派生流水，并拒绝单独删除 Transfer 双边或同组 Adjustment。
 - Income/Expense 只接受正数 magnitude，Adjustment 按 signed 语义映射；分类由 `ICategoryRepository` 校验真实 board。
 - 拒绝 JSON number、超出 `NUMERIC(20,8)`、币种不匹配、跨用户账户与分类。
 
 产物：TransactionController 及金额、分类、权限、时间默认值测试。
 
 #### P1-S10-09 Transfer API
+
+状态：**已完成实现与本地回归（2026-07-14）**。创建与查询路由、三种模式、三类手续费来源和正数 magnitude 响应已覆盖；未注册删除路由。
 
 - 复用已完成的任务 #48，接入三种转账模式、手续费来源和 signed Adjustment 响应映射。
 - 响应中的 outgoing/incoming/fee 均使用正数 magnitude；存储层 outgoing 负号不直接返回。
@@ -465,6 +471,8 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S10-10 Report API
 
+状态：**已完成实现与本地回归（2026-07-14）**。当前月 Dashboard 使用用户时区半开窗口，cash flow 支持最长 120 个月范围，历史分类按已删除 root 名称聚合。
+
 - 暴露 net worth、cash flow 和 dashboard summary。
 - 复用 `ReportQueryService` 的用户时区月窗、历史汇率、signed Adjustment、Transfer 排除和一级分类聚合语义。
 - 所有查询显式绑定 `user_id`；缺失汇率和无效时区不得静默回退。
@@ -473,8 +481,10 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S10-11 API 回归与交付总结
 
-- 启动测试版 Drogon App，覆盖认证、主要成功路径、错误映射、TraceId 和异常脱敏。
-- 运行 Windows Debug 构建、S10-06 检查点的 294 个既有测试和新增 API 测试。
+状态：**本地门禁完成（2026-07-14）**。真实 Drogon/PostgreSQL 服务启动与 smoke test 保留到 P1-S12，不以 stub/离线结果替代。
+
+- 直接驱动 framework-neutral `ApiApplication`，覆盖认证、基础资源、流水、转账、报表、主要错误映射、TraceId 和异常脱敏；以 Drogon route contract 与 compile gate 校验生产 adapter 形状。
+- 运行 Windows Debug 构建、272 个 unit/use-case、16 个 In-Memory integration、29 个 API tests 和 4 个静态门禁，共 321/321。
 - 回写 `Docs/Development/tasks.md`，更新 `Phase_1_S10_Delivery_Summary.md`，记录尚待外部机器验证的项目。
 
 产物：可重复执行的 API 测试集与 S10 交付总结。
@@ -509,10 +519,11 @@ P1-S12 Phase 1 测试收尾与文档回写
 - 使用有上限的指数退避；达到阈值后进入 dead letter，不得无限热重试。
 - 发布失败不得回滚已经提交的业务事实。
 
-#### P1-S11-03 Handler 幂等与审计闭环
+#### P1-S11-03 Handler 幂等与补充审计闭环
 
 - 每个事件处理器以 event id 建立幂等边界，重复投递不得重复写坏缓存、审计或通知事实。
-- 接入 AuditLog 处理器，敏感 payload 只记录必要摘要。
+- 认证及账户、流水删除、分类、标签、偏好等关键业务审计已在 Use Case 事务内同步写入；handler 不得为同一动作重复写 AuditLog。
+- AuditLog handler 只记录尚无同步审计的系统事件、投递失败/dead-letter 和安全告警处置，敏感 payload 只保留必要摘要。
 
 #### P1-S11-04 汇率 HTTP Provider
 

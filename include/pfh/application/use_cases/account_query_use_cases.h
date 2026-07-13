@@ -18,6 +18,9 @@ public:
         : accounts_(accounts) {}
 
     [[nodiscard]] Result<std::vector<AccountDto>> execute(domain::UserId user_id) {
+        if (!user_id.is_valid()) {
+            return err(Error::validation("User id is invalid"));
+        }
         auto accounts = accounts_.find_active_by_user(user_id);
         if (!accounts) {
             return err(from_repository(accounts.error()));
@@ -57,6 +60,9 @@ public:
     [[nodiscard]] Result<BalanceDto> execute(
         domain::UserId user_id,
         domain::AccountId account_id) {
+        if (!user_id.is_valid() || !account_id.is_valid()) {
+            return err(Error::validation("User and account ids must be valid"));
+        }
         auto account = accounts_.find_by_id_for_user(account_id, user_id);
         if (!account) {
             return err(from_repository(account.error()));

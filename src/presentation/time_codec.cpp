@@ -126,17 +126,34 @@ TimeCodec::parse_rfc3339(std::string_view value) {
         return application::err(invalid_time());
     }
 
-    const auto local = std::chrono::sys_days(date) +
-                       std::chrono::hours(hour_value) +
-                       std::chrono::minutes(minute_value) +
-                       std::chrono::seconds(second_value) + fraction;
-    return std::chrono::time_point_cast<std::chrono::system_clock::duration>(
-        local - offset);
+    const auto utc_seconds = std::chrono::sys_days(date) +
+                             std::chrono::hours(hour_value) +
+                             std::chrono::minutes(minute_value) +
+                             std::chrono::seconds(second_value) - offset;
+    using TimePoint = std::chrono::system_clock::time_point;
+    const auto minimum_seconds =
+        std::chrono::ceil<std::chrono::seconds>(TimePoint::min());
+    const auto maximum_seconds =
+        std::chrono::floor<std::chrono::seconds>(TimePoint::max());
+    if (utc_seconds < minimum_seconds || utc_seconds > maximum_seconds) {
+        return application::err(invalid_time());
+    }
+
+    const auto base =
+        std::chrono::time_point_cast<TimePoint::duration>(utc_seconds);
+    const auto fractional_duration =
+        std::chrono::duration_cast<TimePoint::duration>(fraction);
+    if (base > TimePoint::max() - fractional_duration) {
+        return application::err(invalid_time());
+    }
+    return base + fractional_duration;
 }
 
 std::string TimeCodec::format_rfc3339(
     std::chrono::system_clock::time_point value) {
     const auto seconds = std::chrono::floor<std::chrono::seconds>(value);
+    const auto subseconds = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        value - seconds).count();
     const auto days = std::chrono::floor<std::chrono::days>(seconds);
     const std::chrono::year_month_day date(days);
     const std::chrono::hh_mm_ss time(seconds - days);
@@ -148,7 +165,16 @@ std::string TimeCodec::format_rfc3339(
            << std::setw(2) << static_cast<unsigned>(date.day()) << 'T'
            << std::setw(2) << time.hours().count() << ':'
            << std::setw(2) << time.minutes().count() << ':'
-           << std::setw(2) << time.seconds().count() << 'Z';
+           << std::setw(2) << time.seconds().count();
+    if (subseconds != 0) {
+        auto fraction = std::to_string(subseconds);
+        fraction.insert(0, 9 - fraction.size(), '0');
+        while (fraction.back() == '0') {
+            fraction.pop_back();
+        }
+        output << '.' << fraction;
+    }
+    output << 'Z';
     return output.str();
 }
 

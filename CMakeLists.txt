@@ -142,6 +142,8 @@ set(PFH_DOMAIN_SOURCES
 # Application Layer - Use cases and application services
 set(PFH_APPLICATION_SOURCES
     src/application/auth_service.cpp
+    src/application/resource_use_cases.cpp
+    src/application/finance_application_service.cpp
 )
 
 # Infrastructure Layer - External services, persistence, etc.
@@ -156,6 +158,7 @@ set(PFH_POSTGRESQL_SOURCES
     src/infrastructure/persistence/account_repository_impl.cpp
     src/infrastructure/persistence/transaction_repository_impl.cpp
     src/infrastructure/persistence/category_repository_impl.cpp
+    src/infrastructure/persistence/tag_repository_impl.cpp
     src/infrastructure/persistence/user_repository_impl.cpp
     src/infrastructure/persistence/user_preference_repository_impl.cpp
     src/infrastructure/persistence/exchange_rate_repository_impl.cpp
@@ -187,6 +190,10 @@ set(PFH_PRESENTATION_SOURCES
     src/presentation/http_response_mapper.cpp
     src/presentation/jwt_filter.cpp
     src/presentation/auth_controller.cpp
+    src/presentation/resource_controllers.cpp
+    src/presentation/transaction_controller.cpp
+    src/presentation/transfer_controller.cpp
+    src/presentation/report_controller.cpp
     src/presentation/api_application.cpp
 )
 
@@ -346,6 +353,16 @@ add_test(
 )
 set_tests_properties(migration_enum_casts PROPERTIES LABELS "migrations;sql")
 
+add_test(
+    NAME currency_catalog_parity
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/sql/validate_currency_catalog.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+set_tests_properties(currency_catalog_parity PROPERTIES
+    LABELS "migrations;domain;static"
+)
+
 # Offline regression gate for the PostgreSQL adapter's transaction/RLS wiring.
 # This complements the compile gate above; real database behavior remains part
 # of the external PostgreSQL test matrix.
@@ -358,6 +375,14 @@ add_test(
 set_tests_properties(postgresql_adapter_contracts PROPERTIES
     LABELS "postgresql;static"
 )
+
+add_test(
+    NAME openapi_contract
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/sql/validate_openapi_contract.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+set_tests_properties(openapi_contract PROPERTIES LABELS "api;contract;static")
 
 # Integration Tests
 add_subdirectory(tests/integration)

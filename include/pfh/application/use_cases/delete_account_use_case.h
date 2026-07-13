@@ -14,6 +14,7 @@
 #include "pfh/application/persistence/i_unit_of_work.h"
 #include "pfh/domain/events/domain_events.h"
 #include "pfh/domain/repositories/i_account_repository.h"
+#include "pfh/domain/repositories/i_audit_log_repository.h"
 #include "pfh/domain/repositories/i_transaction_repository.h"
 #include <chrono>
 #include <memory>
@@ -35,17 +36,23 @@ public:
     DeleteAccountUseCase(
         domain::IAccountRepository& accounts,
         domain::ITransactionRepository& transactions,
-        IUnitOfWork& uow)
-        : accounts_(accounts), transactions_(transactions), uow_(uow) {}
+        IUnitOfWork& uow,
+        domain::IAuditLogRepository& audit_logs)
+        : accounts_(accounts),
+          transactions_(transactions),
+          uow_(uow),
+          audit_logs_(audit_logs) {}
 
     [[nodiscard]] VoidResult execute(const DeleteAccountCommand& cmd) {
+        if (!cmd.user_id.is_valid() || !cmd.account_id.is_valid()) {
+            return err(Error::validation("User and account ids must be valid"));
+        }
         if (cmd.confirmations != kRequiredConfirmations) {
             return err(Error::validation(
                 "Dangerous action requires " +
                 std::to_string(kRequiredConfirmations) + " confirmations"));
         }
 
-        std::optional<Error> app_error;
         auto write = uow_.execute_in_transaction(
             [&](domain::ITransactionContext& tx_ctx) -> domain::RepositoryVoidResult {
                 // Lock + ownership check: never delete another user's account,
@@ -55,6 +62,23 @@ public:
                     accounts_.find_by_id_for_update(tx_ctx, cmd.account_id, cmd.user_id);
                 if (!account) {
                     return std::unexpected(account.error());
+                }
+
+                const auto occurred_at = std::chrono::system_clock::now();
+                domain::AuditLogEntry audit;
+                audit.operator_user_id = cmd.user_id;
+                audit.action = domain::AuditAction::DangerousDelete;
+                audit.resource_type = "Account";
+                audit.resource_id = cmd.account_id.to_string();
+                audit.before_value_json = "{\"name\":" +
+                    domain::event_detail::json_string(account->name()) + "}";
+                audit.after_value_json = "{\"deleted\":true}";
+                audit.metadata_json =
+                    "{\"confirmations\":" +
+                    std::to_string(cmd.confirmations) + "}";
+                audit.occurred_at = occurred_at;
+                if (auto appended = audit_logs_.append(tx_ctx, audit); !appended) {
+                    return appended;
                 }
 
                 // Purge dependent rows first, then the account itself, all in
@@ -79,18 +103,15 @@ public:
                 }
 
                 // Strongly-typed event matching the S11 contract (14_Event_Design
-                // §2.3) so AuditLogHandler / SecurityNotificationHandler receive
-                // the required userId/accountId/occurredAt fields.
+                // section 2.3). Business audit is already committed above;
+                // post-commit handlers use this for cache/security side effects.
                 uow_.register_event(std::make_shared<domain::AccountDangerouslyDeletedEvent>(
                     cmd.user_id,
                     cmd.account_id,
-                    std::chrono::system_clock::now()));
+                    occurred_at));
                 return {};
             });
         if (!write) {
-            if (app_error.has_value()) {
-                return err(*app_error);
-            }
             return err(from_repository(write.error()));
         }
         return ok();
@@ -100,6 +121,7 @@ private:
     domain::IAccountRepository& accounts_;
     domain::ITransactionRepository& transactions_;
     IUnitOfWork& uow_;
+    domain::IAuditLogRepository& audit_logs_;
 };
 
 } // namespace pfh::application

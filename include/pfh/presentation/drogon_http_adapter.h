@@ -2,26 +2,35 @@
 
 #pragma once
 
-#include "pfh/infrastructure/config.h"
 #include "pfh/presentation/api_application.h"
 
 #ifdef PFH_HAS_POSTGRESQL
 
+#include <cstdint>
+#include <string>
+#include <utility>
+
 namespace pfh::presentation {
+
+struct HttpServerConfig {
+    std::string host = "0.0.0.0";
+    std::uint16_t port = 8080;
+    std::uint32_t threads = 4;
+};
 
 class DrogonHttpAdapter {
 public:
     DrogonHttpAdapter(
         ApiApplication& application,
-        const infrastructure::ServerConfig& server)
-        : application_(application), server_(server) {}
+        HttpServerConfig server)
+        : application_(application), server_(std::move(server)) {}
 
     void configure();
     void run();
 
 private:
     ApiApplication& application_;
-    infrastructure::ServerConfig server_;
+    HttpServerConfig server_;
 };
 
 } // namespace pfh::presentation

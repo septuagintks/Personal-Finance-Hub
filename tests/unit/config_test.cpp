@@ -113,13 +113,35 @@ TEST(JsonConfigLoader, WhenJwtSecretMissing_ReturnsConfigurationError) {
     EXPECT_EQ(r.error().code, ErrorCode::ConfigurationError);
 }
 
-TEST(JsonConfigLoader, WhenJwtSecretIsPlaceholder_ReturnsConfigurationError) {
-    // Placeholder from config.example.json must be rejected.
-    TempConfig cfg(R"({ "jwt": { "secret": "REPLACE_WITH_ACTUAL_SECRET" } })");
+TEST(JsonConfigLoader, WhenSecretIsPlaceholder_ReturnsConfigurationError) {
+    {
+        // Placeholder from config.example.json must be rejected.
+        TempConfig cfg(R"({ "jwt": { "secret": "REPLACE_WITH_ACTUAL_SECRET" } })");
+        JsonConfigLoader loader(cfg.path());
+        auto r = loader.load();
+        ASSERT_FALSE(r.has_value());
+        EXPECT_EQ(r.error().code, ErrorCode::ConfigurationError);
+    }
+
+#ifdef _WIN32
+    _putenv_s("PFH_PASSWORD_PEPPER", "REPLACE_WITH_PEPPER_OR_LEAVE_EMPTY");
+#else
+    setenv("PFH_PASSWORD_PEPPER", "REPLACE_WITH_PEPPER_OR_LEAVE_EMPTY", 1);
+#endif
+
+    TempConfig cfg(kValidConfig);
     JsonConfigLoader loader(cfg.path());
     auto r = loader.load();
-    ASSERT_FALSE(r.has_value());
-    EXPECT_EQ(r.error().code, ErrorCode::ConfigurationError);
+    EXPECT_FALSE(r.has_value());
+    if (!r) {
+        EXPECT_EQ(r.error().code, ErrorCode::ConfigurationError);
+    }
+
+#ifdef _WIN32
+    _putenv_s("PFH_PASSWORD_PEPPER", "");
+#else
+    unsetenv("PFH_PASSWORD_PEPPER");
+#endif
 }
 
 TEST(JsonConfigLoader, WhenJwtSecretIsShort_ReturnsConfigurationError) {
