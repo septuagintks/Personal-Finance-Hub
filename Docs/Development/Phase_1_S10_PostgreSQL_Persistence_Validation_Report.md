@@ -460,3 +460,111 @@ migration_enum_casts：PASS / FAIL
 docker rm -f "$PFH_TEST_CONTAINER"
 docker network rm "$PFH_TEST_NETWORK"
 ```
+
+---
+
+## 9. 第二次测试结果
+
+**测试日期**: 2026-07-13
+
+**测试提交**: `4621f69ef940868e10591f5449ac8be1dd9c95e3`
+
+**修复提交祖先检查**:
+
+```text
+183378981e33a8aa9853e19cdd4a19c75d5a6e77 is ancestor of HEAD: PASS
+```
+
+### 9.1 实际环境
+
+- Host: macOS / Darwin ARM64
+- Linux VM: Colima / Ubuntu 24.04 / Linux 6.8 / aarch64
+- PostgreSQL: 16.14 (`postgres:16-alpine`)
+- Flyway: OSS 10.22.0 (`flyway/flyway:10.22.0`)
+- GCC / G++: 13.3.0
+- CMake: 3.28.3
+- Ninja: 1.11.1
+- Python: 3.12.3
+- Database: 全新 tmpfs 空库 `pfh_validation`
+
+### 9.2 复测结果
+
+| 检查项 | 结果 | 实际结果 |
+| ------ | ---- | -------- |
+| 修复提交祖先检查 | PASS | `1833789` 已包含在测试 HEAD 中 |
+| 空库确认 | PASS | 迁移前 public schema table count = 0 |
+| `flyway migrate` | PASS | V1、V2、V3 连续成功，schema 到达 v3 |
+| `flyway info` | PASS | V1-V3 均为 `Success`，无 Pending/Failed/Missing |
+| `flyway validate` | PASS | `Successfully validated 3 migrations` |
+| 第二次 `migrate` | PASS | `Schema "public" is up to date. No migration necessary.` |
+| 数据完整性断言 | PASS | 所有数量、层级、board 和 locale 断言符合预期 |
+| `migration_enum_casts` | PASS | 1/1 passed |
+| 完整 CTest | PASS | 254/254 passed，0 failed |
+
+本轮没有出现异常 SQL State，原 SQL State `42804` 未复现。
+
+### 9.3 数据完整性实际值
+
+```text
+flyway_schema_history: 1=true, 2=true, 3=true
+currency_count: 33
+template_count: 55
+root_count: 27
+child_count: 28
+default_board=expense: 40
+default_board=income: 15
+orphan_count: 0
+parent_board_mismatch_count: 0
+non_zh_cn_count: 0
+```
+
+第二次 `migrate` 后再次检查：
+
+```text
+currency_count: 33
+template_count: 55
+root_count: 27
+child_count: 28
+```
+
+数据计数未发生变化。
+
+### 9.4 CTest 实际结果
+
+```text
+migration_enum_casts: 1/1 passed
+full CTest: 254/254 passed
+failed: 0
+total test time: 0.87 sec
+```
+
+254 个测试仍由以下部分组成：
+
+- 240 个 unit/use-case tests。
+- 13 个 In-Memory repository integration tests。
+- 1 个 migration enum-cast gate。
+
+本轮不存在 PostgreSQL Repository integration target，因此该 CTest 结果不构成真实 Repository/UoW/RLS 验收证据。
+
+### 9.5 第二轮结论
+
+**V3 enum cast 修复复测结论**: **PASS**
+
+本轮满足 8.10 节全部通过标准：
+
+1. PostgreSQL 16.14 全新空库从 V1 连续迁移到 V3。
+2. Flyway `info` 与 `validate` 成功，V1-V3 checksum 一致。
+3. currencies、分类模板、根/子分类和 board 分布符合预期。
+4. 不存在孤儿分类、父子 board 不一致或非 `zh-CN` 种子。
+5. 第二次 migrate 为 no-op，数据计数不变。
+6. 离线迁移门禁和完整 CTest 全部通过。
+
+**任务 #46 整体结论**: **BLOCKED**
+
+V3 迁移阻断已经关闭，但 `DrogonUnitOfWork`、PostgreSQL `*RepositoryImpl`、composition root 接线和真实 PostgreSQL integration scenarios 仍未实现。因此本轮 PASS 只适用于 V3 修复，不自动完成 #46 或 #57，也不证明真实事务、RLS、行锁、乐观锁、连接池 session reset 或 NUMERIC round-trip 语义。
+
+### 9.6 执行备注
+
+- Flyway 输出了默认 `sql` location 未来可能弃用的 warning，不影响本轮迁移结果。
+- 本轮未修改生产源码、迁移脚本或 `Tasks.md` 状态。
+- 结果记录后应删除一次性 PostgreSQL 容器与 Docker network，并关闭 Colima。
