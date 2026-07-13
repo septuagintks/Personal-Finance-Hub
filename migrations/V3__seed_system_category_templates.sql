@@ -54,17 +54,17 @@ WITH food_parent AS (
     SELECT id FROM system_category_templates WHERE locale = 'zh-CN' AND name = '餐饮' AND group_name = 'expense' AND parent_id IS NULL LIMIT 1
 )
 INSERT INTO system_category_templates (name, group_name, parent_id, default_board, sort_order, is_selectable)
-SELECT '早餐', 'expense', id, 'expense', 1, TRUE FROM food_parent
+SELECT '早餐', 'expense', id, 'expense'::category_board, 1, TRUE FROM food_parent
 UNION ALL
-SELECT '午餐', 'expense', id, 'expense', 2, TRUE FROM food_parent
+SELECT '午餐', 'expense', id, 'expense'::category_board, 2, TRUE FROM food_parent
 UNION ALL
-SELECT '晚餐', 'expense', id, 'expense', 3, TRUE FROM food_parent
+SELECT '晚餐', 'expense', id, 'expense'::category_board, 3, TRUE FROM food_parent
 UNION ALL
-SELECT '咖啡', 'expense', id, 'expense', 4, TRUE FROM food_parent
+SELECT '咖啡', 'expense', id, 'expense'::category_board, 4, TRUE FROM food_parent
 UNION ALL
-SELECT '外卖', 'expense', id, 'expense', 5, TRUE FROM food_parent
+SELECT '外卖', 'expense', id, 'expense'::category_board, 5, TRUE FROM food_parent
 UNION ALL
-SELECT '聚餐', 'expense', id, 'expense', 6, TRUE FROM food_parent
+SELECT '聚餐', 'expense', id, 'expense'::category_board, 6, TRUE FROM food_parent
 ON CONFLICT DO NOTHING;
 
 -- =============================================================================
@@ -75,15 +75,15 @@ WITH daily_parent AS (
     SELECT id FROM system_category_templates WHERE locale = 'zh-CN' AND name = '日常' AND group_name = 'expense' AND parent_id IS NULL LIMIT 1
 )
 INSERT INTO system_category_templates (name, group_name, parent_id, default_board, sort_order, is_selectable)
-SELECT '水费', 'expense', id, 'expense', 1, TRUE FROM daily_parent
+SELECT '水费', 'expense', id, 'expense'::category_board, 1, TRUE FROM daily_parent
 UNION ALL
-SELECT '电费', 'expense', id, 'expense', 2, TRUE FROM daily_parent
+SELECT '电费', 'expense', id, 'expense'::category_board, 2, TRUE FROM daily_parent
 UNION ALL
-SELECT '燃气费', 'expense', id, 'expense', 3, TRUE FROM daily_parent
+SELECT '燃气费', 'expense', id, 'expense'::category_board, 3, TRUE FROM daily_parent
 UNION ALL
-SELECT '物业费', 'expense', id, 'expense', 4, TRUE FROM daily_parent
+SELECT '物业费', 'expense', id, 'expense'::category_board, 4, TRUE FROM daily_parent
 UNION ALL
-SELECT '生活用品', 'expense', id, 'expense', 5, TRUE FROM daily_parent
+SELECT '生活用品', 'expense', id, 'expense'::category_board, 5, TRUE FROM daily_parent
 ON CONFLICT DO NOTHING;
 
 -- =============================================================================
@@ -94,15 +94,15 @@ WITH transport_parent AS (
     SELECT id FROM system_category_templates WHERE locale = 'zh-CN' AND name = '交通' AND group_name = 'expense' AND parent_id IS NULL LIMIT 1
 )
 INSERT INTO system_category_templates (name, group_name, parent_id, default_board, sort_order, is_selectable)
-SELECT '地铁', 'expense', id, 'expense', 1, TRUE FROM transport_parent
+SELECT '地铁', 'expense', id, 'expense'::category_board, 1, TRUE FROM transport_parent
 UNION ALL
-SELECT '公交', 'expense', id, 'expense', 2, TRUE FROM transport_parent
+SELECT '公交', 'expense', id, 'expense'::category_board, 2, TRUE FROM transport_parent
 UNION ALL
-SELECT '打车', 'expense', id, 'expense', 3, TRUE FROM transport_parent
+SELECT '打车', 'expense', id, 'expense'::category_board, 3, TRUE FROM transport_parent
 UNION ALL
-SELECT '加油', 'expense', id, 'expense', 4, TRUE FROM transport_parent
+SELECT '加油', 'expense', id, 'expense'::category_board, 4, TRUE FROM transport_parent
 UNION ALL
-SELECT '停车', 'expense', id, 'expense', 5, TRUE FROM transport_parent
+SELECT '停车', 'expense', id, 'expense'::category_board, 5, TRUE FROM transport_parent
 ON CONFLICT DO NOTHING;
 
 -- =============================================================================
@@ -113,11 +113,11 @@ WITH finance_parent AS (
     SELECT id FROM system_category_templates WHERE locale = 'zh-CN' AND name = '财务' AND group_name = 'expense' AND parent_id IS NULL LIMIT 1
 )
 INSERT INTO system_category_templates (name, group_name, parent_id, default_board, sort_order, is_selectable)
-SELECT '手续费', 'expense', id, 'expense', 1, TRUE FROM finance_parent
+SELECT '手续费', 'expense', id, 'expense'::category_board, 1, TRUE FROM finance_parent
 UNION ALL
-SELECT '利息支出', 'expense', id, 'expense', 2, TRUE FROM finance_parent
+SELECT '利息支出', 'expense', id, 'expense'::category_board, 2, TRUE FROM finance_parent
 UNION ALL
-SELECT '汇兑损耗', 'expense', id, 'expense', 3, TRUE FROM finance_parent
+SELECT '汇兑损耗', 'expense', id, 'expense'::category_board, 3, TRUE FROM finance_parent
 ON CONFLICT DO NOTHING;
 
 -- =============================================================================
@@ -128,11 +128,11 @@ WITH salary_parent AS (
     SELECT id FROM system_category_templates WHERE locale = 'zh-CN' AND name = '工资' AND group_name = 'income' AND parent_id IS NULL LIMIT 1
 )
 INSERT INTO system_category_templates (name, group_name, parent_id, default_board, sort_order, is_selectable)
-SELECT '基本工资', 'income', id, 'income', 1, TRUE FROM salary_parent
+SELECT '基本工资', 'income', id, 'income'::category_board, 1, TRUE FROM salary_parent
 UNION ALL
-SELECT '绩效', 'income', id, 'income', 2, TRUE FROM salary_parent
+SELECT '绩效', 'income', id, 'income'::category_board, 2, TRUE FROM salary_parent
 UNION ALL
-SELECT '补贴', 'income', id, 'income', 3, TRUE FROM salary_parent
+SELECT '补贴', 'income', id, 'income'::category_board, 3, TRUE FROM salary_parent
 ON CONFLICT DO NOTHING;
 
 -- =============================================================================
@@ -143,13 +143,13 @@ WITH investment_parent AS (
     SELECT id FROM system_category_templates WHERE locale = 'zh-CN' AND name = '投资' AND group_name = 'income' AND parent_id IS NULL LIMIT 1
 )
 INSERT INTO system_category_templates (name, group_name, parent_id, default_board, sort_order, is_selectable)
-SELECT '股息', 'income', id, 'income', 1, TRUE FROM investment_parent
+SELECT '股息', 'income', id, 'income'::category_board, 1, TRUE FROM investment_parent
 UNION ALL
-SELECT '基金收益', 'income', id, 'income', 2, TRUE FROM investment_parent
+SELECT '基金收益', 'income', id, 'income'::category_board, 2, TRUE FROM investment_parent
 UNION ALL
-SELECT '利息', 'income', id, 'income', 3, TRUE FROM investment_parent
+SELECT '利息', 'income', id, 'income'::category_board, 3, TRUE FROM investment_parent
 UNION ALL
-SELECT '卖出收益', 'income', id, 'income', 4, TRUE FROM investment_parent
+SELECT '卖出收益', 'income', id, 'income'::category_board, 4, TRUE FROM investment_parent
 ON CONFLICT DO NOTHING;
 
 -- =============================================================================
@@ -160,7 +160,7 @@ WITH redpacket_parent AS (
     SELECT id FROM system_category_templates WHERE locale = 'zh-CN' AND name = '红包' AND group_name = 'income' AND parent_id IS NULL LIMIT 1
 )
 INSERT INTO system_category_templates (name, group_name, parent_id, default_board, sort_order, is_selectable)
-SELECT '亲友红包', 'income', id, 'income', 1, TRUE FROM redpacket_parent
+SELECT '亲友红包', 'income', id, 'income'::category_board, 1, TRUE FROM redpacket_parent
 UNION ALL
-SELECT '平台红包', 'income', id, 'income', 2, TRUE FROM redpacket_parent
+SELECT '平台红包', 'income', id, 'income'::category_board, 2, TRUE FROM redpacket_parent
 ON CONFLICT DO NOTHING;

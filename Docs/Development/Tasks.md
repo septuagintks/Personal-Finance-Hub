@@ -1,6 +1,6 @@
 # Personal Finance Hub (PFH) - Phase 1 待办任务跟踪
 
-Version: 1.6
+Version: 1.7
 Backend: C++23
 Architecture: Clean Architecture + Lightweight DDD
 Status: Active
@@ -199,6 +199,9 @@ Status: Active
 - [ ] 在另一台机器执行 P1-S12：Linux Debug/Release 构建、Docker 服务启动、PostgreSQL 16+ 空库迁移、真实 Repository/UoW/RLS/并发/数值边界、API smoke、Outbox/Scheduler 测试，并记录 commit hash、环境版本、命令和结果 <!-- id: 57 -->
   - 说明：当前开发机无可用 WSL/Docker；该任务必须保留到取得可追溯测试结果，不能用 Windows 或 In-Memory 基线代替。
 
+- [ ] V3 修复后在 PostgreSQL 16+ + Flyway OSS 10.22+ 环境上对 V1–V3 全部迁移做真实空库 `flyway migrate` / `info` / `validate` 复跑，确认 §6.5 的 28 处 enum cast 修复有效（本机已通过离线门禁但未连真实 DB） <!-- id: 58 -->
+  - 本轮已交付 `migration_enum_casts` CTest 门禁，mutation 验证通过；但仅抓语法/cast 模式，CHECK / FK / RLS / trigger 等运行时约束需真实 PostgreSQL。
+
 ---
 
 ## 6. S09 收尾 review 本轮修复记录
@@ -227,4 +230,19 @@ Status: Active
 
 - #13/#28/#30/#31/#32/#33/#37 已从 `[x]` 更正为 `[~]`，注明「In-Memory 语义等价已交付、真实 PostgreSQL/Drogon 连库与后台接线属 #46/S10/S11」。S12 终审需对真实测试库复跑同批 scenarios 后再定稿。
 - item 14 的事务上下文真实性、item 10 的连库数值边界，均需 S12 在真实 PostgreSQL 上验证。
+
+### 6.5 S10 报告第 4.2 节：V3 空库迁移 enum cast 修复 + 离线门禁
+
+S10 报告 §4.2 暴露：V3 中 7 段二级分类 `INSERT ... SELECT ... UNION ALL` 的 `default_board` 列把 `'expense'`/`'income'` 推断为 `text`，写入 `category_board` enum 列触发 SQL State 42804。
+
+本轮已：
+1. 修复 V3：所有 28 处二级分类段的 `default_board` 字面量改 `'expense'::category_board` / `'income'::category_board`；28 处全部覆盖（食品 6 + 日常 5 + 交通 5 + 财务 3 + 工资 3 + 投资 4 + 红包 2）。
+2. 新增 `tests/sql/validate_enum_casts.py` 静态扫描器：扫描 `migrations/V*.sql`，对 enum 列赋值处的裸字符串字面量报错；区分 CREATE TYPE 定义块与赋值语句；跳过 TEXT 列（如 `group_name`）。
+3. 在根 `CMakeLists.txt` 用 `add_test(migration_enum_casts ...)` 挂入 CTest，离线可跑，无需 PostgreSQL/Flyway/Docker；带 `migrations` / `sql` 标签。
+4. Mutation 验证：临时把一行 `'expense'::category_board` 改回 `'expense'`，门禁 FAIL；还原后 PASS（不漏报、不误报）。
+
+未做（按用户在第二轮的指示）：
+- 本机无 PostgreSQL/Flyway/Docker，**未做真实空库 `flyway migrate` 复跑**。修复后能否在 PG 16.14 + Flyway OSS 10.22 上跑通，仍需在具备 DB 环境的 S12（或本地起临时实例）实测后再定稿。
+
+新增跟踪项：
 - 当前机器无可用 WSL 发行版或 Docker，未执行当前 HEAD 的 Linux 测试；仅确认 Windows GCC 16 的 CMake tzdb 探针通过。合并 Phase 分支前必须按 `Docs/Guides/Linux_Development_Workflow.md` 在安装 `tzdata` 的 Linux 环境重新构建并全量测试。

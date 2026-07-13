@@ -195,6 +195,18 @@ enable_testing()
 # Unit Tests
 add_subdirectory(tests/unit)
 
+# Migration enum-cast gate: scans all V*.sql under migrations/ and fails when an
+# enum column literal lacks an explicit PostgreSQL type cast (e.g.
+# 'expense'::category_board). Regression for V3 empty-DB migration failure
+# (S10 report §4.2). Runs without PostgreSQL, Flyway, or Docker.
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(
+    NAME migration_enum_casts
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/sql/validate_enum_casts.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+set_tests_properties(migration_enum_casts PROPERTIES LABELS "migrations;sql")
+
 # Integration Tests
 add_subdirectory(tests/integration)
 
