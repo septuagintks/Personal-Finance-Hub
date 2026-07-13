@@ -11,9 +11,9 @@
 #include "pfh/application/error.h"
 #include "pfh/application/error_mapping.h"
 #include "pfh/application/persistence/i_unit_of_work.h"
+#include "pfh/application/ports/i_active_currency_query.h"
 #include "pfh/application/ports/i_exchange_rate_provider.h"
 #include "pfh/domain/events/domain_events.h"
-#include "pfh/domain/repositories/i_account_repository.h"
 #include "pfh/domain/repositories/i_exchange_rate_repository.h"
 #include <memory>
 #include <set>
@@ -25,11 +25,14 @@ namespace pfh::application {
 class RefreshExchangeRatesUseCase {
 public:
     RefreshExchangeRatesUseCase(
-        domain::IAccountRepository& accounts,
+        IActiveCurrencyQuery& active_currencies,
         domain::IExchangeRateRepository& rates,
         IExchangeRateProvider& provider,
         IUnitOfWork& uow)
-        : accounts_(accounts), rates_(rates), provider_(provider), uow_(uow) {}
+        : active_currencies_(active_currencies),
+          rates_(rates),
+          provider_(provider),
+          uow_(uow) {}
 
     [[nodiscard]] Result<RefreshExchangeRatesResultDto> execute(
         const RefreshExchangeRatesCommand& cmd = {}) {
@@ -51,7 +54,7 @@ public:
                 }
             }
         } else {
-            auto active = accounts_.find_active_currencies();
+            auto active = active_currencies_.list_active_currencies();
             if (!active) {
                 return err(from_repository(active.error()));
             }
@@ -168,7 +171,7 @@ public:
     }
 
 private:
-    domain::IAccountRepository& accounts_;
+    IActiveCurrencyQuery& active_currencies_;
     domain::IExchangeRateRepository& rates_;
     IExchangeRateProvider& provider_;
     IUnitOfWork& uow_;

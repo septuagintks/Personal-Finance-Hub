@@ -34,7 +34,7 @@ Docs/
 │   ├── Phase_1_S09_Delivery_Summary.md
 │   ├── Phase_1_S10_Delivery_Summary.md
 │   ├── Phase_1_S10_PostgreSQL_Persistence_Validation_Report.md
-│   └── Tasks.md
+│   └── tasks.md
 │
 ├── Development_Plans/
 │   ├── Overall_Development_Plan.md

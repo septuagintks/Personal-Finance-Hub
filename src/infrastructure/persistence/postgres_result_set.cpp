@@ -58,7 +58,9 @@ std::chrono::system_clock::time_point getTimestamp(const drogon::orm::Row& row, 
     if (row[col].isNull()) {
         throw std::runtime_error("pg::getTimestamp: column " + std::to_string(col) + " is NULL");
     }
-    return row[col].as<std::chrono::system_clock::time_point>();
+    const auto value = row[col].as<trantor::Date>();
+    return std::chrono::system_clock::time_point(
+        std::chrono::microseconds(value.microSecondsSinceEpoch()));
 }
 
 std::optional<std::chrono::system_clock::time_point> getOptionalTimestamp(
@@ -66,7 +68,21 @@ std::optional<std::chrono::system_clock::time_point> getOptionalTimestamp(
     if (row[col].isNull()) {
         return std::nullopt;
     }
-    return row[col].as<std::chrono::system_clock::time_point>();
+    return getTimestamp(row, col);
+}
+
+trantor::Date toDbTimestamp(std::chrono::system_clock::time_point value) {
+    const auto micros = std::chrono::duration_cast<std::chrono::microseconds>(
+        value.time_since_epoch());
+    return trantor::Date(micros.count());
+}
+
+std::optional<trantor::Date> toDbTimestamp(
+    std::optional<std::chrono::system_clock::time_point> value) {
+    if (!value.has_value()) {
+        return std::nullopt;
+    }
+    return toDbTimestamp(*value);
 }
 
 // ============================================================================

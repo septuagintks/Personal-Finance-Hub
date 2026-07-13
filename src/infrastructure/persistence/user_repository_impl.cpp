@@ -6,53 +6,128 @@
 
 #ifdef PFH_HAS_POSTGRESQL
 
-#include "pfh/domain/repositories/repository_error.h"
-#include "pfh/infrastructure/persistence/drogon_transaction_context.h"
+#include "pfh/infrastructure/persistence/postgres_repository_support.h"
 #include "pfh/infrastructure/persistence/postgres_result_set.h"
+
+#include <string>
 
 namespace pfh::infrastructure {
 
+namespace {
+
+bool is_username_conflict(const drogon::orm::DrogonDbException& error) {
+    const std::string detail = error.base().what();
+    return detail.find("23505") != std::string::npos ||
+           detail.find("uq_users_username") != std::string::npos;
+}
+
+domain::RepositoryResult<domain::User> map_user_result(
+    const drogon::orm::Result& result) {
+    if (result.empty()) {
+        return std::unexpected(domain::RepositoryError::not_found(
+            "User not found"));
+    }
+    try {
+        return domain::User(
+            domain::UserId(pg::getBigInt(result[0], 0)),
+            pg::getString(result[0], 1));
+    } catch (const std::exception&) {
+        return std::unexpected(domain::RepositoryError::database(
+            "Stored user row is invalid"));
+    }
+}
+
+}  // namespace
+
 domain::RepositoryResult<domain::User> UserRepositoryImpl::find_by_id(
     domain::UserId id) {
-    constexpr const char* kSql = R"SQL(
-        SELECT id, username FROM users WHERE id = $1
-    )SQL";
-
-    try {
-        auto result = db_->execSqlSync(kSql, id.value);
-        if (result.empty()) {
-            return std::unexpected(domain::RepositoryError::not_found(
-                "User not found: " + id.to_string()));
-        }
-        const auto& row = result[0];
-        const auto uid = domain::UserId(pg::getBigInt(row, 0));
-        const auto username = pg::getString(row, 1);
-        return domain::User(uid, username);
-    } catch (const drogon::orm::DrogonDbException& e) {
+    if (!db_) {
         return std::unexpected(domain::RepositoryError::database(
-            std::string("find_by_id failed: ") + e.base().what()));
+            "User database client is unavailable"));
+    }
+    try {
+        constexpr const char* kSql =
+            "SELECT id, username FROM users WHERE id = $1";
+        return map_user_result(db_->execSqlSync(kSql, id.value()));
+    } catch (const drogon::orm::DrogonDbException& error) {
+        return std::unexpected(postgres::database_error("find user", error));
+    } catch (const std::exception& error) {
+        return std::unexpected(postgres::unexpected_error("find user", error));
     }
 }
 
 domain::RepositoryResult<domain::User> UserRepositoryImpl::find_by_username(
     const std::string& username) {
-    constexpr const char* kSql = R"SQL(
-        SELECT id, username FROM users WHERE username = $1
-    )SQL";
-
-    try {
-        auto result = db_->execSqlSync(kSql, username);
-        if (result.empty()) {
-            return std::unexpected(domain::RepositoryError::not_found(
-                "User not found by username: " + username));
-        }
-        const auto& row = result[0];
-        const auto id = domain::UserId(pg::getBigInt(row, 0));
-        const auto uname = pg::getString(row, 1);
-        return domain::User(id, uname);
-    } catch (const drogon::orm::DrogonDbException& e) {
+    if (!db_) {
         return std::unexpected(domain::RepositoryError::database(
-            std::string("find_by_username failed: ") + e.base().what()));
+            "User database client is unavailable"));
+    }
+    try {
+        constexpr const char* kSql =
+            "SELECT id, username FROM users WHERE username = $1";
+        return map_user_result(db_->execSqlSync(kSql, username));
+    } catch (const drogon::orm::DrogonDbException& error) {
+        return std::unexpected(
+            postgres::database_error("find user by username", error));
+    } catch (const std::exception& error) {
+        return std::unexpected(
+            postgres::unexpected_error("find user by username", error));
+    }
+}
+
+domain::RepositoryResult<domain::User> UserRepositoryImpl::find_by_id(
+    domain::ITransactionContext& tx_iface,
+    domain::UserId id) {
+    auto context = postgres::require_transaction(tx_iface);
+    if (!context.has_value()) {
+        return std::unexpected(context.error());
+    }
+    const auto tenant = (*context)->tenant_user_id();
+    if (tenant.has_value() && *tenant != id) {
+        return std::unexpected(domain::RepositoryError::not_found(
+            "User not found"));
+    }
+    try {
+        constexpr const char* kSql =
+            "SELECT id, username FROM users WHERE id = $1";
+        return map_user_result(
+            (*context)->transaction().execSqlSync(kSql, id.value()));
+    } catch (const drogon::orm::DrogonDbException& error) {
+        return std::unexpected(
+            postgres::database_error("find user in transaction", error));
+    } catch (const std::exception& error) {
+        return std::unexpected(
+            postgres::unexpected_error("find user in transaction", error));
+    }
+}
+
+domain::RepositoryResult<domain::User> UserRepositoryImpl::find_by_username(
+    domain::ITransactionContext& tx_iface,
+    const std::string& username) {
+    auto context = postgres::require_transaction(tx_iface);
+    if (!context.has_value()) {
+        return std::unexpected(context.error());
+    }
+    try {
+        constexpr const char* kSql =
+            "SELECT id, username FROM users WHERE username = $1";
+        auto user = map_user_result(
+            (*context)->transaction().execSqlSync(kSql, username));
+        if (!user.has_value()) {
+            return user;
+        }
+        const auto tenant = (*context)->tenant_user_id();
+        if (tenant.has_value() && *tenant != user->id()) {
+            return std::unexpected(domain::RepositoryError::not_found(
+                "User not found"));
+        }
+        return user;
+    } catch (const drogon::orm::DrogonDbException& error) {
+        return std::unexpected(postgres::database_error(
+            "find user by username in transaction", error));
+    } catch (const std::exception& error) {
+        return std::unexpected(postgres::unexpected_error(
+            "find user by username in transaction", error));
     }
 }
 
@@ -61,59 +136,75 @@ domain::RepositoryResult<domain::UserId> UserRepositoryImpl::create(
     const std::string& username,
     const std::string& password_hash,
     const domain::Currency& base_currency) {
-    auto& drogon_ctx = static_cast<DrogonTransactionContext&>(tx_iface);
-    auto& tx = drogon_ctx.transaction();
-
-    constexpr const char* kSql = R"SQL(
-        INSERT INTO users (username, password_hash, base_currency_code)
-        VALUES ($1, $2, $3)
-        RETURNING id
-    )SQL";
-
+    auto context = postgres::require_transaction(tx_iface);
+    if (!context.has_value()) {
+        return std::unexpected(context.error());
+    }
+    if ((*context)->tenant_user_id().has_value()) {
+        return std::unexpected(domain::RepositoryError::validation(
+            "User creation requires an unscoped registration transaction"));
+    }
     try {
-        auto result = tx.execSqlSync(kSql, username, password_hash, base_currency.code());
+        constexpr const char* kSql = R"SQL(
+            INSERT INTO users (username, password_hash, base_currency_code)
+            VALUES ($1, $2, $3)
+            RETURNING id
+        )SQL";
+        const auto result = (*context)->transaction().execSqlSync(
+            kSql, username, password_hash, base_currency.code());
         if (result.empty()) {
             return std::unexpected(domain::RepositoryError::database(
-                "create user: no id returned"));
+                "User insert returned no identifier"));
         }
-        const auto id = domain::UserId(pg::getBigInt(result[0], 0));
-        return id;
-    } catch (const drogon::orm::DrogonDbException& e) {
-        const std::string msg = e.base().what();
-        // PostgreSQL unique violation error code is 23505.
-        if (msg.find("23505") != std::string::npos ||
-            msg.find("uq_users_username") != std::string::npos) {
+        return domain::UserId(pg::getBigInt(result[0], 0));
+    } catch (const drogon::orm::DrogonDbException& error) {
+        if (is_username_conflict(error)) {
             return std::unexpected(domain::RepositoryError::conflict(
-                "Username already exists: " + username));
+                "Username already exists"));
         }
-        return std::unexpected(domain::RepositoryError::database(
-            std::string("create user failed: ") + msg));
+        return std::unexpected(postgres::database_error("create user", error));
+    } catch (const std::exception& error) {
+        return std::unexpected(postgres::unexpected_error("create user", error));
     }
 }
 
 domain::RepositoryVoidResult UserRepositoryImpl::save(
     domain::ITransactionContext& tx_iface,
     const domain::User& user) {
-    auto& drogon_ctx = static_cast<DrogonTransactionContext&>(tx_iface);
-    auto& tx = drogon_ctx.transaction();
-
-    // User entity only holds id + username; password_hash/base_currency_code
-    // are managed elsewhere. Only username is updateable here (rare case).
-    constexpr const char* kSql = R"SQL(
-        UPDATE users SET username = $1, updated_at = NOW()
-        WHERE id = $2
-    )SQL";
+    if (!user.id().is_valid()) {
+        return std::unexpected(domain::RepositoryError::validation(
+            "Cannot update a user without an identifier"));
+    }
+    auto context = postgres::require_transaction(tx_iface);
+    if (!context.has_value()) {
+        return std::unexpected(context.error());
+    }
+    const auto tenant = (*context)->tenant_user_id();
+    if (!tenant.has_value() || *tenant != user.id()) {
+        return std::unexpected(domain::RepositoryError::not_found(
+            "User not found"));
+    }
 
     try {
-        auto result = tx.execSqlSync(kSql, user.username(), user.id().value);
+        constexpr const char* kSql = R"SQL(
+            UPDATE users SET username = $1, updated_at = NOW()
+            WHERE id = $2
+        )SQL";
+        const auto result = (*context)->transaction().execSqlSync(
+            kSql, user.username(), user.id().value());
         if (result.affectedRows() == 0) {
             return std::unexpected(domain::RepositoryError::not_found(
-                "Cannot save unknown user: " + user.id().to_string()));
+                "User not found"));
         }
         return {};
-    } catch (const drogon::orm::DrogonDbException& e) {
-        return std::unexpected(domain::RepositoryError::database(
-            std::string("save user failed: ") + e.base().what()));
+    } catch (const drogon::orm::DrogonDbException& error) {
+        if (is_username_conflict(error)) {
+            return std::unexpected(domain::RepositoryError::conflict(
+                "Username already exists"));
+        }
+        return std::unexpected(postgres::database_error("save user", error));
+    } catch (const std::exception& error) {
+        return std::unexpected(postgres::unexpected_error("save user", error));
     }
 }
 

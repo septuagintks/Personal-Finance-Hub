@@ -18,6 +18,12 @@ public:
     /// defaults when no preference row exists.
     [[nodiscard]] virtual RepositoryResult<UserPreference> find_by_user(UserId user_id) = 0;
 
+    /// Transaction-aware variant used when the caller must observe preferences
+    /// or users.base_currency_code written earlier in the same Unit of Work.
+    [[nodiscard]] virtual RepositoryResult<UserPreference> find_by_user(
+        ITransactionContext& tx,
+        UserId user_id) = 0;
+
     [[nodiscard]] virtual RepositoryVoidResult save(
         ITransactionContext& tx,
         const UserPreference& preference) = 0;

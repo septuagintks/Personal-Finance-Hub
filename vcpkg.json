@@ -4,6 +4,12 @@
   "version": "0.1.0",
   "description": "Personal Finance Hub - Multi-account finance management platform",
   "dependencies": [
+    {
+      "name": "drogon",
+      "features": [
+        "postgres"
+      ]
+    },
     "spdlog",
     "nlohmann-json",
     "gtest"

@@ -76,7 +76,8 @@ public:
         std::chrono::system_clock::time_point deleted_at) = 0;
 
     /// @brief Physically delete this account's NON-transfer transactions only.
-    /// Transfer legs are handled by physical_delete_transfers_touching_account
+    /// Associated transaction_tag_relations are deleted first. Transfer legs
+    /// are handled by physical_delete_transfers_touching_account
     /// so the paired leg on the other account and the transfer_groups row are
     /// removed atomically as a unit (never leaving an orphan leg).
     [[nodiscard]] virtual RepositoryVoidResult physical_delete_by_account(
@@ -85,8 +86,9 @@ public:
 
     /// @brief Physically delete every transfer aggregate that touches this
     /// account through either a Transfer leg or grouped Adjustment: both legs,
-    /// every grouped Adjustment, and the transfer_groups row. This prevents
-    /// dangerous account deletion from leaving a partial aggregate.
+    /// every grouped Adjustment, their tag relations, and the transfer_groups
+    /// row. This prevents dangerous account deletion from leaving a partial
+    /// aggregate or failing after Tag support is enabled.
     [[nodiscard]] virtual RepositoryVoidResult physical_delete_transfers_touching_account(
         ITransactionContext& tx,
         AccountId account_id) = 0;

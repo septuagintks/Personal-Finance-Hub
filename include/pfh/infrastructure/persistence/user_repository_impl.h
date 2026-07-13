@@ -9,6 +9,7 @@
 #ifdef PFH_HAS_POSTGRESQL
 
 #include <drogon/orm/DbClient.h>
+#include <utility>
 
 namespace pfh::infrastructure {
 
@@ -16,9 +17,9 @@ namespace pfh::infrastructure {
 ///
 /// Note: `users` is intentionally NOT covered by RLS policies in V1 (login must
 /// resolve username before a tenant id is known). Application-layer filtering
-/// (username/password_hash) is the only guard for direct `users` access, so all
-/// writes still go through repositories that are bound to authenticated
-/// requests via the use case layer.
+/// is the guard for direct reads. Writes add an adapter-level boundary: create
+/// requires an unscoped registration transaction, while save requires a
+/// transaction bound to the same user id.
 class UserRepositoryImpl final : public domain::IUserRepository {
 public:
     explicit UserRepositoryImpl(drogon::orm::DbClientPtr db) : db_(std::move(db)) {}
@@ -27,6 +28,14 @@ public:
         domain::UserId id) override;
 
     [[nodiscard]] domain::RepositoryResult<domain::User> find_by_username(
+        const std::string& username) override;
+
+    [[nodiscard]] domain::RepositoryResult<domain::User> find_by_id(
+        domain::ITransactionContext& tx,
+        domain::UserId id) override;
+
+    [[nodiscard]] domain::RepositoryResult<domain::User> find_by_username(
+        domain::ITransactionContext& tx,
         const std::string& username) override;
 
     [[nodiscard]] domain::RepositoryResult<domain::UserId> create(

@@ -39,7 +39,7 @@ Docs/
 │   ├── Phase_1_S09_Delivery_Summary.md # Phase 1 S09 Application Use Cases 交付记录
 │   ├── Phase_1_S10_Delivery_Summary.md # Phase 1 S10 累计交付记录（进行中）
 │   ├── Phase_1_S10_PostgreSQL_Persistence_Validation_Report.md # V3 外部复测最终报告
-│   └── Tasks.md                        # 待办任务跟踪
+│   └── tasks.md                        # 待办任务跟踪
 │
 ├── Development_Plans/                  # 阶段性开发计划
 │   ├── Overall_Development_Plan.md     # 三阶段总开发计划大纲
@@ -67,7 +67,7 @@ Docs/
     └── Documents_Optimize_3.md         # 优化记录 3 (文档治理、任务清单、计划归档)
 ```
 
-计划类文档按需创建并跟随任务推进维护：`Docs/Development/Documents_Optimize_Plan.md` 仅在有正在设计中的文档优化方案时创建；当前文档优化事项已归档到 `Docs/Archive/Documents_Optimize_3.md`。开发阶段交付记录在开发中存放于 `Docs/Development/`，推荐命名为 `Phase_<N>_S<start>-S<end>_Delivery_Summary.md`，验收完成后归档到 `Docs/Archive/`。总体路线以 [Development_Plans/Overall_Development_Plan.md](Development_Plans/Overall_Development_Plan.md) 为准，阶段性开发计划以 `Docs/Development_Plans/Phase_N_Development_Plan.md` 为准，开发任务跟踪以 [Development/Tasks.md](Development/Tasks.md) 为准。
+计划类文档按需创建并跟随任务推进维护：`Docs/Development/Documents_Optimize_Plan.md` 仅在有正在设计中的文档优化方案时创建；当前文档优化事项已归档到 `Docs/Archive/Documents_Optimize_3.md`。开发阶段交付记录在开发中存放于 `Docs/Development/`，推荐命名为 `Phase_<N>_S<start>-S<end>_Delivery_Summary.md`，验收完成后归档到 `Docs/Archive/`。总体路线以 [Development_Plans/Overall_Development_Plan.md](Development_Plans/Overall_Development_Plan.md) 为准，阶段性开发计划以 `Docs/Development_Plans/Phase_N_Development_Plan.md` 为准，开发任务跟踪以 [Development/tasks.md](Development/tasks.md) 为准。
 
 ---
 
@@ -80,7 +80,7 @@ Docs/
 5. **事务后事件派发 (Post-Commit Dispatch)**：在 `DrogonUnitOfWork` 物理 Commit 成功后才派发领域事件，防止事务回滚导致事件错误派发。
 6. **全局异常拦截**：通过 Drogon 全局异常处理器捕获非预期异常，生成唯一 `TraceId`，在保障生产环境安全（不泄露敏感信息）的同时提供完整的服务端日志追溯。
 
-当前进度（2026-07-13）：P1-S01 至 P1-S09 与 P1-S10-01 已完成，正在执行 P1-S10-02 及后续内容。Windows GCC 16 当前 271/271 通过；V3 已在外部 PostgreSQL 16.14 + Flyway 10.22.0 空库复测通过。Drogon/PostgreSQL 生产接线、REST API、后台任务和 P1-S12 完整真实环境验收尚未完成，不能据此视为 Phase 1 已完成。
+当前进度（2026-07-14）：P1-S01 至 P1-S09 与 P1-S10-01 至 S10-03 已完成实现，下一步执行 S10-04 production composition root。Windows GCC 16 当前 273/273 通过，PostgreSQL 适配器在 OFF 模式也纳入离线全源编译门禁；V3 已在外部 PostgreSQL 16.14 + Flyway 10.22.0 空库复测通过。真实 Drogon/PostgreSQL fixture、REST API、后台任务和 P1-S12 完整环境验收尚未完成，不能据此视为 Phase 1 已完成。
 
 ---
 
@@ -99,6 +99,6 @@ Docs/
 ## 4. 开发者快速上手
 
 1. **阅读顺序推荐**：先看 [Architecture/01_Technical_Architecture.md](Architecture/01_Technical_Architecture.md) 和 [Architecture/07_Workflow_and_Lifecycle_Design.md](Architecture/07_Workflow_and_Lifecycle_Design.md)，再看 [Architecture/04_Money_Currency_System_Design.md](Architecture/04_Money_Currency_System_Design.md)、[Architecture/06_Service_and_Use_Case_Design.md](Architecture/06_Service_and_Use_Case_Design.md)、[Architecture/08_Exchange_Rate_System_Design.md](Architecture/08_Exchange_Rate_System_Design.md)，最后补齐 [Architecture/02_Database_Design.md](Architecture/02_Database_Design.md) 与 [Architecture/05_Repository_and_Persistence_Design.md](Architecture/05_Repository_and_Persistence_Design.md)。
-2. **阶段计划**：进入代码实现前，先阅读 [Development_Plans/Overall_Development_Plan.md](Development_Plans/Overall_Development_Plan.md) 与对应 Phase 开发计划，并以 [Development/Tasks.md](Development/Tasks.md) 跟踪进度。
+2. **阶段计划**：进入代码实现前，先阅读 [Development_Plans/Overall_Development_Plan.md](Development_Plans/Overall_Development_Plan.md) 与对应 Phase 开发计划，并以 [Development/tasks.md](Development/tasks.md) 跟踪进度。
 3. **开发规范**：新文档或修改文档时，请遵守 [Standards/Documents_Format_Standard.md](Standards/Documents_Format_Standard.md)；目录树变更时，请同步更新 [Guides/Directory_Guidance.md](Guides/Directory_Guidance.md)。
 4. **Linux 工作流**：最终部署目标为 Linux；P1-S10 开发期间按 [Guides/Linux_Development_Workflow.md](Guides/Linux_Development_Workflow.md) 保持可复现命令，并在 P1-S12 由另一台机器完成 Linux、Docker 与真实 PostgreSQL 阻断门禁。

@@ -192,9 +192,9 @@ Initialization complete (application logic pending)
 - A later external PostgreSQL 16.14/Flyway 10.22.0 run validated V1-V3 and the
   then-current 254-test baseline; see
   `Docs/Development/Phase_1_S10_PostgreSQL_Persistence_Validation_Report.md`.
-  The P1-S10-01 271-test HEAD still requires the final P1-S12 Linux rerun.
+  The current P1-S10-03 272-test HEAD still requires the final P1-S12 Linux rerun.
 - Keep `build/` and `config/config.local.json` local.
 - Run Linux validation before phase delivery or before merging phase work back to `main`.
-- Implement PostgreSQL/Drogon production adapters in P1-S10, then re-run the shared repository scenarios against PostgreSQL 16+ on the external P1-S12 machine.
+- Wire the implemented PostgreSQL/Drogon core adapters through S10-04, then re-run the shared repository scenarios against PostgreSQL 16+ on the external P1-S12 machine.
 - Run API smoke tests after P1-S10 introduces the Drogon API surface.
 - Record the current commit hash, environment versions, Debug/Release commands, Docker startup/health result, migration result, PostgreSQL tests, API tests and Outbox/Scheduler tests before Phase 1 sign-off.

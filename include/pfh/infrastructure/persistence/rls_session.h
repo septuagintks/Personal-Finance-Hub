@@ -7,15 +7,10 @@
 // current_setting returns NULL, USING/WITH CHECK match no rows, the request
 // returns empty.
 //
-// Two usage models are supported:
-//   1. **Pooled connection per request** (typical for HTTP request handlers):
-//      acquire → setAppUserId → work → reset → release. The reset is required
-//      to avoid leaking the previous tenant id into the next request that
-//      happens to reuse the connection.
-//   2. **Pooled connection per transaction** (used inside DrogonUnitOfWork):
-//      the SET is issued at the start of the transaction and RESET on commit
-//      or rollback. This guarantees the GUC is cleared before the connection
-//      is returned to the pool.
+// The GUC is transaction-local. Every tenant operation must pin one Drogon
+// Transaction, set the value before its first tenant query, then commit or
+// rollback. A SET on DbClient is unsafe because consecutive pooled statements
+// are not guaranteed to use the same physical connection.
 //
 // Authorization is the responsibility of the caller: this helper is purely a
 // database-side binding for the JWT-derived user_id.
@@ -30,14 +25,7 @@
 
 namespace pfh::infrastructure {
 
-/// @brief Apply the `app.current_user_id` GUC on a connection or transaction.
-///
-/// Drogon's DbClient exposes two executors:
-///   - `execSqlSync(sql, ...)` runs against a pooled connection.
-///   - `Transaction::execSqlSync(sql, ...)` runs inside the active transaction.
-///
-/// Both must set the GUC because RLS policies depend on it. `setAppUserId`
-/// dispatches based on which overload it was given.
+/// @brief Apply `app.current_user_id` to an active transaction.
 class RlsSession {
 public:
     /// @brief Set GUC on an active transaction (called at tx begin).
@@ -48,17 +36,6 @@ public:
         const std::shared_ptr<drogon::orm::Transaction>& tx,
         domain::UserId user_id);
 
-    /// @brief Clear the GUC (called at tx end or connection release).
-    static void resetAppUserId(
-        const std::shared_ptr<drogon::orm::Transaction>& tx);
-
-    /// @brief Set GUC on a freshly acquired pooled connection (request-scoped).
-    static void setAppUserId(
-        const drogon::orm::DbClientPtr& db,
-        domain::UserId user_id);
-
-    /// @brief Clear GUC on a pooled connection before release.
-    static void resetAppUserId(const drogon::orm::DbClientPtr& db);
 };
 
 }  // namespace pfh::infrastructure

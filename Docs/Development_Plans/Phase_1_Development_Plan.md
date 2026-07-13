@@ -43,7 +43,7 @@ Phase 1 的具体开发顺序、目录结构、实现步骤和测试收尾清单
 
 ### 1.4 当前进度
 
-截至 2026-07-13，P1-S01 至 P1-S09 与 P1-S10-01 已完成，Windows GCC 16 基线为 271/271。V3 已通过外部 PostgreSQL 16.14 空库迁移复测，当前继续 P1-S10-02 及后续 REST API 与认证基础开发。
+截至 2026-07-14，P1-S01 至 P1-S09 与 P1-S10-01 至 S10-03 已完成实现，Windows GCC 16 基线为 273/273。V3 已通过外部 PostgreSQL 16.14 空库迁移复测，当前继续 P1-S10-04 production composition root 及后续 REST API 与认证基础开发。
 
 以下内容尚未完成，不能由现有 In-Memory 测试替代：
 
@@ -81,14 +81,14 @@ Presentation
 目标：
 
 - 完成 Phase 1 开发计划。
-- 优化 `Docs/Development/Tasks.md`，让任务项具备可验证产物。
+- 优化 `Docs/Development/tasks.md`，让任务项具备可验证产物。
 - 同步 `Docs/README.md` 与 `Docs/Guides/Directory_Guidance.md`。
 
 交付物：
 
 - `Docs/Development_Plans/Phase_1_Development_Plan.md`
 - `Docs/Development_Plans/Phase_1/Phase_1_Detailed_Development_Plan.md`
-- `Docs/Development/Tasks.md`
+- `Docs/Development/tasks.md`
 - 更新后的目录说明文档
 
 验收标准：
@@ -173,7 +173,7 @@ Presentation
 - `DrogonUnitOfWork` 与 `OutboxPublisherJob`。
 - Repository 集成测试。
 
-当前状态：迁移脚本、接口、In-Memory 事务语义和 13 个 integration scenarios 已交付；PostgreSQL Repository、`DrogonUnitOfWork` 与真实连库测试在 P1-S10/P1-S12 完成，`OutboxPublisherJob` 在 P1-S11 完成。
+当前状态：迁移脚本、接口、In-Memory 事务语义、16 个 integration scenarios，以及核心 PostgreSQL Repository / `DrogonUnitOfWork` 已交付；S10-04 继续完成 production composition root 与 DbClient 装配，真实连库测试在 S10-11/P1-S12 签署，`OutboxPublisherJob` 在 P1-S11 完成。
 
 验收标准：
 

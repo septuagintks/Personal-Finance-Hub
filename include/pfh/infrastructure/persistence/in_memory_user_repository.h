@@ -56,6 +56,26 @@ public:
             "User not found by username: " + username));
     }
 
+    [[nodiscard]] domain::RepositoryResult<domain::User> find_by_id(
+        domain::ITransactionContext& /*tx*/,
+        domain::UserId id) override {
+        if (!store_.in_transaction) {
+            return std::unexpected(domain::RepositoryError::database(
+                "find_by_id(tx) requires an active transaction"));
+        }
+        return find_by_id(id);
+    }
+
+    [[nodiscard]] domain::RepositoryResult<domain::User> find_by_username(
+        domain::ITransactionContext& /*tx*/,
+        const std::string& username) override {
+        if (!store_.in_transaction) {
+            return std::unexpected(domain::RepositoryError::database(
+                "find_by_username(tx) requires an active transaction"));
+        }
+        return find_by_username(username);
+    }
+
     [[nodiscard]] domain::RepositoryResult<domain::UserId> create(
         domain::ITransactionContext& /*tx*/,
         const std::string& username,
@@ -143,6 +163,16 @@ public:
         }
         return std::unexpected(domain::RepositoryError::not_found(
             "User preference not found for user: " + user_id.to_string()));
+    }
+
+    [[nodiscard]] domain::RepositoryResult<domain::UserPreference> find_by_user(
+        domain::ITransactionContext& /*tx*/,
+        domain::UserId user_id) override {
+        if (!store_.in_transaction) {
+            return std::unexpected(domain::RepositoryError::database(
+                "find_by_user(tx) requires an active transaction"));
+        }
+        return find_by_user(user_id);
     }
 
     [[nodiscard]] domain::RepositoryVoidResult save(

@@ -99,7 +99,6 @@ option(PFH_BUILD_POSTGRESQL "Build PostgreSQL persistence adapters" OFF)
 if(PFH_BUILD_POSTGRESQL)
     find_package(Drogon REQUIRED)
     find_package(PostgreSQL REQUIRED)
-    add_compile_definitions(PFH_HAS_POSTGRESQL)
     message(STATUS "PostgreSQL persistence: ENABLED")
 else()
     message(STATUS "PostgreSQL persistence: DISABLED (In-Memory only)")
@@ -141,23 +140,27 @@ set(PFH_APPLICATION_SOURCES
 # Infrastructure Layer - External services, persistence, etc.
 # Currently header-only In-Memory repositories live in include/.
 # PostgreSQL implementations added in P1-S10-03, guarded by PFH_HAS_POSTGRESQL.
+set(PFH_POSTGRESQL_SOURCES
+    src/infrastructure/persistence/drogon_transaction_context.cpp
+    src/infrastructure/persistence/drogon_unit_of_work.cpp
+    src/infrastructure/persistence/postgres_repository_support.cpp
+    src/infrastructure/persistence/postgres_active_currency_query.cpp
+    src/infrastructure/persistence/account_repository_impl.cpp
+    src/infrastructure/persistence/transaction_repository_impl.cpp
+    src/infrastructure/persistence/category_repository_impl.cpp
+    src/infrastructure/persistence/user_repository_impl.cpp
+    src/infrastructure/persistence/user_preference_repository_impl.cpp
+    src/infrastructure/persistence/exchange_rate_repository_impl.cpp
+    src/infrastructure/persistence/postgres_result_set.cpp
+    src/infrastructure/persistence/rls_session.cpp
+)
+
 set(PFH_INFRASTRUCTURE_SOURCES
     src/infrastructure/placeholder.cpp
 )
 
-if(PFH_HAS_POSTGRESQL)
-    list(APPEND PFH_INFRASTRUCTURE_SOURCES
-        src/infrastructure/persistence/drogon_transaction_context.cpp
-        src/infrastructure/persistence/drogon_unit_of_work.cpp
-        src/infrastructure/persistence/account_repository_impl.cpp
-        src/infrastructure/persistence/transaction_repository_impl.cpp
-        src/infrastructure/persistence/category_repository_impl.cpp
-        src/infrastructure/persistence/user_repository_impl.cpp
-        src/infrastructure/persistence/user_preference_repository_impl.cpp
-        src/infrastructure/persistence/exchange_rate_repository_impl.cpp
-        src/infrastructure/persistence/postgres_result_set.cpp
-        src/infrastructure/persistence/rls_session.cpp
-    )
+if(PFH_BUILD_POSTGRESQL)
+    list(APPEND PFH_INFRASTRUCTURE_SOURCES ${PFH_POSTGRESQL_SOURCES})
 endif()
 
 # Presentation Layer - REST API controllers
@@ -174,20 +177,21 @@ add_library(pfh_domain STATIC ${PFH_DOMAIN_SOURCES})
 target_include_directories(pfh_domain PUBLIC ${PFH_INCLUDE_DIR})
 
 # Application Layer - currently header-only use cases
-# Uncomment when .cpp files are extracted
-# add_library(pfh_application STATIC ${PFH_APPLICATION_SOURCES})
-# target_link_libraries(pfh_application PUBLIC pfh_domain)
+add_library(pfh_application INTERFACE)
+target_include_directories(pfh_application INTERFACE ${PFH_INCLUDE_DIR})
+target_link_libraries(pfh_application INTERFACE pfh_domain)
 
 # Infrastructure Library - In-Memory (always) + PostgreSQL (when PFH_BUILD_POSTGRESQL=ON)
 add_library(pfh_infrastructure STATIC ${PFH_INFRASTRUCTURE_SOURCES})
 target_include_directories(pfh_infrastructure PUBLIC ${PFH_INCLUDE_DIR})
 target_link_libraries(pfh_infrastructure PUBLIC
-    pfh_domain
+    pfh_application
     spdlog::spdlog
     nlohmann_json::nlohmann_json
 )
 
-if(PFH_HAS_POSTGRESQL)
+if(PFH_BUILD_POSTGRESQL)
+    target_compile_definitions(pfh_infrastructure PUBLIC PFH_HAS_POSTGRESQL=1)
     target_link_libraries(pfh_infrastructure PUBLIC
         Drogon::Drogon
         PostgreSQL::PostgreSQL
@@ -195,8 +199,41 @@ if(PFH_HAS_POSTGRESQL)
 endif()
 
 # Presentation Library - Drogon controllers (future)
-# add_library(pfh_presentation STATIC ${PFH_PRESENTATION_SOURCES})
-# target_link_libraries(pfh_presentation PUBLIC pfh_application pfh_infrastructure)
+add_library(pfh_presentation INTERFACE)
+target_include_directories(pfh_presentation INTERFACE ${PFH_INCLUDE_DIR})
+target_link_libraries(pfh_presentation INTERFACE pfh_application)
+if(PFH_BUILD_POSTGRESQL)
+    target_link_libraries(pfh_presentation INTERFACE Drogon::Drogon)
+endif()
+
+# Header-only fixtures/helpers shared by all test layers.
+add_library(pfh_test_support INTERFACE)
+target_include_directories(pfh_test_support INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/support
+)
+target_link_libraries(pfh_test_support INTERFACE pfh_application)
+
+# The regular local build intentionally works without Drogon. Still compile all
+# PostgreSQL adapter translation units against a narrow API-shaped test stub so
+# syntax/type errors cannot hide behind PFH_BUILD_POSTGRESQL=OFF. Production ON
+# builds always use the real Drogon target and do not see this include path.
+if(NOT PFH_BUILD_POSTGRESQL)
+    add_library(pfh_postgresql_adapter_compile_gate OBJECT
+        ${PFH_POSTGRESQL_SOURCES}
+    )
+    target_compile_definitions(pfh_postgresql_adapter_compile_gate PRIVATE
+        PFH_HAS_POSTGRESQL=1
+    )
+    target_include_directories(pfh_postgresql_adapter_compile_gate BEFORE PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/support/drogon_stub
+        ${PFH_INCLUDE_DIR}
+    )
+    target_link_libraries(pfh_postgresql_adapter_compile_gate PRIVATE
+        pfh_application
+        spdlog::spdlog
+        nlohmann_json::nlohmann_json
+    )
+endif()
 
 # =============================================================================
 # Executable Target
@@ -207,7 +244,7 @@ add_executable(pfh_server
 )
 
 target_link_libraries(pfh_server PRIVATE
-    pfh_domain
+    pfh_presentation
     pfh_infrastructure
     spdlog::spdlog
     nlohmann_json::nlohmann_json
@@ -234,6 +271,19 @@ add_test(
 )
 set_tests_properties(migration_enum_casts PROPERTIES LABELS "migrations;sql")
 
+# Offline regression gate for the PostgreSQL adapter's transaction/RLS wiring.
+# This complements the compile gate above; real database behavior remains part
+# of the external PostgreSQL test matrix.
+add_test(
+    NAME postgresql_adapter_contracts
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/sql/validate_postgresql_adapter_contracts.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+set_tests_properties(postgresql_adapter_contracts PROPERTIES
+    LABELS "postgresql;static"
+)
+
 # Integration Tests
 add_subdirectory(tests/integration)
 
@@ -259,7 +309,7 @@ message(STATUS "Project Version: ${PROJECT_VERSION}")
 message(STATUS "C++ Standard: C++${CMAKE_CXX_STANDARD}")
 message(STATUS "Build Type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "Compiler: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
-if(PFH_HAS_POSTGRESQL)
+if(PFH_BUILD_POSTGRESQL)
     message(STATUS "PostgreSQL: ${PostgreSQL_VERSION_STRING}")
     message(STATUS "Drogon: ${Drogon_VERSION}")
 endif()

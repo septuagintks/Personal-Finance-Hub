@@ -23,7 +23,7 @@ set(UNIT_TEST_SOURCES
 add_executable(pfh_unit_tests ${UNIT_TEST_SOURCES})
 
 target_link_libraries(pfh_unit_tests PRIVATE
-    pfh_domain
+    pfh_test_support
     GTest::gtest
     GTest::gtest_main
     spdlog::spdlog
@@ -32,7 +32,6 @@ target_link_libraries(pfh_unit_tests PRIVATE
 
 target_include_directories(pfh_unit_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/tests/support
 )
 
 include(GoogleTest)

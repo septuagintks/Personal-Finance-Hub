@@ -19,6 +19,7 @@
 #include <gtest/gtest.h>
 #include <memory>
 #include <nlohmann/json.hpp>
+#include <set>
 
 using namespace pfh::domain;
 using namespace pfh::application;
@@ -69,7 +70,10 @@ protected:
         user_repo_ = std::make_unique<InMemoryUserRepository>(*store_);
         pref_repo_ = std::make_unique<InMemoryUserPreferenceRepository>(*store_);
         tx_repo_ = std::make_unique<InMemoryTransactionRepository>(*store_);
-        account_repo_ = std::make_unique<InMemoryAccountRepository>(*store_, *tx_repo_);
+        auto account_repo =
+            std::make_unique<InMemoryAccountRepository>(*store_, *tx_repo_);
+        active_currency_query_ = account_repo.get();
+        account_repo_ = std::move(account_repo);
         rate_repo_ = std::make_unique<InMemoryExchangeRateRepository>(*store_);
         category_repo_ = std::make_unique<InMemoryCategoryRepository>(*store_);
         provider_ = std::make_unique<MockExchangeRateProvider>();
@@ -118,6 +122,7 @@ protected:
     std::unique_ptr<IUserPreferenceRepository> pref_repo_;
     std::unique_ptr<ITransactionRepository> tx_repo_;
     std::unique_ptr<IAccountRepository> account_repo_;
+    IActiveCurrencyQuery* active_currency_query_ = nullptr;
     std::unique_ptr<IExchangeRateRepository> rate_repo_;
     std::unique_ptr<ICategoryRepository> category_repo_;
     std::unique_ptr<MockExchangeRateProvider> provider_;
@@ -758,7 +763,8 @@ TEST_F(UseCaseTest, RefreshExchangeRates_WhenProviderFails_DegradesWithoutWrite)
     auto s = seed();
     (void)s;
     provider_->set_fail(true);
-    RefreshExchangeRatesUseCase uc(*account_repo_, *rate_repo_, *provider_, *uow_);
+    RefreshExchangeRatesUseCase uc(
+        *active_currency_query_, *rate_repo_, *provider_, *uow_);
     auto result = uc.execute(RefreshExchangeRatesCommand{});
     ASSERT_TRUE(result.has_value());
     EXPECT_TRUE(result->degraded);
@@ -786,7 +792,8 @@ TEST_F(UseCaseTest, RefreshExchangeRates_WhenProviderFailsButHistoryExists_Flags
     const auto outbox_before = store_->outbox.size();
 
     provider_->set_fail(true);
-    RefreshExchangeRatesUseCase uc(*account_repo_, *rate_repo_, *provider_, *uow_);
+    RefreshExchangeRatesUseCase uc(
+        *active_currency_query_, *rate_repo_, *provider_, *uow_);
     auto result = uc.execute(RefreshExchangeRatesCommand{});
     ASSERT_TRUE(result.has_value());
     EXPECT_TRUE(result->degraded);
@@ -807,7 +814,8 @@ TEST_F(UseCaseTest, RefreshExchangeRates_WhenOnlySomeHistoryExists_FlagsNoFallba
     ASSERT_TRUE(rw.has_value());
 
     provider_->set_fail(true);
-    RefreshExchangeRatesUseCase uc(*account_repo_, *rate_repo_, *provider_, *uow_);
+    RefreshExchangeRatesUseCase uc(
+        *active_currency_query_, *rate_repo_, *provider_, *uow_);
     RefreshExchangeRatesCommand cmd;
     cmd.target_currency_codes = {"CNY", "EUR"};
     auto result = uc.execute(cmd);
@@ -823,7 +831,8 @@ TEST_F(UseCaseTest, RefreshExchangeRates_WhenOnlySomeHistoryExists_FlagsNoFallba
 TEST_F(UseCaseTest, RefreshExchangeRates_WhenProviderOk_AppendsRatesAndOutbox) {
     auto s = seed();
     (void)s;
-    RefreshExchangeRatesUseCase uc(*account_repo_, *rate_repo_, *provider_, *uow_);
+    RefreshExchangeRatesUseCase uc(
+        *active_currency_query_, *rate_repo_, *provider_, *uow_);
     RefreshExchangeRatesCommand cmd;
     cmd.target_currency_codes = {"CNY", "EUR"};
     auto result = uc.execute(cmd);
@@ -837,11 +846,33 @@ TEST_F(UseCaseTest, RefreshExchangeRates_WhenProviderOk_AppendsRatesAndOutbox) {
               std::string::npos);
 }
 
+TEST_F(UseCaseTest, RefreshExchangeRates_IncludesBaseCurrencyWithoutMatchingAccount) {
+    auto s = seed();
+    auto preference_write = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            return pref_repo_->save(tx, UserPreference(s.user, ccy("EUR")));
+        });
+    ASSERT_TRUE(preference_write.has_value()) << preference_write.error().message;
+
+    RefreshExchangeRatesUseCase uc(
+        *active_currency_query_, *rate_repo_, *provider_, *uow_);
+    auto result = uc.execute();
+
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->appended_count, 2u);  // CNY account + EUR report base; USD is pivot.
+    std::set<std::string> targets;
+    for (const auto& [_, exchange_rate] : store_->exchange_rates) {
+        targets.insert(exchange_rate.target().code());
+    }
+    EXPECT_EQ(targets, (std::set<std::string>{"CNY", "EUR"}));
+}
+
 TEST_F(UseCaseTest, RefreshExchangeRates_WhenProviderOmitsPair_RejectsWholeResponse) {
     auto s = seed();
     (void)s;
     provider_->set_omit_last(true);
-    RefreshExchangeRatesUseCase uc(*account_repo_, *rate_repo_, *provider_, *uow_);
+    RefreshExchangeRatesUseCase uc(
+        *active_currency_query_, *rate_repo_, *provider_, *uow_);
     RefreshExchangeRatesCommand cmd;
     cmd.target_currency_codes = {"CNY", "EUR"};
 
@@ -857,7 +888,8 @@ TEST_F(UseCaseTest, RefreshExchangeRates_WhenProviderDuplicatesPair_RejectsWhole
     auto s = seed();
     (void)s;
     provider_->set_duplicate_first(true);
-    RefreshExchangeRatesUseCase uc(*account_repo_, *rate_repo_, *provider_, *uow_);
+    RefreshExchangeRatesUseCase uc(
+        *active_currency_query_, *rate_repo_, *provider_, *uow_);
     RefreshExchangeRatesCommand cmd;
     cmd.target_currency_codes = {"CNY", "EUR"};
 
@@ -1499,7 +1531,7 @@ TEST_F(UseCaseTest, UserRepository_ReadYourWrites_WithinTransaction) {
         UserPreference updated(s.user, ccy("EUR"), "de-DE", "Europe/Berlin");
         if (auto r = pref_repo_->save(tx, updated); !r) return std::unexpected(r.error());
         // Read-your-writes: must see EUR / Berlin, not the seeded USD default.
-        auto reread = pref_repo_->find_by_user(s.user);
+        auto reread = pref_repo_->find_by_user(tx, s.user);
         if (!reread) return std::unexpected(reread.error());
         EXPECT_EQ(reread->base_currency().code(), "EUR");
         EXPECT_EQ(reread->timezone(), "Europe/Berlin");
@@ -1520,7 +1552,7 @@ TEST_F(UseCaseTest, UserRepository_ReadYourWrites_FindByUsername) {
         if (!created) return std::unexpected(created.error());
         uid = *created;
         // The just-created (staged, uncommitted) user must be findable by name.
-        auto found = user_repo_->find_by_username("dave");
+        auto found = user_repo_->find_by_username(tx, "dave");
         if (!found) return std::unexpected(found.error());
         EXPECT_EQ(found->id().value(), uid.value());
         return {};

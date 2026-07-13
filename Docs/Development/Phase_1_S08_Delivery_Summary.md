@@ -190,4 +190,4 @@ ctest --test-dir build --output-on-failure
 - [Event Design](../Architecture/14_Event_Design.md)
 - [Phase 1 Detailed Plan](../Development_Plans/Phase_1/Phase_1_Detailed_Development_Plan.md)
 - [S07 Delivery Summary](Phase_1_S07_Delivery_Summary.md)
-- [Tasks](Tasks.md)
+- [tasks](tasks.md)

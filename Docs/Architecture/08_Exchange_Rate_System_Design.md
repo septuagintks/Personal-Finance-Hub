@@ -271,22 +271,22 @@ class RefreshExchangeRatesUseCase {
 private:
     std::shared_ptr<IExchangeRateProvider> provider_;
     std::shared_ptr<IExchangeRateRepository> repository_;
-    std::shared_ptr<IAccountRepository> accountRepository_;
+    std::shared_ptr<IActiveCurrencyQuery> activeCurrencyQuery_;
     std::shared_ptr<IAuditLogRepository> auditRepo_;
 
 public:
     RefreshExchangeRatesUseCase(
         std::shared_ptr<IExchangeRateProvider> provider,
         std::shared_ptr<IExchangeRateRepository> repository,
-        std::shared_ptr<IAccountRepository> accountRepository,
+        std::shared_ptr<IActiveCurrencyQuery> activeCurrencyQuery,
         std::shared_ptr<IAuditLogRepository> auditRepo)
-        : provider_(provider), repository_(repository), accountRepository_(accountRepository), auditRepo_(auditRepo) {}
+        : provider_(provider), repository_(repository), activeCurrencyQuery_(activeCurrencyQuery), auditRepo_(auditRepo) {}
 
     std::expected<void, std::string> execute() {
         LOG_INFO << "Starting exchange rate refresh from " << provider_->getProviderName();
 
         // 0. 先收集系统中所有未归档账户正在使用的币种，调度器本身不携带 UserId
-        auto activeCurrenciesResult = accountRepository_->findActiveCurrencies();
+        auto activeCurrenciesResult = activeCurrencyQuery_->list_active_currencies();
         if (!activeCurrenciesResult) {
             std::string errorMsg = "Failed to collect active currencies";
             LOG_ERROR << errorMsg;

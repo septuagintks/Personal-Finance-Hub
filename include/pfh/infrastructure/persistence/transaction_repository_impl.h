@@ -9,18 +9,20 @@
 #ifdef PFH_HAS_POSTGRESQL
 
 #include <drogon/orm/DbClient.h>
+#include <utility>
 
 namespace pfh::infrastructure {
 
 /// @brief PostgreSQL adapter for ITransactionRepository.
 ///
-/// `transactions` IS RLS-scoped. All writes go through an active transaction
-/// with the GUC set. Transfer aggregates are atomic: transfer_groups row +
-/// outgoing + incoming (+ adjustments) in one DB transaction.
+/// Instances are request-scoped. Reads bind tenant_user_id in a short pinned
+/// transaction; writes additionally verify the supplied UnitOfWork context.
 class TransactionRepositoryImpl final : public domain::ITransactionRepository {
 public:
-    explicit TransactionRepositoryImpl(drogon::orm::DbClientPtr db)
-        : db_(std::move(db)) {}
+    TransactionRepositoryImpl(
+        drogon::orm::DbClientPtr db,
+        domain::UserId tenant_user_id)
+        : db_(std::move(db)), tenant_user_id_(tenant_user_id) {}
 
     [[nodiscard]] domain::RepositoryResult<domain::Transaction> find_by_id(
         domain::TransactionId id) override;
@@ -63,6 +65,7 @@ public:
 
 private:
     drogon::orm::DbClientPtr db_;
+    domain::UserId tenant_user_id_;
 };
 
 }  // namespace pfh::infrastructure

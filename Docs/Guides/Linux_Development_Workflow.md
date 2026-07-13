@@ -286,7 +286,7 @@ P1-S12 的 Linux、Docker 和真实 PostgreSQL 验收在另一台具备对应环
 - PostgreSQL 空库迁移、真实 Repository/UoW/RLS 与 API 测试通过
 - Docker 服务启动、健康检查和关键 API smoke test 通过
 - 该 Phase 的交付总结文档已回写
-- `Docs/Development/Tasks.md` 已同步任务状态
+- `Docs/Development/tasks.md` 已同步任务状态
 - 与设计不一致的地方已先回写架构文档
 
 ---

@@ -9,16 +9,16 @@
 #include "pfh/domain/events/i_domain_event.h"
 #include "pfh/domain/repositories/repository_error.h"
 #include "pfh/infrastructure/persistence/drogon_transaction_context.h"
-#include "pfh/infrastructure/persistence/rls_session.h"
+#include "pfh/infrastructure/persistence/postgres_repository_support.h"
+#include "pfh/infrastructure/persistence/postgres_result_set.h"
 
-#include <spdlog/spdlog.h>
 #include <utility>
 
 namespace pfh::infrastructure {
 
 DrogonUnitOfWork::DrogonUnitOfWork(
     drogon::orm::DbClientPtr db,
-    domain::UserId user_id)
+    std::optional<domain::UserId> user_id)
     : db_(std::move(db)), user_id_(user_id) {}
 
 void DrogonUnitOfWork::register_event(std::shared_ptr<domain::IDomainEvent> event) {
@@ -29,71 +29,39 @@ void DrogonUnitOfWork::register_event(std::shared_ptr<domain::IDomainEvent> even
 
 domain::RepositoryVoidResult DrogonUnitOfWork::execute_in_transaction(
     std::function<domain::RepositoryVoidResult(domain::ITransactionContext&)> action) {
-    if (!db_) {
+    if (in_transaction_) {
         return std::unexpected(domain::RepositoryError::database(
-            "DrogonUnitOfWork: null DbClient"));
+            "Nested transactions are not supported"));
     }
 
-    auto tx = db_->newTransaction();
-    if (!tx) {
-        return std::unexpected(domain::RepositoryError::database(
-            "DrogonUnitOfWork: failed to begin transaction"));
-    }
-
-    // Bind RLS GUC so every statement sees the same tenant. Must be the FIRST
-    // statement on the new transaction so the policy fail-closed baseline is
-    // never observable by repository SQL.
-    try {
-        RlsSession::setAppUserId(tx, user_id_);
-    } catch (const std::exception& e) {
-        // RLS setup failure means the request cannot be safely served.
-        tx->rollback();
-        return std::unexpected(domain::RepositoryError::database(
-            std::string("RLS setup failed: ") + e.what()));
-    }
-
-    DrogonTransactionContext ctx(tx);
-
-    // Run user action. Any unexpected return rolls back; outbox events are
-    // discarded along with business writes.
-    auto result = action(ctx);
-    if (!result.has_value()) {
-        tx->rollback();
-        RlsSession::resetAppUserId(tx);
-        // Drop pending events - they belong to the rolled-back business state.
-        pending_events_.clear();
-        return result;
-    }
-
-    // Action succeeded: write outbox events in the same transaction.
-    auto outbox_result = write_outbox(ctx);
-    if (!outbox_result.has_value()) {
-        tx->rollback();
-        RlsSession::resetAppUserId(tx);
-        pending_events_.clear();
-        return outbox_result;
-    }
-
-    // Commit. setCommitCallback would publish externally, but Phase 1 leaves
-    // outbox publishing to the dedicated OutboxPublisherJob (tasks #34).
-    tx->execSqlSync("COMMIT");
-    // Drogon's commit semantics: newTransaction returns a transaction whose
-    // destructor auto-rolls-back if no explicit commit was issued. Calling
-    // COMMIT directly via SQL is acceptable; Drogon's Transaction supports
-    // a rollback-on-destruct path which we satisfy by explicitly clearing
-    // the GUC before the destructor runs.
-    RlsSession::resetAppUserId(tx);
-
-    // Events committed; clear local queue. The outbox row is the durable
-    // record; the in-memory copy is no longer needed.
+    in_transaction_ = true;
     pending_events_.clear();
-    return {};
+    auto result = postgres::execute_transaction<void>(
+        db_,
+        user_id_,
+        "unit of work",
+        [&](const std::shared_ptr<drogon::orm::Transaction>& transaction)
+            -> domain::RepositoryVoidResult {
+            DrogonTransactionContext context(transaction, user_id_);
+            auto action_result = action(context);
+            if (!action_result.has_value()) {
+                return action_result;
+            }
+            return write_outbox(context);
+        });
+
+    pending_events_.clear();
+    in_transaction_ = false;
+    return result;
 }
 
 domain::RepositoryVoidResult DrogonUnitOfWork::write_outbox(
     domain::ITransactionContext& tx_iface) {
-    auto& drogon_ctx = static_cast<DrogonTransactionContext&>(tx_iface);
-    auto& db_tx = drogon_ctx.transaction();
+    auto context = postgres::require_transaction(tx_iface, user_id_);
+    if (!context.has_value()) {
+        return std::unexpected(context.error());
+    }
+    auto& db_tx = (*context)->transaction();
 
     if (pending_events_.empty()) {
         return {};
@@ -116,12 +84,13 @@ domain::RepositoryVoidResult DrogonUnitOfWork::write_outbox(
                 evt->aggregate_type(),            // VARCHAR (nullable)
                 evt->aggregate_id(),              // VARCHAR (nullable)
                 evt->payload_json(),              // JSONB (text)
-                evt->occurred_at());              // TIMESTAMPTZ
+                pg::toDbTimestamp(evt->occurred_at()));  // TIMESTAMPTZ
         }
         return {};
     } catch (const drogon::orm::DrogonDbException& e) {
-        return std::unexpected(domain::RepositoryError::database(
-            std::string("outbox insert failed: ") + e.base().what()));
+        return std::unexpected(postgres::database_error("outbox insert", e));
+    } catch (const std::exception& e) {
+        return std::unexpected(postgres::unexpected_error("outbox insert", e));
     }
 }
 

@@ -20,6 +20,9 @@ Architecture: Clean Architecture + Lightweight DDD
 6. **领域概念不强制等同表结构**：`UserPreference` 是 Domain Concept，拥有独立的 `user_preferences` 表，由 `IUserRepository` 联合查询或通过独立的 `IUserPreferenceRepository` 进行读写。`TransferGroup` 则相反，只是 `transfer_groups` 持久化元数据载体，不是 Domain Entity。
 7. **Read Model 边界**：`BalanceSnapshot` 是 Value Object，也是账户余额查询的 Read Model。它没有独立身份或生命周期，Repository 可以从 `account_balance_cache` 或流水聚合映射得到。
 8. **辅助实体仓储边界**：`Category`、`Tag`、`AuditLog`、`UserPreference` 虽不是资金事实来源，但它们是前端工作流和审计闭环的必要数据，必须有明确 Repository 接口。
+9. **RLS 必须绑定固定事务**：租户 Repository 是 request-scoped，并持有认证后的 `UserId`。每次读取 RLS 表也必须创建并固定一个 Drogon `Transaction`，先执行事务级 `SET LOCAL app.current_user_id`，再在同一 Transaction 上执行全部查询。禁止先对池化 `DbClient` 设置 GUC、再假设下一条语句仍使用同一物理连接。
+10. **以提交回调确认成功**：Drogon `Transaction` 没有供业务代码直接调用的 `commit()`。成功路径应释放最后一个 Transaction owner 触发提交，并以 `newTransaction` / `setCommitCallback` 的布尔结果作为提交是否成功的依据；禁止通过 `execSqlSync("COMMIT")` 绕过 Drogon 生命周期。
+11. **事务内读取必须显式传递上下文**：需要 read-your-writes 的 User/UserPreference 等流程必须调用接收 `ITransactionContext&` 的 Repository 重载；无上下文读取会创建独立短事务，不能用于观察当前 UoW 尚未提交的写入。
 
 ---
 
@@ -71,9 +74,6 @@ public:
     // 获取用户下的所有未归档账户
     virtual std::expected<std::vector<Account>, RepositoryError> findActiveByUser(UserId userId) = 0;
 
-    // 获取系统中所有未归档账户正在使用的币种（用于汇率刷新任务）
-    virtual std::expected<std::vector<Currency>, RepositoryError> findActiveCurrencies() = 0;
-
     // 核心：获取账户的实时余额快照（Repository 内部处理流水聚合或缓存读取）
     virtual std::expected<BalanceSnapshot, RepositoryError> balanceOf(AccountId id) = 0;
 
@@ -88,6 +88,13 @@ public:
 };
 
 ```
+
+系统级“活跃币种”查询不属于租户账户仓储。它必须合并所有未归档账户币种与 `users.base_currency_code`；否则用户把报表基准币种设为一个没有对应账户的币种时，USD 枢纽刷新会缺少该侧汇率。后台任务不携带 `UserId`，而 `accounts` 已启用 FORCE RLS；若把该方法留在 request-scoped `IAccountRepository`，它只能看到单个租户或在未设置 GUC 时返回空集合。因此 Application 单独定义 `IActiveCurrencyQuery::list_active_currencies()` 端口：
+
+- In-Memory adapter 可直接遍历全部未归档账户。
+- PostgreSQL adapter 必须使用独立的后台只读 DbClient/数据库角色，该角色具备跨租户读取所需权限。
+- request-serving DbClient 不得复用该特权角色，`PostgresActiveCurrencyQuery` 也不得注入 Controller 或普通用户 Use Case。
+- 角色、连接与最小权限的实际装配在 P1-S10-04 完成，并在 S12 验证 request 连接无法绕过 RLS。
 
 ### 2.3 转账与流水仓储接口
 
@@ -298,110 +305,25 @@ public:
 
 ### 3.2 账户仓储的具体实现
 
-这里展示如何利用 Drogon 的同步/协程客户端，在内部透明地处理 `account_balance_cache`。
+账户余额读取是“带缓存写回的读路径”，必须把账户、流水版本、缓存命中判断、余额重建和缓存 UPSERT 放在同一个租户事务中。当前实现遵守以下顺序：
+
+1. 使用 request-scoped `tenant_user_id` 创建短事务，并先执行 `SET LOCAL`。
+2. 先锁定账户聚合根，再在同一事务中读取 `MAX(transactions.version)`、最新流水 ID 和缓存行；流水新增、软删除与物理删除也必须遵循账户先行锁定约束。
+3. 仅当 `source_version` 与最新流水 ID 同时匹配时命中缓存。
+4. miss/stale 时加载未删除流水，交给纯领域 `BalanceCalculationService` 重建。
+5. 同事务 UPSERT `account_balance_cache`；流水新增、软删除和聚合物理删除也必须在各自写事务内删除受影响账户的缓存。
+6. `source_version` 使用 schema 的流水 `version` 语义，不得使用 In-Memory 的“未删除流水数量”替代。
 
 ```cpp
-// infrastructure/persistence/AccountRepositoryImpl.cpp
-#include "domain/repositories/IAccountRepository.hpp"
-#include "domain/services/BalanceCalculationService.hpp"
-#include "infrastructure/persistence/mappers/AccountMapper.hpp"
-#include "infrastructure/persistence/mappers/TransactionMapper.hpp"
-#include <drogon/drogon.h>
-
-class AccountRepositoryImpl : public IAccountRepository {
-private:
-    drogon::orm::DbClientPtr dbClient_;
-    BalanceCalculationService balanceCalculator_;
-
-public:
-    AccountRepositoryImpl(drogon::orm::DbClientPtr dbClient) : dbClient_(dbClient) {}
-
-    std::expected<Account, RepositoryError> findById(AccountId id) override {
-        try {
-            auto result = dbClient_->execSqlSync("SELECT * FROM accounts WHERE id = $1", id.value());
-            if (result.empty()) {
-                return std::unexpected(RepositoryError{RepositoryStatus::NotFound, "Account not found"});
-            }
-            return AccountMapper::toDomain(result[0]);
-        } catch (const std::exception& e) {
-            return std::unexpected(RepositoryError{RepositoryStatus::DatabaseError, e.what()});
-        }
-    }
-
-    // 核心落地：余额快照的缓存断接策略。
-    // Repository 只负责缓存读取、流水加载、映射和写回；
-    // Income/Expense/Transfer/Adjustment 的余额方向规则属于 BalanceCalculationService。
-    std::expected<BalanceSnapshot, RepositoryError> balanceOf(AccountId id) override {
-        try {
-            // 1. 尝试从缓存表中读取
-            auto cacheRes = dbClient_->execSqlSync(
-                "SELECT balance, last_transaction_id, source_version, updated_at "
-                "FROM account_balance_cache WHERE account_id = $1",
-                id.value()
-            );
-
-            // 2. 查询该账户流水当前版本，用于判断缓存是否失效
-            auto versionRes = dbClient_->execSqlSync(
-                "SELECT COALESCE(MAX(version), 0) AS source_version, MAX(id) AS max_tx_id "
-                "FROM transactions WHERE account_id = $1 AND deleted_at IS NULL",
-                id.value()
-            );
-
-            int64_t sourceVersion = versionRes[0]["source_version"].as<int64_t>();
-            int64_t maxTxId = versionRes[0]["max_tx_id"].isNull() ? 0 : versionRes[0]["max_tx_id"].as<int64_t>();
-
-            if (!cacheRes.empty() && cacheRes[0]["source_version"].as<int64_t>() == sourceVersion) {
-                auto row = cacheRes[0];
-                return BalanceSnapshot(
-                    Decimal(row["balance"].as<std::string>()), // 字符串转高精度定点数
-                    TransactionId(row["last_transaction_id"].as<int64_t>()),
-                    row["updated_at"].as<std::string>()
-                );
-            }
-
-            // 3. 缓存未命中或失效：加载原始流水并交给 Domain Service 计算
-            auto txRes = dbClient_->execSqlSync(
-                "SELECT * FROM transactions "
-                "WHERE account_id = $1 AND deleted_at IS NULL "
-                "ORDER BY transaction_time ASC, id ASC",
-                id.value()
-            );
-
-            std::vector<Transaction> transactions;
-            transactions.reserve(txRes.size());
-            for (const auto& row : txRes) {
-                transactions.push_back(TransactionMapper::toDomain(row));
-            }
-
-            auto snapshot = balanceCalculator_.calculate(id, transactions);
-
-            // 4. 将计算结果异步写入/更新缓存表，保证下次快速读取
-            dbClient_->execSqlAsync(
-                "INSERT INTO account_balance_cache (account_id, balance, last_transaction_id, source_version, cache_version, updated_at) "
-                "VALUES ($1, $2, $3, $4, 1, NOW()) "
-                "ON CONFLICT (account_id) DO UPDATE SET "
-                "balance = $2, last_transaction_id = $3, source_version = $4, "
-                "cache_version = account_balance_cache.cache_version + 1, updated_at = NOW()",
-                [id](const drogon::orm::Result&) {}, // 异步回调消防后即忘
-                [](const drogon::orm::DrogonDbException&) {},
-                id.value(), snapshot.balance().to_string(), maxTxId, sourceVersion
-            );
-
-            return snapshot;
-
-        } catch (const std::exception& e) {
-            return std::unexpected(RepositoryError{RepositoryStatus::DatabaseError, e.what()});
-        }
-    }
-
-    // 满足多态和接口的其他实现...
-    std::expected<std::vector<Account>, RepositoryError> findActiveByUser(UserId userId) override { /* ... */ return {}; }
-    std::expected<void, RepositoryError> save(const Account& account) override { /* ... */ return {}; }
-    std::expected<void, RepositoryError> physicalDelete(AccountId id) override {
-        dbClient_->execSqlSync("DELETE FROM accounts WHERE id = $1", id.value());
-        return {};
-    }
-};
+return postgres::execute_transaction<BalanceSnapshot>(
+    dbClient_, tenantUserId_, "read account balance",
+    [&](const auto& transaction) -> RepositoryResult<BalanceSnapshot> {
+        // account/cache/version/transactions all use this transaction.
+        // NUMERIC values are read as strings and mapped to Decimal.
+        // Rebuild delegates only financial arithmetic to the Domain Service.
+        // Cache UPSERT includes account_id, user_id, source_version and last tx id.
+        return rebuiltOrCachedSnapshot;
+    });
 
 ```
 
@@ -458,62 +380,34 @@ public:
 
 事务闭包必须接收一个事务上下文（例如 `ITransactionContext& tx`），并把它传给参与写入的 Repository。这样业务表写入、缓存更新和 outbox 写入才能共享同一个底层数据库事务；不得在 UoW 中创建 `trans` 后，让 Repository 继续使用普通 `DbClient` 在事务外写库。
 
+Drogon 的提交由 `Transaction` 生命周期驱动。实现必须在释放最后一个 owner 前完成业务写入与 outbox 写入，并等待 commit callback 返回 `true` 后才向 Application 报告成功。回滚或提交失败时清空本次 `pendingEvents_`；`SET LOCAL` 会随事务结束自动清除，不允许在已提交/已回滚的 Transaction 上再执行 RESET。
+
 ```cpp
-// infrastructure/persistence/DrogonUnitOfWork.cpp
-#include "application/persistence/IUnitOfWork.hpp"
-#include <drogon/orm/DbClient.h>
+auto committed = std::make_shared<std::promise<bool>>();
+auto completion = committed->get_future();
+auto transaction = dbClient_->newTransaction(
+    [committed](bool ok) { committed->set_value(ok); });
 
-class DrogonUnitOfWork : public IUnitOfWork {
-private:
-    drogon::orm::DbClientPtr dbClient_;
-    std::vector<std::shared_ptr<IDomainEvent>> pendingEvents_;
-
-public:
-    DrogonUnitOfWork(drogon::orm::DbClientPtr dbClient) : dbClient_(dbClient) {}
-
-    void registerEvent(std::shared_ptr<IDomainEvent> event) override {
-        pendingEvents_.push_back(std::move(event));
+RlsSession::setAppUserId(transaction, tenantUserId);
+{
+    DrogonTransactionContext context(transaction, tenantUserId);
+    auto result = action(context);
+    if (!result) {
+        transaction->rollback();
+        return std::unexpected(result.error());
     }
-
-    std::expected<void, RepositoryError> executeInTransaction(
-        std::function<std::expected<void, RepositoryError>(ITransactionContext& tx)> action
-    ) override {
-        pendingEvents_.clear();
-        // 创建 Drogon 底层的 Transaction 智能指针
-        auto trans = dbClient_->newTransaction();
-        DrogonTransactionContext txContext(trans);
-
-        auto result = action(txContext);
-
-        if (result.has_value()) {
-            try {
-                // 同一数据库事务内先写 outbox，再提交业务事实
-                for (const auto& event : pendingEvents_) {
-                    auto payload = serializeDomainEvent(*event); // 序列化为 JSON
-                    trans->execSqlSync(
-                        "INSERT INTO domain_events_outbox (id, event_name, aggregate_type, aggregate_id, payload, status, retry_count, max_retry_count, next_retry_at, occurred_at, created_at) "
-                        "VALUES ($1, $2, $3, $4, $5, 'pending', 0, 5, NOW(), $6, NOW())",
-                        generateOutboxId(), event->getEventName(), getAggregateType(*event), getAggregateId(*event), payload, event->getOccurredAt()
-                    );
-                }
-
-                trans->commit();
-                pendingEvents_.clear();
-                return {};
-            } catch (const std::exception& e) {
-                LOG_ERROR << "Transaction commit or outbox write failed: " << e.what();
-                trans->rollback();
-                pendingEvents_.clear();
-                return std::unexpected(RepositoryError{RepositoryStatus::DatabaseError, "Outbox write or commit failed"});
-            }
-        } else {
-            // 执行失败，回滚事务并丢弃暂存事件
-            trans->rollback();
-            pendingEvents_.clear();
-            return std::unexpected(result.error());
-        }
+    auto outbox = writeOutbox(context, pendingEvents_); // same Transaction
+    if (!outbox) {
+        transaction->rollback();
+        return std::unexpected(outbox.error());
     }
-};
+}
+
+transaction.reset(); // release last owner and let Drogon commit
+if (!completion.get()) {
+    return std::unexpected(RepositoryError::database("commit failed"));
+}
+return {};
 
 ```
 

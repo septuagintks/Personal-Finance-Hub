@@ -4,9 +4,11 @@
 **首轮验证提交**: `0a1ac5f7600f3ba5573520826847c08bb783b27a`
 **V3 修复提交**: `183378981e33a8aa9853e19cdd4a19c75d5a6e77`
 **外部复测提交**: `4621f69ef940868e10591f5449ac8be1dd9c95e3`
-**对应任务**: `Tasks.md` #28 / #46 / #57 / #58
+**对应任务**: `tasks.md` #28 / #46 / #57 / #58
 **报告状态**: FINAL - 结果已汇入 `Phase_1_S10_Delivery_Summary.md`
 **最终结论**: **V3 MIGRATION PASS；S10 REAL PERSISTENCE BLOCKED**
+
+> 结论边界：`BLOCKED` 描述的是上述外部复测提交当时的状态。后续 S10-03 已实现核心 Repository/UoW，但尚未在同类真实环境复跑；当前实现进度以 `Phase_1_S10_Delivery_Summary.md` 为准，本报告保留为迁移测试原始证据。
 
 ---
 
@@ -190,7 +192,7 @@ total test time: 0.87 sec
 - `Account.version` 乐观锁冲突。
 - 余额缓存 `source_version` 与 schema 版本语义。
 - `NUMERIC(20,8/10)` 数据库 round-trip。
-- RLS fail-closed 与连接池 session reset。
+- RLS fail-closed 与连接池事务级租户上下文隔离。
 - Transfer 双边流水和 Adjustment 原子写入。
 - Exchange rate append-only 与历史查询。
 - 复合外键、唯一约束和跨用户写入拒绝。

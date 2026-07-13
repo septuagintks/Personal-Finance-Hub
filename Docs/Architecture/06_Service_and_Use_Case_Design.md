@@ -124,6 +124,8 @@ Application 必须保留精确错误语义：跨用户/不存在账户返回 Not
 
 该用例在 P1-S10-06/S10-07 随注册与基础资源 API 落地。它必须通过一个 Unit of Work 使用同一事务上下文调用 `IUserPreferenceRepository`、`ICategoryRepository` 与 `IAuditLogRepository`，并把 Repository 错误映射为稳定的 Application `Error`，不得在 Domain Service 中执行 seed 或数据库访问。
 
+注册专用 bootstrap UoW 在插入 `users` 前不绑定租户；取得数据库分配的 `UserId` 后，必须在同一事务中一次性绑定该租户并执行 `SET LOCAL`，再写入偏好、分类、审计和 outbox。该事务不能切换第二次租户，也不能拆成“先提交用户、再初始化默认数据”的两个成功边界。
+
 初始化内容：
 
 1. `UserPreference` 默认值

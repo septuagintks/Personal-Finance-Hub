@@ -3,7 +3,7 @@
 // C++23
 //
 // Shared helpers that translate between Drogon Result/Row and domain entities.
-// All conversions go through Decimal/currency parsing so the NUMERIC(20,8) →
+// All conversions go through Decimal/currency parsing so the NUMERIC columns ->
 // string → Decimal pipeline never sees float representations.
 
 #pragma once
@@ -20,7 +20,10 @@
 #include "pfh/domain/user_preference.h"
 
 #include <drogon/orm/Result.h>
+#include <trantor/utils/Date.h>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 
@@ -58,6 +61,13 @@ namespace pg {
 [[nodiscard]] std::optional<std::chrono::system_clock::time_point> getOptionalTimestamp(
     const drogon::orm::Row& row, size_t col);
 
+/// @brief Convert a domain timestamp to the type supported by Drogon SqlBinder.
+[[nodiscard]] trantor::Date toDbTimestamp(
+    std::chrono::system_clock::time_point value);
+
+[[nodiscard]] std::optional<trantor::Date> toDbTimestamp(
+    std::optional<std::chrono::system_clock::time_point> value);
+
 /// @brief Map a PostgreSQL account_type enum text to domain::AccountType.
 [[nodiscard]] domain::AccountType parseAccountType(const std::string& s);
 
@@ -94,11 +104,11 @@ namespace pg {
 /// @brief Map a domain::ThemeMode to its canonical SQL text form.
 [[nodiscard]] std::string toSqlText(domain::ThemeMode mode);
 
-/// @brief Map a PostgreSQL default_home_page enum text to domain::DefaultHomePage.
-[[nodiscard]] domain::DefaultHomePage parseDefaultHomePage(const std::string& s);
+/// @brief Map a PostgreSQL default_home_page enum text to domain::HomePage.
+[[nodiscard]] domain::HomePage parseDefaultHomePage(const std::string& s);
 
-/// @brief Map a domain::DefaultHomePage to its canonical SQL text form.
-[[nodiscard]] std::string toSqlText(domain::DefaultHomePage page);
+/// @brief Map a domain::HomePage to its canonical SQL text form.
+[[nodiscard]] std::string toSqlText(domain::HomePage page);
 
 /// @brief Map a PostgreSQL report_period enum text to domain::ReportPeriod.
 [[nodiscard]] domain::ReportPeriod parseReportPeriod(const std::string& s);

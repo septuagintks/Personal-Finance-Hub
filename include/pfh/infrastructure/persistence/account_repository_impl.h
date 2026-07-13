@@ -9,19 +9,20 @@
 #ifdef PFH_HAS_POSTGRESQL
 
 #include <drogon/orm/DbClient.h>
+#include <utility>
 
 namespace pfh::infrastructure {
 
 /// @brief PostgreSQL adapter for IAccountRepository.
 ///
-/// `accounts` IS RLS-scoped (V1 §RLS). Reads on a pooled connection require
-/// `app.current_user_id` to be set; read paths that happen before
-/// authentication (none in production, but unit/integration tests exercise
-/// this) bind GUC explicitly via RlsSession.
+/// Instances are request-scoped. Every read pins a short transaction and binds
+/// tenant_user_id with SET LOCAL before touching an RLS table.
 class AccountRepositoryImpl final : public domain::IAccountRepository {
 public:
-    explicit AccountRepositoryImpl(drogon::orm::DbClientPtr db)
-        : db_(std::move(db)) {}
+    AccountRepositoryImpl(
+        drogon::orm::DbClientPtr db,
+        domain::UserId tenant_user_id)
+        : db_(std::move(db)), tenant_user_id_(tenant_user_id) {}
 
     [[nodiscard]] domain::RepositoryResult<domain::Account> find_by_id(
         domain::AccountId id) override;
@@ -37,8 +38,6 @@ public:
 
     [[nodiscard]] domain::RepositoryResult<std::vector<domain::Account>> find_active_by_user(
         domain::UserId user_id) override;
-
-    [[nodiscard]] domain::RepositoryResult<std::vector<domain::Currency>> find_active_currencies() override;
 
     [[nodiscard]] domain::RepositoryResult<domain::BalanceSnapshot> balance_of(
         domain::AccountId id) override;
@@ -57,6 +56,7 @@ public:
 
 private:
     drogon::orm::DbClientPtr db_;
+    domain::UserId tenant_user_id_;
 };
 
 }  // namespace pfh::infrastructure

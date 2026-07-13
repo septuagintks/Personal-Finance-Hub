@@ -19,6 +19,15 @@ public:
     [[nodiscard]] virtual RepositoryResult<User> find_by_id(UserId id) = 0;
     [[nodiscard]] virtual RepositoryResult<User> find_by_username(const std::string& username) = 0;
 
+    /// Transaction-aware reads for workflows that must observe an earlier
+    /// create/update before commit (for example registration bootstrap).
+    [[nodiscard]] virtual RepositoryResult<User> find_by_id(
+        ITransactionContext& tx,
+        UserId id) = 0;
+    [[nodiscard]] virtual RepositoryResult<User> find_by_username(
+        ITransactionContext& tx,
+        const std::string& username) = 0;
+
     /// @brief Create a new user. Returns the assigned UserId.
     [[nodiscard]] virtual RepositoryResult<UserId> create(
         ITransactionContext& tx,

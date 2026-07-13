@@ -9,6 +9,7 @@
 #ifdef PFH_HAS_POSTGRESQL
 
 #include <drogon/orm/DbClient.h>
+#include <utility>
 
 namespace pfh::infrastructure {
 
@@ -21,10 +22,16 @@ namespace pfh::infrastructure {
 /// own row from `users` is acceptable.
 class UserPreferenceRepositoryImpl final : public domain::IUserPreferenceRepository {
 public:
-    explicit UserPreferenceRepositoryImpl(drogon::orm::DbClientPtr db)
-        : db_(std::move(db)) {}
+    UserPreferenceRepositoryImpl(
+        drogon::orm::DbClientPtr db,
+        domain::UserId tenant_user_id)
+        : db_(std::move(db)), tenant_user_id_(tenant_user_id) {}
 
     [[nodiscard]] domain::RepositoryResult<domain::UserPreference> find_by_user(
+        domain::UserId user_id) override;
+
+    [[nodiscard]] domain::RepositoryResult<domain::UserPreference> find_by_user(
+        domain::ITransactionContext& tx,
         domain::UserId user_id) override;
 
     [[nodiscard]] domain::RepositoryVoidResult save(
@@ -33,6 +40,7 @@ public:
 
 private:
     drogon::orm::DbClientPtr db_;
+    domain::UserId tenant_user_id_;
 };
 
 }  // namespace pfh::infrastructure

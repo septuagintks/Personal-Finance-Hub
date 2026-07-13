@@ -49,7 +49,7 @@ if (-not (Test-Path "build")) {
 
 try {
     Push-Location "build"
-    cmake .. -DCMAKE_BUILD_TYPE=Debug
+    cmake .. -DCMAKE_BUILD_TYPE=Debug -DPFH_BUILD_POSTGRESQL=OFF
     if ($LASTEXITCODE -eq 0) {
         Write-Host "✓ CMake configure passed" -ForegroundColor Green
     } else {

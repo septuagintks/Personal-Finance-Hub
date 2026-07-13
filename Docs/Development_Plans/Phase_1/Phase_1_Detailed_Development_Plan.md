@@ -11,7 +11,7 @@ Status: Active
 
 本文档是 `Phase_1_Development_Plan.md` 的细化子计划，用于描述 Phase 1 从创建工程目录结构开始，到第一阶段测试收尾为止的具体开发顺序、交付物和验收口径。
 
-当前进度（2026-07-13）：P1-S01 至 P1-S09 已完成，P1-S10-01 REST 契约与遗留项收口也已交付。Windows GCC 16 基线为 254 个 unit/use-case、16 个 In-Memory integration 与 1 个 migration gate，共 271/271。V3 已在外部 PostgreSQL 16.14 空库复测通过；真实 Drogon/PostgreSQL 适配器、API、后台任务及完整 P1-S12 门禁尚未完成。
+当前进度（2026-07-14）：P1-S01 至 P1-S09 与 P1-S10-01 至 S10-03 已完成实现，下一步进入 S10-04 production composition root。Windows GCC 16 基线为 255 个 unit/use-case、16 个 In-Memory integration、1 个 migration gate 与 1 个 PostgreSQL adapter contract gate，共 273/273；全部 PostgreSQL 适配器还会在 PostgreSQL OFF 构建中通过 API stub 执行语法编译。V3 已在外部 PostgreSQL 16.14 空库复测通过；真实 Drogon/PostgreSQL fixture、API、后台任务及完整 P1-S12 门禁尚未完成。
 
 ### 1.1 执行原则
 
@@ -380,25 +380,31 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S10-02 Drogon、PostgreSQL 与 CMake 目标接入
 
+状态：**已完成实现与本地静态复核（2026-07-14）**。
+
 - 启用 Drogon/PostgreSQL 依赖发现，落地 `pfh_application`、`pfh_infrastructure`、`pfh_presentation` 和可执行程序目标。
 - 保持依赖方向：Domain 不链接 Drogon/PostgreSQL，Application 只依赖 Domain 端口。
 - 将已增长的 header-only 用例按需迁移到 `.cpp`，避免 Controller 编译单元重复实例化。
-- 增加 `tests/api` 目标和服务测试启动入口。
+- 预留 `tests/api` 目录；实际服务测试目标在 S10-05 出现首批 Controller/HTTP mapper 后启用，避免空测试目标制造假验收。
 
-产物：可配置、可编译并能启动空 HTTP 服务的分层 CMake 目标。
+产物：可配置、可编译的分层 CMake 目标，`PFH_BUILD_POSTGRESQL=ON` 确实编译并链接适配器；空服务启动与生产 DbClient 装配统一在 S10-04 完成。
 
 #### P1-S10-03 PostgreSQL Repository 与 DrogonUnitOfWork
 
-- 实现 `DrogonUnitOfWork`，把同一 `Transaction` 上下文显式传给所有写 Repository 和 outbox。
-- 实现 PostgreSQL 版 User、UserPreference、Account、Transaction（含 Transfer 聚合持久化）、ExchangeRate、Category、Tag、AuditLog、RefreshToken 和 RevokedToken 适配器。
-- 完成任务 #46/#47/#51：真实分类解析、事务内 read-your-writes、余额缓存 `source_version` 与 schema `version` 语义严格一致。
-- 以迁移 schema 为事实来源，所有查询和约束显式包含 `user_id`；不得照搬 In-Memory 的简化字段或计数规则。
+状态：**核心适配器实现与离线编译/结构门禁已完成（2026-07-14）；真实连库签署保留到 S10-04/S12**。
 
-产物：可供 composition root 装配的生产持久化适配器及可复用的 PostgreSQL integration scenarios。
+- 实现 `DrogonUnitOfWork`，把同一 `Transaction` 上下文显式传给所有写 Repository 和 outbox。
+- 实现 PostgreSQL 版 User、UserPreference、Account、Transaction（含 Transfer + Adjustment 聚合持久化）、ExchangeRate、Category 核心适配器，以及供无用户后台任务使用的 `PostgresActiveCurrencyQuery`。
+- 完成任务 #46/#47/#51：真实分类解析、事务内 read-your-writes、余额缓存 `source_version` 与 schema `version` 语义严格一致。
+- 以迁移 schema 为事实来源，所有租户查询和约束显式包含 `user_id`；唯一跨租户查询通过独立系统端口/后台只读连接实现，不混入 tenant Repository。不得照搬 In-Memory 的简化字段或计数规则。
+- Tag 适配器随 S10-07 的 Tag Application 用例实现；RefreshToken/RevokedToken 随 S10-06 认证生命周期实现；AuditLog 端口与高危同步审计写入随 S10-06/S10-07，异步审计处理器随 S11-03 实现。它们不再提前塞入缺少 Application 契约的 S10-03。
+
+产物：可供 composition root 装配的核心生产持久化适配器、离线全源编译门禁与 PostgreSQL adapter contract gate。可复用的真实 PostgreSQL integration fixture/scenarios 在 S10-04 接入运行期 DbClient 后落地，并在 S12 目标环境签署。
 
 #### P1-S10-04 Composition Root、DbClient 与 RLS 上下文
 
 - 在 bootstrap 层创建 DbClient、Repository、UnitOfWork、Use Case、QueryService、Controller 和 Filter 的唯一装配入口。
+- request-serving DbClient 使用受 FORCE RLS 约束的普通应用角色；`PostgresActiveCurrencyQuery` 使用独立后台只读角色/连接。两个连接不得混用，后台特权 client 不得注入 Controller 或用户 Use Case。
 - 鉴权后在每请求/每事务执行 `SET LOCAL app.current_user_id` 或等价安全方案；连接归还连接池前不得残留用户上下文。
 - 未设置、非法或跨用户上下文必须 fail closed，并由测试证明连接池复用不会串租户。
 - 启动时校验数据库配置、JWT 密钥和必要依赖，失败时给出不含敏感信息的明确日志。
@@ -417,6 +423,8 @@ P1-S12 Phase 1 测试收尾与文档回写
 #### P1-S10-06 注册、登录与 Token 生命周期
 
 - 实现 register、login、refresh、logout 四条认证路径。
+- 注册使用单一 bootstrap UoW：先在无租户状态插入 User，取得 `UserId` 后在同一 Transaction 上一次性绑定 RLS tenant，再初始化 UserPreference、默认分类、`categories_initialized`、同步审计与 outbox；任一步失败全部回滚。
+- 为上述流程补充只能绑定一次且首条租户 SQL 前必须绑定的 transaction tenant-scope 契约；普通认证请求仍在事务开始前由 JWT userId 预绑定。
 - 实现密码哈希、JWT 签发与校验、`iss/aud/sub/sid/jti/iat/nbf/exp` 校验和 `JwtFilter` 请求上下文注入。
 - Refresh Token 只持久化哈希，刷新时执行 rotation；复用已撤销 token 时撤销整个 token family/session。
 - logout 同事务撤销 refresh token、记录 access token `jti` 并写审计/outbox 事实。
@@ -460,8 +468,8 @@ P1-S12 Phase 1 测试收尾与文档回写
 #### P1-S10-11 API 回归与交付总结
 
 - 启动测试版 Drogon App，覆盖认证、主要成功路径、错误映射、TraceId 和异常脱敏。
-- 运行 Windows Debug 构建、当前 271 个既有测试和新增 API 测试。
-- 回写 `Docs/Development/Tasks.md`，更新 `Phase_1_S10_Delivery_Summary.md`，记录尚待外部机器验证的项目。
+- 运行 Windows Debug 构建、当前 273 个既有测试和新增 API 测试。
+- 回写 `Docs/Development/tasks.md`，更新 `Phase_1_S10_Delivery_Summary.md`，记录尚待外部机器验证的项目。
 
 产物：可重复执行的 API 测试集与 S10 交付总结。
 
@@ -577,7 +585,7 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S12-07 文档定稿与分支交付
 
-- 回写 `Docs/Development/Tasks.md`、测试基线、环境记录和 `Phase_1_S12_Delivery_Summary.md`。
+- 回写 `Docs/Development/tasks.md`、测试基线、环境记录和 `Phase_1_S12_Delivery_Summary.md`。
 - 已验收的阶段交付总结按文档规范归档；未完成项继续留在 Tasks，不以说明文字代替验收。
 - 审核架构、代码和 API 契约；存在偏差时先明确设计结论，再修代码或文档。
 - 所有阻断项通过后，才允许将完整 Phase 1 分支合并到 `main`。

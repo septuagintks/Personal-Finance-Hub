@@ -126,7 +126,7 @@ CREATE POLICY rls_transactions ON transactions
     WITH CHECK (user_id = pfh_current_user_id());
 ```
 
-- 应用在鉴权后必须 `SET app.current_user_id = '<uid>'`（每连接/每事务）。
+- 应用在鉴权后必须在固定数据库事务上执行 `SET LOCAL app.current_user_id = '<uid>'`，后续 RLS SQL 使用同一事务；事务结束自动清除上下文。
 - Fail-closed：未设置 GUC → 租户 id 解析为 NULL → 无任何行可见/可写。
 - 覆盖：accounts、categories、transactions、transfer_groups、transaction_tags、
   transaction_tag_relations、account_balance_cache、user_preferences。
@@ -206,4 +206,4 @@ DELETE FROM exchange_rates WHERE source = 'Test';             -- 应失败
 - [Database Migration Guide](../Guides/Database_Migration_Guide.md)
 - [Phase 1 Detailed Plan](../Development_Plans/Phase_1/Phase_1_Detailed_Development_Plan.md)
 - [S08 Delivery Summary](Phase_1_S08_Delivery_Summary.md)
-- [Tasks](Tasks.md)
+- [tasks](tasks.md)

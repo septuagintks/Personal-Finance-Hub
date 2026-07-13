@@ -317,18 +317,23 @@ INSERT INTO system_category_templates (name, locale, group_name, default_board, 
    - 其次解析 Accept-Language Header
    - 回退到 "zh-CN"
 
-3. [Use Case] 创建 User 和 password_hash.
+3. [Use Case] 校验注册输入并生成 password_hash。
 
-4. [Use Case] 开启 uow->executeInTransaction():
+4. [Use Case] 开启未绑定租户的 bootstrap uow->executeInTransaction()：
 
-5.   [PreferenceRepository]
+5.   [UserRepository]
+     - INSERT User 并取得数据库分配的 userId
+     - 在当前事务上将 tenant scope 一次性绑定为该 userId
+     - 绑定后执行 SET LOCAL app.current_user_id，禁止再次切换租户
+
+6.   [PreferenceRepository]
      - INSERT INTO user_preferences
      - baseCurrency 来自注册 DTO 或地区默认值
      - locale 使用步骤 2 确定的语言
      - timezone 根据 locale 推断（如 en-US → America/New_York, zh-CN → Asia/Shanghai）
      - theme 默认 'system'
 
-6.   [CategoryRepository]
+7.   [CategoryRepository]
      a. 查询系统模板：
         SELECT * FROM system_category_templates
         WHERE locale = $1 AND default_board = 'income'
@@ -341,28 +346,29 @@ INSERT INTO system_category_templates (name, locale, group_name, default_board, 
         SELECT $userId, name, default_board, 'system', id
         FROM system_category_templates
         WHERE locale = $locale AND default_board IN ('income', 'expense')
-        ON CONFLICT (user_id, name, COALESCE(parent_id, -1))
+        ON CONFLICT (user_id, board, parent_id, name)
         DO UPDATE SET updated_at = NOW();
 
-7.   [AuditLogRepository]
+8.   [UserRepository / AuditLogRepository / UnitOfWork]
+     - 将 users.categories_initialized 更新为 TRUE
      - 写入 Action=Create, Resource=UserDefaults
      - metadata 包含 locale 和初始化的分类数量
+     - 在提交前登记 UserRegistered 事件，由同一事务写入 outbox
 
-8. [Use Case] Commit.
-9. [Use Case] 注册 UserRegistered 事件（可选，用于异步欢迎邮件等）
+9. [Use Case] 业务数据与 outbox 一起 Commit；任一步失败则全部回滚。
 ```
+
+bootstrap UoW 的“无租户”状态只允许访问 `users`、系统模板等非 RLS 数据。取得新 `userId` 后必须在首条租户表 SQL 前完成一次性绑定；普通已认证请求仍在事务开始前预绑定 JWT 中的 `userId`。禁止为了初始化默认数据拆成多个独立提交，也禁止用后台特权连接绕过该流程。
 
 ### 7.3 注册初始化幂等性与并发冲突防御
 
 如果用户在注册过程中，由于网络抖动导致前端重复提交，或者初始化分类事务执行缓慢，可能会导致产生重复的分类数据或唯一约束冲突。为此，系统采用三层防御机制：
 
 1. **第一层（应用层）**：在 `users` 表或 `user_preferences` 表中引入 `categories_initialized` 状态标志。这是防止重复初始化的主要手段。
-2. **第二层（数据库层）**：在 `categories` 表上建立唯一索引，并使用 `ON CONFLICT DO UPDATE`（非 `DO NOTHING`，以便触发 `updated_at` 刷新，保留可观测性）作为兜底。
-   - **注意**：由于根分类的 `parent_id` 为 `NULL`，而 SQL 中 `NULL != NULL`，因此唯一索引必须使用 `COALESCE` 或部分索引（Partial Index）来处理：
-     ```sql
-     CREATE UNIQUE INDEX uq_categories_user_name_parent
-     ON categories (user_id, name, COALESCE(parent_id, -1));
-     ```
+2. **第二层（数据库层）**：`categories` 使用 V1 schema 的 `UNIQUE NULLS NOT DISTINCT (user_id, board, parent_id, name)`，并以相同四列执行 `ON CONFLICT DO UPDATE`（非 `DO NOTHING`，以便触发 `updated_at` 刷新，保留可观测性）。`NULLS NOT DISTINCT` 确保两个根分类的 `parent_id = NULL` 仍会发生唯一冲突：
+   ```sql
+   UNIQUE NULLS NOT DISTINCT (user_id, board, parent_id, name)
+   ```
 3. **第三层（监控层）**：对数据库的 `ON CONFLICT` 触发次数进行监控告警，以便及时发现前端防抖失效或恶意重放攻击。
 
 ### 7.4 语言回退机制
@@ -408,8 +414,8 @@ std::string determineInitializationLocale(const std::string& preferredLocale) {
    - 检查该用户是否已有分类
    - 重复调用不能产生重复分类
 5. **初始化失败处理**：
-   - 注册事务必须回滚
-   - 或标记用户为"待完成初始化"状态，后台补偿
+   - 注册 bootstrap 事务必须整体回滚，不能留下已提交但默认数据不完整的用户
+   - 若未来改用后台补偿模型，必须先单独设计可恢复状态机、幂等重试与登录门禁，不能在 Phase 1 静默拆分事务
 
 ### 7.6 前端国际化配合
 

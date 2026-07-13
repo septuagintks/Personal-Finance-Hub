@@ -271,57 +271,35 @@ public:
 // infrastructure/persistence/DrogonUnitOfWork.cpp (改造片段)
 #include "domain/events/IDomainEvent.hpp"
 
-class DrogonUnitOfWork : public IUnitOfWork {
-private:
-    drogon::orm::DbClientPtr dbClient_;
-    std::vector<std::shared_ptr<IDomainEvent>> pendingEvents_;
+auto committed = std::make_shared<std::promise<bool>>();
+auto completion = committed->get_future();
+auto transaction = dbClient_->newTransaction(
+    [committed](bool ok) { committed->set_value(ok); });
+RlsSession::setAppUserId(transaction, tenantUserId);
 
-public:
-    DrogonUnitOfWork(drogon::orm::DbClientPtr dbClient)
-        : dbClient_(dbClient) {}
-
-    void registerEvent(std::shared_ptr<IDomainEvent> event) override {
-        pendingEvents_.push_back(std::move(event));
+{
+    DrogonTransactionContext context(transaction, tenantUserId);
+    auto result = action(context);
+    if (!result) {
+        transaction->rollback();
+        pendingEvents_.clear();
+        return std::unexpected(result.error());
     }
 
-    std::expected<void, RepositoryError> executeInTransaction(
-        std::function<std::expected<void, RepositoryError>(ITransactionContext& tx)> action) override
-    {
-        pendingEvents_.clear(); // 清理旧事件
-        auto trans = dbClient_->newTransaction();
-        DrogonTransactionContext txContext(trans);
-
-        auto result = action(txContext);
-
-        if (result.has_value()) {
-            try {
-                // 先在同一事务中写入 outbox，再提交业务事实
-                for (const auto& ev : pendingEvents_) {
-                    auto payload = serializeDomainEvent(*ev);
-                    trans->execSqlSync(
-                        "INSERT INTO domain_events_outbox (id, event_name, aggregate_type, aggregate_id, payload, status, retry_count, max_retry_count, next_retry_at, occurred_at, created_at) "
-                        "VALUES ($1, $2, $3, $4, $5, 'pending', 0, 5, NOW(), $6, NOW())",
-                        generateOutboxId(), ev->getEventName(), getAggregateType(*ev), getAggregateId(*ev), payload, ev->getOccurredAt()
-                    );
-                }
-
-                trans->commit();
-                pendingEvents_.clear();
-                return {};
-            } catch (const std::exception& e) {
-                LOG_ERROR << "Transaction commit or outbox write failed physically: " << e.what();
-                trans->rollback();
-                pendingEvents_.clear();
-                return std::unexpected(RepositoryError{RepositoryStatus::DatabaseError, "Outbox write or commit failed"});
-            }
-        } else {
-            // 显式回滚，直接丢弃暂存的事件
-            trans->rollback();
-            pendingEvents_.clear();
-            return std::unexpected(result.error());
-        }
+    auto outbox = writeOutbox(context, pendingEvents_);
+    if (!outbox) {
+        transaction->rollback();
+        pendingEvents_.clear();
+        return std::unexpected(outbox.error());
     }
-};
+}
+
+transaction.reset(); // Drogon commits when the last owner is released
+pendingEvents_.clear();
+if (!completion.get()) {
+    return std::unexpected(RepositoryError::database("commit failed"));
+}
+return {};
 ```
 
 ## 说明：`serializeDomainEvent`、`generateOutboxId`、`getAggregateType`、`getAggregateId` 由基础设施层实现。它们只负责把领域事件转换为 outbox 行，不负责真正的 handler 执行。

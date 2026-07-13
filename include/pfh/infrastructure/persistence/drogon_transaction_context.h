@@ -8,11 +8,13 @@
 #pragma once
 
 #include "pfh/domain/repositories/i_transaction_context.h"
+#include "pfh/domain/user.h"
 
 #ifdef PFH_HAS_POSTGRESQL
 
 #include <drogon/orm/DbClient.h>
 #include <memory>
+#include <optional>
 
 namespace pfh::infrastructure {
 
@@ -24,15 +26,21 @@ namespace pfh::infrastructure {
 class DrogonTransactionContext final : public domain::ITransactionContext {
 public:
     explicit DrogonTransactionContext(
-        const std::shared_ptr<drogon::orm::Transaction>& tx)
-        : tx_(tx) {}
+        const std::shared_ptr<drogon::orm::Transaction>& tx,
+        std::optional<domain::UserId> tenant_user_id = std::nullopt)
+        : tx_(tx), tenant_user_id_(tenant_user_id) {}
 
     /// @brief Access the underlying Drogon transaction for SQL execution.
     /// Non-const: execCommand/execSqlAsync mutate the transaction state.
     [[nodiscard]] drogon::orm::Transaction& transaction() const { return *tx_; }
+    [[nodiscard]] bool is_valid() const noexcept { return tx_ != nullptr; }
+    [[nodiscard]] std::optional<domain::UserId> tenant_user_id() const noexcept {
+        return tenant_user_id_;
+    }
 
 private:
     std::shared_ptr<drogon::orm::Transaction> tx_;
+    std::optional<domain::UserId> tenant_user_id_;
 };
 
 }  // namespace pfh::infrastructure

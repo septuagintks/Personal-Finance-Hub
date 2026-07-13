@@ -10,6 +10,7 @@
 #pragma once
 
 #include "pfh/domain/balance_calculation_service.h"
+#include "pfh/application/ports/i_active_currency_query.h"
 #include "pfh/domain/repositories/i_account_repository.h"
 #include "pfh/domain/repositories/i_transaction_repository.h"
 #include "pfh/infrastructure/persistence/in_memory_store.h"
@@ -19,7 +20,9 @@
 
 namespace pfh::infrastructure {
 
-class InMemoryAccountRepository final : public domain::IAccountRepository {
+class InMemoryAccountRepository final
+    : public domain::IAccountRepository,
+      public application::IActiveCurrencyQuery {
 public:
     InMemoryAccountRepository(
         InMemoryStore& store,
@@ -93,7 +96,7 @@ public:
         return result;
     }
 
-    [[nodiscard]] domain::RepositoryResult<std::vector<domain::Currency>> find_active_currencies()
+    [[nodiscard]] domain::RepositoryResult<std::vector<domain::Currency>> list_active_currencies()
         override {
         std::map<std::int64_t, domain::Account> merged = store_.accounts;
         if (store_.in_transaction) {
@@ -114,6 +117,19 @@ public:
             const auto& code = acc.currency().code();
             if (seen.insert(code).second) {
                 result.push_back(acc.currency());
+            }
+        }
+
+        auto users = store_.users;
+        if (store_.in_transaction) {
+            for (const auto& [id, user] : store_.staged_users) {
+                users.insert_or_assign(id, user);
+            }
+        }
+        for (const auto& [_, user] : users) {
+            const auto& code = user.base_currency.code();
+            if (seen.insert(code).second) {
+                result.push_back(user.base_currency);
             }
         }
         return result;

@@ -1,6 +1,6 @@
 # Personal Finance Hub (PFH) - Phase 1 待办任务跟踪
 
-Version: 1.7
+Version: 1.8
 Backend: C++23
 Architecture: Clean Architecture + Lightweight DDD
 Status: Active
@@ -30,7 +30,7 @@ Status: Active
 
 ### 2.1 近期顺序
 
-1. 执行 P1-S10-02 至 S10-04，落地 CMake 分层目标、PostgreSQL Repository、`DrogonUnitOfWork`、composition root 与 RLS 上下文。
+1. 执行 P1-S10-04，落地 production composition root、运行期 DbClient 与请求级租户装配；S10-02/S10-03 的实现已完成静态审查。
 2. 执行 P1-S10-05 至 S10-10，按统一 HTTP 边界、认证、基础资源、Transaction、Transfer、Report 的顺序接入 `/api/v1`。
 3. 执行 P1-S10-11，补齐 API 测试并完成 S10 交付总结；S10 完整通过后进入 P1-S11。
 4. P1-S12 在另一台机器完成 Linux、Docker、PostgreSQL 16+、Debug/Release 和真实运行时阻断门禁。
@@ -39,9 +39,10 @@ Status: Active
 
 - P1-S01 至 P1-S09 的 Domain、Application 与 In-Memory 验证基线已完成。
 - P1-S10 以 `Docs/Development_Plans/Phase_1/Phase_1_Detailed_Development_Plan.md` 的 3.10 节为执行边界。
-- P1-S10-01 已完成，当前 Windows GCC 16 基线为 254 个 unit/use-case、16 个 In-Memory integration 和 1 个 migration gate，共 271/271。
+- P1-S10-01 至 S10-03 已完成实现；当前 Windows GCC 16 基线为 255 个 unit/use-case、16 个 In-Memory integration、1 个 migration gate 和 1 个 PostgreSQL adapter contract gate，共 273/273。
 - CMake configure 必须通过 `std::chrono` IANA tzdb 能力探测；Linux 运行环境必须安装 `tzdata`。
-- PostgreSQL/Drogon 真实适配器仍属于 #46，生产写路径不得以 In-Memory 结果代替连库验收。
+- PostgreSQL/Drogon 核心适配器已实现并纳入离线编译门禁，但尚未在真实 Drogon/PostgreSQL 上执行 fixture；生产写路径不得以静态门禁或 In-Memory 结果代替 #46/S12 连库验收。
+- S10-04 必须分别装配 request RLS DbClient 与后台只读 DbClient；`PostgresActiveCurrencyQuery` 的跨租户权限不得泄漏到 Controller/普通用户用例。
 
 ---
 
@@ -106,15 +107,15 @@ Status: Active
   - 更正（S09 review item 16）：Flyway 迁移脚本（V1–V3）与连接**配置**（`DatabaseConfig` + env overlay，含 `PFH_DB_*` 与端口合法性校验）已交付；但运行期真实 Drogon `DbClient` 连接池接线未完成，随 #46 一并落地。
 - [x] 编写 Phase 1 初始迁移，覆盖用户、偏好、账户、分类、流水、汇率、余额缓存和 outbox 表 <!-- id: 29 -->
 - [~] 实现 `DrogonUnitOfWork`，确保业务写入和 outbox 写入使用同一数据库事务上下文 <!-- id: 30 -->
-  - 更正（S09 review item 16）：当前交付为 `IUnitOfWork` + `InMemoryUnitOfWork`（语义等价，业务写入与 outbox 同事务提交/回滚，事件 occurred_at 落库），可在无 DB 环境验证。**`DrogonUnitOfWork` SQL 适配器尚未实现**，随 #46 落地，接口不变。
+  - S10-03 进展：`DrogonUnitOfWork` 已实现同一 Drogon Transaction 内业务写入 + outbox、异常回滚、事务级 RLS 和 commit callback 确认；离线 adapter compile gate 通过。真实提交失败、回滚和 outbox 原子性仍随 #46/S12 连库验证。
 - [~] 实现 `UserRepository` 与 `UserPreferenceRepository` <!-- id: 31 -->
-  - 更正（S09 review item 16）：Domain 接口 + In-Memory 实现已完成（含事务内 read-your-writes、偏好默认值对齐 schema）；**PostgreSQL 实现待接线（#46）**。
+  - S10-03 进展：Domain、In-Memory 与 PostgreSQL 实现均已交付；偏好 fallback 与 RLS 读取固定在同一短事务。composition root 接线和真实 read-your-writes 复核仍归 #46/S10-04/S12。
 - [~] 实现 `AccountRepository` 与 `TransactionRepository`，覆盖用户隔离、乐观锁和余额缓存更新 <!-- id: 32 -->
-  - 更正（S09 review item 16）：Domain 接口 + In-Memory 实现已完成，规则由集成测试覆盖（用户隔离、乐观锁、余额缓存、FOR UPDATE 锁定读入口、转账聚合级联删除）；**PostgreSQL 实现待接线（#46）**。
+  - S10-03 进展：PostgreSQL 实现已覆盖 request-scoped RLS、`FOR UPDATE NOWAIT`、同事务乐观锁检查、余额缓存、signed 流水、Transfer + Adjustment 聚合保存/级联删除；真实并发和 NUMERIC round-trip 仍归 #46/S12。
 - [~] 实现 `ExchangeRateRepository`，保证汇率 append-only 和历史时间点查询 <!-- id: 33 -->
-  - 更正（S09 review item 16）：Domain 接口 + In-Memory 实现已完成；**PostgreSQL 实现待接线（#46）**。
+  - S10-03 进展：PostgreSQL append 与 latest/historical/pair 查询已实现并通过离线编译门禁；真实 DB append-only trigger 与时间 round-trip 仍归 #46/S12。
 - [~] 实现 `ICategoryRepository`，供创建流水校验真实分类并支持报表按一级分类聚合 <!-- id: 33a -->
-  - 说明（S09 review）：Domain 接口、In-Memory 实现、事务内锁定读入口、`CreateTransactionUseCase` 与报表接线均已完成；**PostgreSQL 实现仍随 #46/#47 落地**。
+  - S10-03 进展：PostgreSQL 实现已覆盖租户读取、锁定读、父子 board 校验与 root 回溯；真实 RLS/并发场景复核仍随 #46/#47/S12 落地。
 - [ ] 实现 `OutboxPublisherJob`，支持 pending、failed、重试次数和 dead letter 记录 <!-- id: 34 -->
 
 ### 3.7 应用层用例 (Application Use Cases)
@@ -152,7 +153,7 @@ Status: Active
 - 实现符合对应 `Docs/Architecture/` 设计文档。
 - 覆盖关键成功路径、边界条件和错误路径测试。
 - 金额、汇率、认证、事务和事件相关代码不得绕过文档中的强约束。
-- 所有跨用户查询和唯一约束必须显式包含 `user_id` 或通过关联关系强约束用户边界。
+- 所有租户查询和唯一约束必须显式包含 `user_id` 或通过关联关系强约束用户边界；确需跨租户的后台查询必须使用独立 Application 端口、最小权限只读角色和专用连接，不得复用 request DbClient。
 
 ### 4.3 测试类任务
 
@@ -169,27 +170,28 @@ Status: Active
 
 ### 5.1 高优先级（进入生产写路径前必须解决）
 
-- [ ] 接入真实持久化：实现 `DrogonUnitOfWork` 与 PostgreSQL 版 `*RepositoryImpl`，替换现有 In-Memory 实现；用同一批 integration scenarios 对真实测试库复跑 <!-- id: 46 -->
-  - 说明：当前 S08 交付为「Domain 接口 + In-Memory 语义等价实现」，规则可测但未连库；#30–#33 的 Drogon 适配器部分尚未完成。
+- [~] 接入真实持久化：实现 `DrogonUnitOfWork` 与 PostgreSQL 版 `*RepositoryImpl`，替换现有 In-Memory 实现；用同一批 integration scenarios 对真实测试库复跑 <!-- id: 46 -->
+  - S10-03 进展：核心 PostgreSQL Repository 与 UoW 已实现，并由 OFF 模式下的全源编译门禁和结构契约门禁覆盖；尚未完成 S10-04 production composition root 与真实测试库 scenarios，因此不得标记完成。
   - 执行归属：适配器、composition root 与测试场景在 P1-S10-03/S10-04 落地；真实 PostgreSQL 复跑与签署在另一台机器的 P1-S12-03 完成。
-  - RLS 依赖：真实仓储在鉴权后必须对数据库连接执行 `SET app.current_user_id = '<uid>'`（每请求/每事务），否则 fail-closed 策略会使查询返回空。连接池复用时须在归还前 `RESET`。
+  - RLS 依赖：租户仓储必须在固定 Drogon Transaction 上先执行 `SET LOCAL app.current_user_id`，并在同一 Transaction 上完成后续 SQL；事务结束自动清除 GUC。禁止对普通池化 `DbClient` 先 SET 再查询，也禁止依赖手工 RESET 修复连接亲和性。
   - In-Memory 模型仍缺 `transaction_tag_relations.user_id`、`account_balance_cache.user_id` 等新增列的对应；接 SQL 时以迁移 schema 为准。
 - [~] 实现 `ICategoryRepository`，由仓储解析分类 board，替换 `CreateTransactionCommand.category_board` 的显式传入方式 <!-- id: 47 -->
   - 进展（S09 review 收尾）：已交付接口 + In-Memory 实现（含锁定读取与 `resolve_root_id_for_user`），`CreateTransactionUseCase` 已将分类仓储设为必需依赖并按 `user_id + category_id` 读取真实 board；命令中的 `category_board` 已移除，报表也已接入一级分类聚合。
-  - 剩余：实现 PostgreSQL `CategoryRepositoryImpl` 并用真实事务/并发场景复核（随 #46、S12）。
+  - 剩余：PostgreSQL `CategoryRepositoryImpl` 已实现；仍需用真实事务、RLS 与并发场景复核（随 #46、S12）。
 - [x] 实现转账手续费 / 汇兑损益承载路径：`CreateTransferCommand` 支持 `FeeSource`、手续费金额与可选第三方账户，用例构造独立 signed `Adjustment`，并测试余额、cash flow、原子回滚与级联删除 <!-- id: 48 -->
   - P1-S10-01 已完成 Application/Domain/Repository 接线；P1-S10-09 只负责 Transfer API 暴露。手续费为负 Adjustment，未来 FX gain/loss 继续复用 signed Adjustment；在没有市场基准汇率输入时不自动虚构汇兑损益。
 
 ### 5.2 中优先级
 
-- [ ] 实现 `ITagRepository` 与 `IAuditLogRepository` 及对应用例，打通标签与审计闭环（P1-S10-03/S10-07、P1-S11-03）<!-- id: 49 -->
+- [ ] 实现 `ITagRepository` 与 `IAuditLogRepository` 及对应用例，打通标签与审计闭环（Tag 随 P1-S10-07；高危同步审计随 S10-06/S10-07；异步审计处理器随 P1-S11-03）<!-- id: 49 -->
 - [x] 明确 `transactions` 并发更新策略：Phase 1 采用追加 + 软删除，不提供普通更新，不增加行级 `version`；账户聚合并发继续使用 `Account.version` <!-- id: 50 -->
-- [ ] PostgreSQL `AccountRepositoryImpl` 的余额缓存 `source_version` 必须严格对齐 schema 的 `version` 语义（`MAX(version)` 或等价），不得照搬 In-Memory 的「未删除流水条数」简化实现（P1-S10-03/S12-03）<!-- id: 51 -->
+- [~] PostgreSQL `AccountRepositoryImpl` 的余额缓存 `source_version` 必须严格对齐 schema 的 `version` 语义（`MAX(version)` 或等价），不得照搬 In-Memory 的「未删除流水条数」简化实现（P1-S10-03/S12-03）<!-- id: 51 -->
+  - S10-03 已实现 `MAX(version)` + 最新流水 ID 双校验、同事务 rebuild/UPSERT，以及全部流水写路径缓存失效；真实 PostgreSQL 命中、失效和并发复核保留到 S12-03。
 - [x] 明确转账删除边界：Phase 1 不注册转账删除路由；待 `DeleteTransferUseCase` 支持两端与调整项聚合级联并通过测试后再开放 <!-- id: 52 -->
 
 ### 5.3 低优先级 / 技术债
 
-- [ ] 落地 `pfh_application` / `pfh_infrastructure` / `pfh_presentation` CMake 库目标；随实现规模增长把 header-only 用例拆出 `.cpp`（P1-S10-02）<!-- id: 53 -->
+- [x] 落地 `pfh_application` / `pfh_infrastructure` / `pfh_presentation` CMake 库目标；当前 Application/Presentation 仍为明确的 `INTERFACE` 目标，后续出现稳定 `.cpp` 实现时再自然转为编译库（P1-S10-02）<!-- id: 53 -->
 - [x] 报表命名对齐：Phase 1 以 `ReportQueryService` 承载最小报表读路径，不另设 `GenerateMonthlyReportUseCase` <!-- id: 54 -->
 - [x] DTO 金额符号说明：API 设计文档已明确业务 magnitude、signed Adjustment 与存储层带符号金额的边界 <!-- id: 55 -->
 - [ ] `TransferResultDto` 金额来源为 Domain 正数幅度，与持久化带符号存储不同；在表现层统一对外表示口径（P1-S10-05/S10-09）<!-- id: 56 -->
@@ -256,4 +258,18 @@ S10 报告 §4.2 暴露：V3 中 7 段二级分类 `INSERT ... SELECT ... UNION 
 - 源、目标和第三方手续费账户在同一事务内按 ID 升序锁定；聚合保存为 group + 双边流水 + Adjustment + outbox 原子边界。
 - 修复 In-Memory grouped Adjustment 未替换真实 group ID、聚合删除遗漏 Adjustment、普通流水仓储未校验账户币种三个缺口。
 - 新增 17 项测试；当前 Windows GCC 16 Debug 基线为 254 unit/use-case + 16 In-Memory integration + 1 migration gate，合计 271/271 PASS。
-- P1-S10 仍在进行中；下一步为 P1-S10-02，真实 PostgreSQL 聚合语义继续由 #46 与 P1-S12 阻断。
+- 该 271 项数字是 S10-01 当时基线；S10-02/S10-03 review 后当前基线见第 8 节。
+
+---
+
+## 8. P1-S10-02/S10-03 review 收尾记录
+
+- 修复 CMake 错用未设置的 `PFH_HAS_POSTGRESQL` 条件，确保 ON 模式真实加入/链接 PostgreSQL 源；落地 Application/Infrastructure/Presentation 与 test-support 分层目标。
+- 增加 OFF 模式 PostgreSQL 全源 compile gate 和 `postgresql_adapter_contracts`，当前 Windows GCC 16 Debug 基线为 273/273。
+- 修复全部 TypedId `.value` 误用、`HomePage` 类型漂移和头文件 include 顺序依赖。
+- 租户 Repository 改为 request-scoped；所有 RLS 读取固定在短 Transaction 内执行 `SET LOCAL`，不再依赖池化 DbClient 连接亲和性或手工 RESET。
+- 系统级活跃币种查询从 `IAccountRepository` 拆为 `IActiveCurrencyQuery`；PostgreSQL adapter 明确要求独立后台只读角色，避免无用户 Scheduler 与 FORCE RLS 语义冲突。
+- `DrogonUnitOfWork` 改用 Transaction 生命周期 + commit callback 确认提交；异常、outbox 失败和 action error 均回滚并清空事件。
+- PostgreSQL 流水写入补账户币种、分类 board、NUMERIC 与 tenant 校验；Transfer Adjustment 使用新 group ID，危险删除覆盖 tag relations、第三方手续费账户与完整聚合。
+- 余额缓存实现 `MAX(version)` + 最新流水 ID 双校验、同事务 rebuild/UPSERT 与全写路径失效。
+- 当前实现可进入 S10-04；真实 Drogon ABI、PostgreSQL fixture、RLS/锁/事务/NUMERIC 行为仍由 #46 与 S12 阻断。

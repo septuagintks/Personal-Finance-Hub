@@ -45,7 +45,7 @@
 | 孤儿、父子 board 不一致、非 `zh-CN` | 均为 0 |
 | 外部 Linux ARM64 CTest | 254/254 PASS |
 
-该结果关闭 `Tasks.md` #58，但不关闭 #46。外部复测时尚无 PostgreSQL Repository、`DrogonUnitOfWork` 或真实 fixture，不能据此验收事务、RLS、行锁、连接池 session reset 或 NUMERIC round-trip。
+该结果关闭 `tasks.md` #58，但不关闭 #46。外部复测时尚无 PostgreSQL Repository、`DrogonUnitOfWork` 或真实 fixture，不能据此验收事务、RLS、行锁、连接池租户上下文隔离或 NUMERIC round-trip。
 
 ---
 
@@ -119,7 +119,7 @@
 
 ```text
 build: PASS
-unit/use-case: 254
+unit/use-case: 255
 In-Memory integration: 16
 migration enum-cast gate: 1
 CTest: 271/271 PASS
@@ -128,7 +128,7 @@ failed: 0
 
 相较外部 V3 复测时的 254 项基线，本次新增 17 项测试：6 个 Domain、8 个 Use Case、3 个 Repository integration 场景。
 
-271 项本地结果仍不包含真实 PostgreSQL adapter。P1-S10-03/S10-04 完成后，必须用 PostgreSQL fixture 重跑聚合原子性、NUMERIC、RLS、行锁和连接池上下文场景。
+S10-03 review 后本地基线增加 `postgresql_adapter_contracts`，并让 PostgreSQL 适配器在 OFF 模式下也通过 API stub 执行全源语法编译。该结果仍不包含真实 Drogon ABI 或 PostgreSQL 行为；S10-04 接入运行期 DbClient 后，必须用 PostgreSQL fixture 重跑聚合原子性、NUMERIC、RLS、行锁和连接池上下文场景。
 
 ---
 
@@ -136,13 +136,13 @@ failed: 0
 
 ### 6.1 S10-02：Drogon/PostgreSQL 依赖与分层 CMake
 
-- 新增 `PFH_BUILD_POSTGRESQL` 选项（默认 OFF），当 OFF 时只编译 In-Memory 实现，允许无数据库的本地开发。
+- 新增 `PFH_BUILD_POSTGRESQL` 选项（默认 OFF）。OFF 时运行 In-Memory 服务/测试，同时通过 `pfh_postgresql_adapter_compile_gate` 编译全部 PostgreSQL 翻译单元；ON 时把这些源文件加入真实 `pfh_infrastructure`。
 - 当 `PFH_BUILD_POSTGRESQL=ON` 时，CMake 通过 `find_package` 强制要求 Drogon 和 PostgreSQL 库。
-- 新增分层库目标：`pfh_domain` → `pfh_application` → `pfh_infrastructure` → `pfh_presentation`。
+- 新增分层目标：`pfh_domain`、header-only `pfh_application`、`pfh_infrastructure`、header-only `pfh_presentation` 和 `pfh_server`。
 - Domain 层保持零外部依赖，不链接 Drogon、PostgreSQL 或 spdlog。
-- Application 层仅依赖 Domain，Infrastructure 和 Presentation 可选链接 Drogon。
+- Application 层仅依赖 Domain；Infrastructure 实现 Application/Domain 端口；Presentation 依赖 Application，并只在 PostgreSQL/Drogon 生产模式链接 Drogon。
 - 新增 `pfh_test_support` 库，供 unit/integration 测试共享 fixture 与 test helpers。
-- 构建门禁在 Windows GCC 16 / PostgreSQL OFF 和外部 Linux ARM64 / PostgreSQL OFF 均通过。
+- 当前 HEAD 的 Windows GCC 16 / PostgreSQL OFF 构建、全量适配器离线编译与 CTest 均通过。外部 Linux ARM64 结果来自较早迁移复测提交，不能冒充当前 S10-03 实现验证。
 
 ### 6.2 S10-03：PostgreSQL Repository 实现
 
@@ -150,50 +150,56 @@ failed: 0
 
 | 适配器类 | 功能概要 |
 | -------- | -------- |
-| `PostgresUserRepository` | CREATE、find by id、find by username；user_id 不对外暴露主键值 |
-| `PostgresUserPreferenceRepository` | find by user、upsert（base_currency + extended JSON）|
-| `PostgresAccountRepository` | 创建、查询、更新、归档；余额缓存 hit/miss/rebuild；FOR UPDATE 锁定读 |
-| `PostgresTransactionRepository` | save_single（income/expense/adjustment）、save_transfer（聚合 + 手续费）、软删除、按账户物理删除 |
-| `PostgresExchangeRateRepository` | append、find_latest、find_historical、find_all_for_pair；历史时间点 `<=` 查询 |
-| `PostgresCategoryRepository` | 创建、查询、软删除、root id 回溯、分类 board 校验、父子一致性 |
-| `DrogonUnitOfWork` | `execute_in_transaction` + rollback on error；outbox 与业务写入同事务 commit |
+| `UserRepositoryImpl` | create、find by id/username、save；提供事务感知读取，全局用户表写入额外校验“未绑定注册事务创建 / 同用户事务更新” |
+| `UserPreferenceRepositoryImpl` | request-scoped find/fallback 与 upsert；事务感知重载保证 `users`/`user_preferences` read-your-writes |
+| `AccountRepositoryImpl` | 创建、查询、乐观锁更新、`FOR UPDATE NOWAIT`、余额缓存 hit/miss/rebuild |
+| `TransactionRepositoryImpl` | signed 单笔流水、Transfer + Adjustment 聚合保存、软删除、聚合物理删除与缓存失效 |
+| `ExchangeRateRepositoryImpl` | append、latest、historical、pair history；历史查询使用 `fetched_at <= target_time` |
+| `CategoryRepositoryImpl` | request-scoped 查询/保存、锁定读、父子 board 校验、root id 回溯 |
+| `PostgresActiveCurrencyQuery` | 合并未归档账户币种与用户报表基准币种；要求独立后台只读连接 |
+| `DrogonUnitOfWork` | 同一 Transaction 内业务写入 + outbox、异常回滚、commit callback 确认 |
 
 **NUMERIC 映射与精度**：
 
-- PostgreSQL `NUMERIC(28,10)` 使用服务端 scale，客户端通过字符串 round-trip 避免浮点截断。
+- schema 金额列使用 `NUMERIC(20,8)`，汇率列使用 `NUMERIC(20,10)`，Transfer 快照列使用 `NUMERIC(30,10)`；客户端通过字符串 round-trip 避免二进制浮点截断。
 - 应用层 `Decimal` 内部 `__int128` scale 固定 10^10，与数据库列 scale 一致。
-- 所有 SQL `INSERT`/`UPDATE` 使用参数化查询，传递十进制字符串；`SELECT` 结果通过 `asString()` 拿到原始 NUMERIC 文本后再由 `Decimal::parse` 重建。
-- 数据库侧不执行任何舍入，应用层保证入库前已按 Half-Even 舍入到正确精度。
+- 所有 SQL `INSERT`/`UPDATE` 使用参数化查询，传递十进制字符串；`SELECT` 结果以字符串读取后由 `Decimal::parse_numeric_20_8/20_10` 重建。
+- Repository 在写入前再次执行 `fits_numeric_20_8/20_10`，拒绝依赖数据库隐式舍入或溢出报错。
 
 **RLS 上下文注入**：
 
-- 每个事务开始后、业务 SQL 执行前，`DrogonUnitOfWork` 自动执行 `SET LOCAL app.current_user_id = $1`，将 `UserId` 注入 session variable。
+- 写路径由 `DrogonUnitOfWork` 在首条业务 SQL 前执行事务级 `SET LOCAL app.current_user_id`；租户读路径也创建短 Transaction，在同一连接上 SET 后查询。
 - PostgreSQL 所有 user-scoped 表的 RLS policy 从 `current_setting('app.current_user_id')::BIGINT` 读取当前用户 id，拒绝跨用户访问。
-- RLS 策略在 Phase 1 实时校验，不依赖 C++ 层用户隔离逻辑；adapter 误传 id 时数据库会直接拒绝写入。
+- request-scoped Repository 同时校验构造时的 tenant、方法参数、实体 owner 与 Transaction context；RLS 作为数据库末端防线。禁止在普通池化 `DbClient` 上 SET 后再发下一条租户查询。
+- `SET LOCAL` 随 commit/rollback 自动清除，不在已结束事务上手工 RESET；S12 仍需证明连接池复用不会串租户。
 
 **乐观锁与行锁**：
 
 - `Account` 更新在 SQL 层校验 `version`，不匹配时返回 0 行，adapter 映射为 `RepositoryStatus::Conflict`。
 - `IAccountRepository::find_by_id_for_update` 执行 `SELECT ... FOR UPDATE NOWAIT`，被锁时立即失败而不阻塞事务。
 - 转账用例在锁定三账户时按 `account_id` 升序排列，降低死锁概率。
+- `balance_of` 在检查/重建缓存前锁定账户；单笔流水写入与软删除也锁定对应账户。危险删除会按 ID 尝试锁定转账两端及 grouped Adjustment 账户，无法立即取得时回滚，避免缓存重建与余额事实并发交错。
 
 **事务边界与异常映射**：
 
-- `DrogonUnitOfWork::execute_in_transaction` 捕获 Drogon `DrogonDbException` 和 C++ `std::exception`，回滚事务并将 PostgreSQL SQLSTATE 映射为统一 `RepositoryError`。
-- 常见 SQLSTATE 映射：`23505` (unique violation) → `Conflict`；`23503` (foreign key) → `NotFound`；`40001` (serialization failure) → `Database`；`23514` (check constraint) → `Validation`。
-- 未知 SQLSTATE 或纯 C++ 异常一律映射为 `RepositoryStatus::Database`，记录完整错误信息供日志追踪。
+- `DrogonUnitOfWork::execute_in_transaction` 捕获 Drogon `DrogonDbException` 和 C++ `std::exception`，失败时回滚并清空本次事件队列。
+- Drogon Transaction 没有直接 `commit()` API；实现释放最后一个 Transaction owner 触发提交，并等待 commit callback 返回 `true` 后才报告成功，禁止执行字面量 `COMMIT`。
+- 用户名/分类唯一约束映射为稳定 `Conflict`；其他底层异常记录完整服务端日志，对 Application 只返回不含 SQL/驱动文本的 `DatabaseError`。当前未声称已经可靠解析全部 SQLSTATE。
 
 **余额缓存 rebuild**：
 
-- `balance_of` 先尝试读取 `balance_cache` 表对应行，校验 `source_version`（= 非删除流水计数）。
-- miss/stale 时调用 `BalanceCalculationService::calculate_balance`，将结果写回 `balance_cache` 表并递增 `cache_version`。
-- 流水 `INSERT`/`UPDATE`/soft-delete 时，Repository 删除对应 `account_id` 的缓存行，下次 `balance_of` 自动 rebuild。
+- `balance_of` 在同一租户事务读取 `account_balance_cache`，同时校验 `source_version = COALESCE(MAX(transactions.version), 0)` 与最新未删除流水 ID；不使用 In-Memory 的流水数量简化规则。
+- miss/stale 时调用 `BalanceCalculationService::calculate_balance`，同事务 UPSERT 缓存并递增 `cache_version`。
+- 单笔流水、Transfer/Adjustment、软删除与聚合物理删除都会删除全部受影响账户缓存，下次 `balance_of` rebuild。
+- 物理删除普通流水时先在同一数据修改 CTE 中删除余额缓存，再删除 tag relations 与流水，避免 `account_balance_cache.last_transaction_id` 外键仍引用待删流水。
 
 **转账聚合保存**：
 
 - `save_transfer` 在一个事务内依次插入 `transfer_groups` 行、outgoing transaction、incoming transaction、以及所有 Adjustment（手续费）。
-- 四个 `INSERT` 任何一个失败时整个事务回滚，不产生孤立的 group 或单边流水。
-- 返回的 `TransferPersistResult` 包含数据库分配的 `transfer_group_id`、`outgoing_id`、`incoming_id` 和所有 adjustment ids，供响应 DTO 使用。
+- Adjustment 入库时重建为数据库刚分配的真实 `transfer_group_id`，不会保留 Domain 的无效占位 ID。
+- 任一 INSERT 失败时由外层 UoW 回滚，不产生孤立 group 或单边流水。
+- `TransferPersistResult` 按当前接口返回 `transfer_group_id`、`outgoing_id` 和 `incoming_id`；接口不承诺返回 Adjustment IDs。
+- 账户危险删除先物化所有关联 group，再删除 tag relations、两端与 grouped Adjustment、group 行和全部受影响缓存；第三方手续费账户单独触碰 group 时也能完整级联。
 
 **分类 root 回溯**：
 
@@ -203,37 +209,35 @@ failed: 0
 
 ### 6.3 本地静态门禁
 
-本次提交在 `PFH_BUILD_POSTGRESQL=OFF` 模式下构建并测试，所有 PostgreSQL 适配器源文件已编译，但未执行实际数据库连接：
+本次 review 在 `PFH_BUILD_POSTGRESQL=OFF` 模式下构建并测试。生产适配器通过窄 Drogon API stub 编译，另有结构门禁检查 CMake 条件、TypedId、RLS、提交方式、余额版本和 Transfer 级联；未执行真实数据库连接：
 
 ```text
 build (PostgreSQL OFF): PASS
 unit/use-case: 254
 In-Memory integration: 16
 migration enum-cast gate: 1
-CTest: 271/271 PASS
+PostgreSQL adapter contract gate: 1
+PostgreSQL adapter compile gate: PASS (build target)
+CTest: 273/273 PASS
 failed: 0
 ```
 
-PostgreSQL Repository 与 `DrogonUnitOfWork` 的连库验证将在 P1-S10-04 composition root 接线后、与 fixture 一同执行；S10-11 会用真实数据库重跑所有 integration 场景。
+该 stub 只验证项目源码语法和所用 API 形状，不替代真实 Drogon 头文件/ABI。真实 Repository/UoW 连库验证在 P1-S10-04 接线后与 fixture 一同执行，并在 S12 目标环境签署。
 
 ### 6.4 主要新增文件
 
 | 文件 | 功能 |
 | ---- | ---- |
-| `include/pfh/infrastructure/persistence/postgres_user_repository.h` | PostgreSQL User Repository 接口实现 |
-| `src/infrastructure/persistence/postgres_user_repository.cpp` | 用户创建、查询实现 |
-| `include/pfh/infrastructure/persistence/postgres_user_preference_repository.h` | PostgreSQL UserPreference Repository |
-| `src/infrastructure/persistence/postgres_user_preference_repository.cpp` | 偏好 upsert、JSON extended 字段处理 |
-| `include/pfh/infrastructure/persistence/postgres_account_repository.h` | PostgreSQL Account Repository |
-| `src/infrastructure/persistence/postgres_account_repository.cpp` | 账户 CRUD、余额缓存、乐观锁、FOR UPDATE |
-| `include/pfh/infrastructure/persistence/postgres_transaction_repository.h` | PostgreSQL Transaction Repository |
-| `src/infrastructure/persistence/postgres_transaction_repository.cpp` | 流水 save_single、save_transfer、软删除、物理删除 |
-| `include/pfh/infrastructure/persistence/postgres_exchange_rate_repository.h` | PostgreSQL ExchangeRate Repository |
-| `src/infrastructure/persistence/postgres_exchange_rate_repository.cpp` | 汇率 append、历史查询、时间点 `<=` 逻辑 |
-| `include/pfh/infrastructure/persistence/postgres_category_repository.h` | PostgreSQL Category Repository |
-| `src/infrastructure/persistence/postgres_category_repository.cpp` | 分类 CRUD、root 回溯、board 一致性校验 |
-| `include/pfh/infrastructure/persistence/drogon_unit_of_work.h` | Drogon 事务管理器 |
-| `src/infrastructure/persistence/drogon_unit_of_work.cpp` | `execute_in_transaction` + RLS session var 注入 + outbox co-commit |
+| `include/pfh/infrastructure/persistence/*_repository_impl.h` | 6 个核心 PostgreSQL Repository 实现声明 |
+| `src/infrastructure/persistence/*_repository_impl.cpp` | User/Preference/Account/Transaction/Category/ExchangeRate SQL 实现 |
+| `include/pfh/application/ports/i_active_currency_query.h` | 从租户 AccountRepository 拆出的系统级调度查询端口 |
+| `src/infrastructure/persistence/postgres_active_currency_query.cpp` | 独立后台只读连接的跨租户活跃币种查询 |
+| `include/pfh/infrastructure/persistence/postgres_repository_support.h` | 固定事务读、commit callback、context 校验与统一异常边界 |
+| `src/infrastructure/persistence/postgres_repository_support.cpp` | 回滚、日志与稳定 RepositoryError 映射 |
+| `include/pfh/infrastructure/persistence/drogon_unit_of_work.h` | request-scoped/全局任务可选租户 UoW |
+| `src/infrastructure/persistence/drogon_unit_of_work.cpp` | Transaction + RLS + outbox co-commit |
+| `tests/support/drogon_stub/` | OFF 模式编译专用最小 Drogon API stub |
+| `tests/sql/validate_postgresql_adapter_contracts.py` | PostgreSQL adapter 离线结构回归门禁 |
 
 ---
 
@@ -250,7 +254,9 @@ PostgreSQL Repository 与 `DrogonUnitOfWork` 的连库验证将在 P1-S10-04 com
 | #55 | 完成 | DTO 金额符号说明已固定 |
 | #58 | 完成 | V3 PostgreSQL 16.14 空库复测通过 |
 | #28 | 部分完成 | Flyway 已验证，运行期 DbClient 未接线 |
-| #46 | 未完成 | PostgreSQL Repository/UoW 已实现但未在外部环境连库验证；S10-04/S10-11 一并执行 |
+| #46 | 部分完成 | 核心 Repository/UoW 已实现并静态复核；composition root、真实 fixture 和目标环境签署待 S10-04/S12 |
+| #51 | 部分完成 | `MAX(version)` + 最新流水 ID 与全写路径缓存失效已实现；真实 DB 复核待 S12 |
+| #53 | 完成 | Application/Infrastructure/Presentation 分层 CMake 目标已落地 |
 | #57 | 未完成 | P1-S12 完整外部环境门禁仍保留 |
 
 ---
@@ -258,5 +264,5 @@ PostgreSQL Repository 与 `DrogonUnitOfWork` 的连库验证将在 P1-S10-04 com
 ## 8. 后续顺序
 
 1. P1-S10-04：完成 composition root、DbClient 与 RLS 上下文接线。
-2. P1-S10-05 至 S10-10：依次实现 HTTP 边界、认证、资源、流水、转账和报表 API。
-3. P1-S10-11：完成 API 回归、外部 PostgreSQL 连库验证并将本文更新为 S10 最终交付记录。
+2. P1-S10-05 至 S10-10：依次实现 HTTP 边界、认证、资源、流水、转账和报表 API；S10-06 注册 bootstrap UoW 必须支持创建 User 后在同一事务一次性绑定新 tenant，不能拆分默认数据初始化事务。
+3. P1-S10-11：完成 API 回归与开发环境 PostgreSQL fixture 复跑并更新本文；P1-S12 在目标 Linux/Docker 环境作最终签署。

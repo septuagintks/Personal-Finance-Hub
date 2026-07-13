@@ -9,16 +9,19 @@
 #ifdef PFH_HAS_POSTGRESQL
 
 #include <drogon/orm/DbClient.h>
+#include <utility>
 
 namespace pfh::infrastructure {
 
 /// @brief PostgreSQL adapter for ICategoryRepository.
 ///
-/// `categories` IS RLS-scoped. Reads on pooled connections need the GUC set.
+/// Instances are request-scoped; all reads and writes are bound to one tenant.
 class CategoryRepositoryImpl final : public domain::ICategoryRepository {
 public:
-    explicit CategoryRepositoryImpl(drogon::orm::DbClientPtr db)
-        : db_(std::move(db)) {}
+    CategoryRepositoryImpl(
+        drogon::orm::DbClientPtr db,
+        domain::UserId tenant_user_id)
+        : db_(std::move(db)), tenant_user_id_(tenant_user_id) {}
 
     [[nodiscard]] domain::RepositoryResult<domain::Category> find_by_id_for_user(
         domain::CategoryId id,
@@ -46,6 +49,7 @@ public:
 
 private:
     drogon::orm::DbClientPtr db_;
+    domain::UserId tenant_user_id_;
 };
 
 }  // namespace pfh::infrastructure

@@ -10,6 +10,7 @@
 #include "pfh/domain/exchange_rate.h"
 #include "pfh/domain/repositories/i_transaction_context.h"
 #include "pfh/domain/repositories/repository_error.h"
+#include "pfh/domain/typed_id.h"
 #include <chrono>
 #include <vector>
 

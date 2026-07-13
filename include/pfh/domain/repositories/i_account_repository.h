@@ -40,8 +40,6 @@ public:
     [[nodiscard]] virtual RepositoryResult<std::vector<Account>> find_active_by_user(
         UserId user_id) = 0;
 
-    [[nodiscard]] virtual RepositoryResult<std::vector<Currency>> find_active_currencies() = 0;
-
     /// @brief Return balance snapshot. Implementation owns cache hit/miss/rebuild.
     [[nodiscard]] virtual RepositoryResult<BalanceSnapshot> balance_of(AccountId id) = 0;
 

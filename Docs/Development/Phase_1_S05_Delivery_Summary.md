@@ -147,7 +147,7 @@ pfh_domain:      独立静态库，不链接 spdlog/框架
 - **CurrencyMetadata**：展示用元数据（符号、精度、名称）随前端/展示需求在后续阶段引入。
 - **Repository 降级查询链**：待 P1-S08 在应用层实现（见 4.1）。
 
-对应 Tasks.md 已勾选：#16、#17、#18、#19、#20。
+对应 `tasks.md` 已勾选：#16、#17、#18、#19、#20。
 
 ---
 
@@ -179,4 +179,4 @@ pfh_domain:      独立静态库，不链接 spdlog/框架
 - [汇率系统设计](../Architecture/08_Exchange_Rate_System_Design.md)
 - [技术架构](../Architecture/01_Technical_Architecture.md)
 - [Phase 1 详细开发计划](../Development_Plans/Phase_1/Phase_1_Detailed_Development_Plan.md)
-- [任务跟踪](Tasks.md)
+- [任务跟踪](tasks.md)
