@@ -17,6 +17,7 @@
 #include "pfh/domain/currency_conversion_service.h"
 #include "pfh/domain/domain_error.h"
 #include "pfh/domain/transfer_aggregate.h"
+#include <optional>
 #include <string>
 
 namespace pfh::domain {
@@ -43,6 +44,7 @@ public:
     /// @param occurred_at Transaction timestamp.
     /// @param description Optional description.
     /// @param transfer_group_id Link between the two sides.
+    /// @param fee Optional resolved fee, expressed as a positive magnitude.
     /// @return TransferAggregate on success, DomainError on validation failure.
     [[nodiscard]] static DomainResult<TransferAggregate> build_from_outgoing_and_rate(
         Money outgoing_amount,
@@ -52,7 +54,8 @@ public:
         UserId user_id,
         Transaction::TimePoint occurred_at,
         std::string description,
-        TransferGroupId transfer_group_id);
+        TransferGroupId transfer_group_id,
+        std::optional<TransferFee> fee = std::nullopt);
 
     /// @brief Build a transfer from both amounts; derive the exchange rate.
     ///
@@ -68,6 +71,7 @@ public:
     /// @param occurred_at Transaction timestamp.
     /// @param description Optional description.
     /// @param transfer_group_id Link between the two sides.
+    /// @param fee Optional resolved fee, expressed as a positive magnitude.
     /// @return TransferAggregate on success, DomainError on validation failure.
     [[nodiscard]] static DomainResult<TransferAggregate> build_from_both_amounts(
         Money outgoing_amount,
@@ -77,7 +81,8 @@ public:
         UserId user_id,
         Transaction::TimePoint occurred_at,
         std::string description,
-        TransferGroupId transfer_group_id);
+        TransferGroupId transfer_group_id,
+        std::optional<TransferFee> fee = std::nullopt);
 
     /// @brief Build a transfer from incoming amount and exchange rate.
     ///
@@ -91,6 +96,7 @@ public:
     /// @param occurred_at Transaction timestamp.
     /// @param description Optional description.
     /// @param transfer_group_id Link between the two sides.
+    /// @param fee Optional resolved fee, expressed as a positive magnitude.
     /// @return TransferAggregate on success, DomainError on validation failure.
     [[nodiscard]] static DomainResult<TransferAggregate> build_from_incoming_and_rate(
         Money incoming_amount,
@@ -100,7 +106,8 @@ public:
         UserId user_id,
         Transaction::TimePoint occurred_at,
         std::string description,
-        TransferGroupId transfer_group_id);
+        TransferGroupId transfer_group_id,
+        std::optional<TransferFee> fee = std::nullopt);
 
     /// @brief Validate transfer consistency rules.
     ///
@@ -109,6 +116,7 @@ public:
     /// - Same transfer_group_id.
     /// - Same-currency: amounts match.
     /// - Cross-currency: outgoing * rate ≈ incoming (within rounding).
+    /// - Adjustments are signed, non-zero, same-user members of the group.
     ///
     /// @param aggregate The transfer to validate.
     /// @return Success (empty) or DomainError describing the violation.

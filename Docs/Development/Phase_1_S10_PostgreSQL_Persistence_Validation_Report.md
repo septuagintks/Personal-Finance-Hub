@@ -1,126 +1,82 @@
 # Phase 1 S10 PostgreSQL Persistence - 验证报告
 
 **验证日期**: 2026-07-13
-**验证提交**: `0a1ac5f7600f3ba5573520826847c08bb783b27a`
-**对应任务**: `Tasks.md` #46 / P1-S10-03 / P1-S10-04 / P1-S12-03
-**验证结论**: **FAIL / BLOCKED**
+**首轮验证提交**: `0a1ac5f7600f3ba5573520826847c08bb783b27a`
+**V3 修复提交**: `183378981e33a8aa9853e19cdd4a19c75d5a6e77`
+**外部复测提交**: `4621f69ef940868e10591f5449ac8be1dd9c95e3`
+**对应任务**: `Tasks.md` #28 / #46 / #57 / #58
+**报告状态**: FINAL - 结果已汇入 `Phase_1_S10_Delivery_Summary.md`
+**最终结论**: **V3 MIGRATION PASS；S10 REAL PERSISTENCE BLOCKED**
 
 ---
 
-## 1. 验证目标
+## 1. 验证范围与结论边界
 
-本轮针对以下验收目标执行验证：
+本报告记录两轮外部环境验证：
 
-- 实现 `DrogonUnitOfWork`。
-- 实现 PostgreSQL 版 `*RepositoryImpl`。
-- 在 composition root 中以真实持久化替换 In-Memory 实现。
-- 将现有 Repository integration scenarios 对 PostgreSQL 16+ 真实测试库复跑。
-- 在空库上完成 Flyway V1-V3 迁移。
+1. 首轮检查 P1-S10 PostgreSQL 持久化前置状态，并在 PostgreSQL 16+ 空库执行 Flyway V1-V3。
+2. 修复 V3 `category_board` enum 类型推断问题后，在相同环境重新执行空库迁移、Flyway 校验、数据断言和完整 CTest。
+
+本报告最终确认：
+
+- V1-V3 已能在 PostgreSQL 16.14 全新空库连续迁移成功。
+- V3 enum cast 缺陷已修复，SQL State `42804` 未复现。
+- Linux ARM64 Debug/Release 与当前 254 项测试基线通过。
+- `DrogonUnitOfWork`、PostgreSQL Repository、composition root 和真实 PostgreSQL integration fixture 尚未实现，因此 #46 及相关真实持久化语义仍为 `BLOCKED`。
+
+V3 迁移通过不能解释为 PostgreSQL Repository/UoW/RLS 已通过。
 
 ---
 
 ## 2. 验证环境
 
-- Host: macOS / Darwin ARM64
-- Linux VM: Colima / Ubuntu 24.04 / Linux 6.8 / aarch64
-- Compiler: GCC / G++ 13.3.0
-- CMake: 3.28.3
-- Ninja: 1.11.1
-- PostgreSQL: 16.14 (`postgres:16-alpine`)
-- Flyway: 10.22.0 (`flyway/flyway:10`)
+| 项目 | 环境 |
+| ---- | ---- |
+| Host | macOS / Darwin ARM64 |
+| Linux VM | Colima / Ubuntu 24.04 / Linux 6.8 / aarch64 |
+| Compiler | GCC / G++ 13.3.0 |
+| CMake | 3.28.3 |
+| Ninja | 1.11.1 |
+| Python | 3.12.3 |
+| PostgreSQL | 16.14 (`postgres:16-alpine`) |
+| Flyway | OSS 10.22.0 (`flyway/flyway:10.22.0`) |
+| Database | 隔离 Docker network + tmpfs 全新空库 `pfh_validation` |
 
-数据库验证使用隔离 Docker network 与 tmpfs 数据目录，验证后已删除临时容器和网络，未保留测试数据卷。
-
----
-
-## 3. 验证结果摘要
-
-| 验收项 | 结果 | 说明 |
-| ------ | ---- | ---- |
-| `DrogonUnitOfWork` | FAIL | 当前源码中不存在实现 |
-| PostgreSQL `*RepositoryImpl` | FAIL | 当前源码中不存在实现 |
-| Drogon/PostgreSQL CMake 接线 | FAIL | `find_package(Drogon)` 与 `find_package(PostgreSQL)` 仍被注释 |
-| composition root 使用真实持久化 | FAIL | `main.cpp` 仍是启动占位，不装配 Repository/UoW |
-| PostgreSQL integration test target | FAIL | 当前 integration target 只构造 In-Memory Repository |
-| 同一批 scenarios 在真实库复跑 | BLOCKED | 无 PostgreSQL adapter 与测试 fixture，无法执行 |
-| PostgreSQL 16 空库迁移 | FAIL | V3 enum 类型错误，迁移回滚 |
-| Linux Debug build | PASS | 43/43 build steps completed |
-| Linux Debug tests | PASS | 253/253 passed |
-| Linux Release build | PASS | 43/43 build steps completed |
-| Linux Release tests | PASS | 253/253 passed |
-| Debug/Release bootstrap smoke | PASS | 配置读取与 logger 初始化成功 |
-
-现有 253 个测试由 240 个 unit/use-case tests 和 13 个 In-Memory repository integration tests 构成。它们证明当前 Domain/Application/In-Memory 基线没有回归，但不能作为真实 PostgreSQL 持久化验收结果。
+临时 PostgreSQL 容器、Docker network 和测试数据均在验证后清理，Colima 已关闭。
 
 ---
 
-## 4. 阻断问题
+## 3. 首轮验证结果
 
-### 4.1 真实持久化 adapter 尚未实现
+### 3.1 预期内的未实现项
 
-源码检索未发现以下目标：
+首轮源码检查确认以下内容尚未实现：
 
-- `DrogonUnitOfWork`
-- PostgreSQL `AccountRepositoryImpl`
-- PostgreSQL `TransactionRepositoryImpl`
-- PostgreSQL `UserRepositoryImpl`
-- PostgreSQL `UserPreferenceRepositoryImpl`
-- PostgreSQL `CategoryRepositoryImpl`
-- PostgreSQL `ExchangeRateRepositoryImpl`
+- `DrogonUnitOfWork`。
+- PostgreSQL `AccountRepositoryImpl`、`TransactionRepositoryImpl`、`UserRepositoryImpl`、`UserPreferenceRepositoryImpl`、`CategoryRepositoryImpl`、`ExchangeRateRepositoryImpl`。
+- Drogon/PostgreSQL CMake 生产接线。
+- 生产 composition root。
+- PostgreSQL integration test target 与共享 fixture。
 
-当前 `tests/integration/repository_integration_test.cpp` 明确使用：
+这些项目属于 P1-S10-02 至 P1-S10-04 的后续开发范围，状态应记为 `NOT IMPLEMENTED / BLOCKED`，不是已有实现发生回归。
 
-- `InMemoryStore`
-- `InMemoryUnitOfWork`
-- `InMemoryAccountRepository`
-- `InMemoryTransactionRepository`
-- `InMemoryExchangeRateRepository`
-- `InMemoryUserRepository`
-- `InMemoryUserPreferenceRepository`
+### 3.2 首轮真实缺陷
 
-因此现有 integration scenarios 没有连接 PostgreSQL，也没有验证 SQL、连接池、事务对象、RLS、真实行锁或数据库约束。
-
-### 4.2 V3 空库迁移失败
-
-执行：
-
-```bash
-flyway migrate
-```
-
-环境：
-
-```text
-PostgreSQL 16.14
-Flyway OSS 10.22.0
-```
-
-结果：
+首轮执行 `flyway migrate` 时：
 
 ```text
 V1__initial_schema.sql: PASS
 V2__seed_initial_currencies.sql: PASS
 V3__seed_system_category_templates.sql: FAIL
-```
 
-数据库错误：
-
-```text
 SQL State: 42804
 ERROR: column "default_board" is of type category_board
        but expression is of type text
 ```
 
-首个失败点位于 `V3__seed_system_category_templates.sql` 的二级分类 `INSERT ... SELECT ... UNION ALL` 段。`'expense'` 和 `'income'` 在该表达式中被推断为 `text`，写入 `category_board` enum 列时没有隐式转换。
+根因是 V3 的 7 个二级分类 `INSERT ... SELECT ... UNION ALL` 区块中，`expense/income` 字面量被 PostgreSQL 推断为 `text`，无法隐式写入 `category_board` enum。
 
-同一模式在多个二级分类插入段重复出现，不能只修复首个 `food_parent` 段。应对所有相关 SELECT 列使用显式 enum 类型，例如：
-
-```sql
-'expense'::category_board
-'income'::category_board
-```
-
-V3 失败后的数据库状态符合事务回滚预期：
+V3 失败后事务完整回滚：
 
 ```text
 flyway_schema_history: V1=true, V2=true
@@ -128,382 +84,60 @@ currencies: 33
 system_category_templates: 0
 ```
 
-这说明 V3 自身完整回滚，但当前空库无法迁移到最新版本。
+首轮同时通过 Linux Debug/Release 构建、253/253 CTest 和 bootstrap smoke；这些结果证明 Domain/Application/In-Memory 基线没有回归，但不构成真实持久化证据。
 
 ---
 
-## 5. 尚未被真实数据库验证的关键语义
+## 4. 修复内容与纸面检查
 
-在 PostgreSQL adapter 和共享测试 fixture 落地前，以下行为仍无真实数据库证据：
+修复提交 `1833789` 完成：
 
-- 业务写入与 outbox 在同一数据库事务内提交或回滚。
-- `SELECT ... FOR UPDATE` 锁定读取及并发行为。
-- `Account.version` 乐观锁冲突。
-- 余额缓存 `source_version` 与 schema `version` 语义对齐。
-- `NUMERIC(20,8)` / `NUMERIC(20,10)` 边界和数据库 round-trip。
-- `SET app.current_user_id` 下的 RLS 用户隔离和 fail-closed 行为。
-- 连接归还连接池前执行 `RESET app.current_user_id`。
-- transfer group、双边流水和 adjustment 的原子写入。
-- append-only exchange rate 与历史时间点查询。
-- 数据库唯一约束、复合外键和跨用户写入拒绝。
+1. 7 个二级分类区块的 28 个 `default_board` 字面量全部增加显式类型转换。
+2. `'expense'::category_board` 共 19 处，`'income'::category_board` 共 9 处。
+3. 顶级分类继续使用具备目标列类型上下文的 `INSERT ... VALUES`。
+4. `group_name` 保持 `TEXT` 字符串，不错误转换为 `category_board`。
+5. 新增离线 CTest `migration_enum_casts`，阻止同一 SQL 形态回归。
 
----
+纸面检查结果：
 
-## 6. 修复与复测要求
+| 检查项 | 结果 |
+| ------ | ---- |
+| V1 `category_board` 仅包含 `income/expense` | PASS |
+| parent CTE / UNION 区块 | 7 |
+| 二级分类写入 | 28 |
+| 显式 `::category_board` | 28 |
+| 二级分类裸 board 字面量 | 0 |
+| 父分类查询按 locale/group/root 收窄 | PASS |
+| 离线 `migration_enum_casts` | PASS |
 
-1. 修复 V3 中所有 `default_board` 的 enum 类型表达式。
-2. 在 PostgreSQL 16+ 空库重新执行 `flyway migrate`、`flyway validate` 和 `flyway info`。
-3. 实现 `DrogonUnitOfWork` 和 PostgreSQL Repository adapters，并在 CMake 中完成 Drogon/PostgreSQL 依赖与 target 接线。
-4. 将现有 13 个 repository scenarios 抽为可复用测试契约，分别运行 In-Memory fixture 与 PostgreSQL fixture。
-5. 增加 RLS、连接池 session reset、真实并发、行锁、乐观锁和 NUMERIC round-trip 场景。
-6. 在 Debug 和 Release 下重新执行完整 CTest，并记录 PostgreSQL/Flyway 版本、commit hash 和测试结果。
-
-在上述项目完成前，`Tasks.md` #46 不满足完成条件，不应标记为 `[x]`。
+离线门禁是针对本次 SQL 形态的正则回归保护，不是 PostgreSQL parser，不能替代本报告的真实空库复测。
 
 ---
 
-## 7. 本轮执行说明
+## 5. 外部复测结果
 
-- 本轮只执行验证和记录报告，未修改生产源码、迁移脚本或任务状态。
-- 构建目录位于 ignored 的 `build/` 下。
-- 临时 PostgreSQL 容器、Docker network 已清理。
-- Colima 已在验证结束后关闭。
-
----
-
-## 8. 第二次测试说明：V3 修复复测
-
-### 8.1 复测定位
-
-本轮只验证上轮发现的 V3 空库迁移缺陷是否已修复，不提前验收尚未实现的 P1-S10-02 至 P1-S10-04：
-
-- `DrogonUnitOfWork`、PostgreSQL Repository、CMake 生产接线和 composition root 仍属于后续开发内容。
-- RLS、真实事务、行锁、NUMERIC round-trip 和连接池 session reset 仍因 PostgreSQL adapter 未实现而保持 `BLOCKED`，不纳入本次 V3 修复结论。
-- 本次通过后只关闭 `Tasks.md` #58；#46、#57 以及 #28 中的运行期 DbClient 接线仍不得标记完成。
-
-上轮 V3 失败属于真实迁移缺陷，而非 S10 生产适配器缺失造成的预期阻断。原始错误和回滚状态保留在本文 4.2 节，作为修复前基线。
-
-### 8.2 待测修复
-
-修复提交：`183378981e33a8aa9853e19cdd4a19c75d5a6e77`
-
-修复内容：
-
-1. V3 的 7 个二级分类 `INSERT ... SELECT ... UNION ALL` 区块中，28 个 `default_board` 字面量全部增加显式转换：
-   - `'expense'::category_board`：19 处。
-   - `'income'::category_board`：9 处。
-2. 顶级分类使用 `INSERT ... VALUES`，目标列直接提供 enum 类型上下文，因此不要求额外转换。
-3. `group_name` 的 `expense/income` 写入 `TEXT` 列，保持普通字符串是正确行为，不应转换为 `category_board`。
-4. 新增离线 CTest `migration_enum_casts`，用于阻止同一类二级分类裸 enum 字面量回归。
-
-复测前必须记录实际待测提交，且该提交必须包含上述修复：
-
-```bash
-git rev-parse HEAD
-git merge-base --is-ancestor 183378981e33a8aa9853e19cdd4a19c75d5a6e77 HEAD
-```
-
-第二条命令必须返回退出码 0。最终报告以 `git rev-parse HEAD` 的输出为准，不只记录分支名。
-
-### 8.3 纸面检查结果
-
-本机在不连接 PostgreSQL 的前提下完成以下静态核对：
-
-| 检查项 | 结果 | 说明 |
-| ------ | ---- | ---- |
-| `category_board` enum 定义 | PASS | V1 仅定义 `income`、`expense` |
-| 二级分类区块数量 | PASS | 共 7 个 parent CTE / UNION 区块 |
-| 二级分类写入数量 | PASS | 共 28 条，19 expense + 9 income |
-| 显式 `::category_board` 数量 | PASS | 28 处 |
-| 二级分类裸 board 字面量 | PASS | 0 处 |
-| 父分类查找范围 | PASS | 均限制 `locale='zh-CN'`、`group_name` 和顶级 `parent_id IS NULL` |
-| 离线回归门禁 | PASS | `python tests/sql/validate_enum_casts.py` 返回 0 |
-
-离线门禁是针对本次 SQL 形态的正则扫描器，不是 PostgreSQL parser。它不能证明 CHECK、FK、RLS、trigger、事务、编码、Flyway checksum 或 PostgreSQL/Flyway 版本兼容性；本轮真实空库复测仍是必要阻断项。
-
-### 8.4 推荐复测环境
-
-为便于与上轮结果直接比较，优先复用以下版本：
-
-- Host：macOS / Darwin ARM64。
-- Linux VM：Colima / Ubuntu 24.04 / aarch64。
-- PostgreSQL：16.14，镜像 `postgres:16-alpine`。
-- Flyway：10.22.0，镜像 `flyway/flyway:10.22.0`。
-- Python 3：用于运行离线 `migration_enum_casts` CTest。
-- 数据库：全新空库，使用临时容器、隔离 network 和 tmpfs 数据目录。
-
-可以使用更新的 PostgreSQL 16.x 或 Flyway 10.22+ 补充验证，但至少保留一组与上轮相同版本的对照结果。不得在上轮残留 schema 上直接执行，以免跳过 V1-V3 的真实空库路径。
-
-### 8.5 Docker 复测准备
-
-以下命令以 Bash、仓库根目录和一次性测试凭据为例：
-
-```bash
-export PFH_TEST_NETWORK=pfh-s10-v3-test
-export PFH_TEST_CONTAINER=pfh-s10-v3-postgres
-export PFH_TEST_DB=pfh_validation
-export PFH_TEST_USER=pfh
-export PFH_TEST_PASSWORD=pfh_validation_password
-
-docker network create "$PFH_TEST_NETWORK"
-
-docker run -d \
-  --name "$PFH_TEST_CONTAINER" \
-  --network "$PFH_TEST_NETWORK" \
-  --tmpfs /var/lib/postgresql/data \
-  -e POSTGRES_DB="$PFH_TEST_DB" \
-  -e POSTGRES_USER="$PFH_TEST_USER" \
-  -e POSTGRES_PASSWORD="$PFH_TEST_PASSWORD" \
-  postgres:16-alpine
-
-until docker exec "$PFH_TEST_CONTAINER" \
-  pg_isready -U "$PFH_TEST_USER" -d "$PFH_TEST_DB"; do
-  sleep 1
-done
-```
-
-准备完成后先确认数据库为空：
-
-```bash
-docker exec -i "$PFH_TEST_CONTAINER" \
-  psql -U "$PFH_TEST_USER" -d "$PFH_TEST_DB" -Atc \
-  "SELECT COUNT(*) FROM pg_tables WHERE schemaname = 'public';"
-```
-
-首次执行应返回 `0`。
-
-### 8.6 Flyway 必跑命令
-
-定义公共参数：
-
-```bash
-FLYWAY_IMAGE=flyway/flyway:10.22.0
-FLYWAY_URL="jdbc:postgresql://${PFH_TEST_CONTAINER}:5432/${PFH_TEST_DB}"
-```
-
-#### 8.6.1 空库迁移
-
-```bash
-docker run --rm \
-  --network "$PFH_TEST_NETWORK" \
-  -v "$PWD/migrations:/flyway/sql:ro" \
-  "$FLYWAY_IMAGE" \
-  -url="$FLYWAY_URL" \
-  -user="$PFH_TEST_USER" \
-  -password="$PFH_TEST_PASSWORD" \
-  -connectRetries=60 \
-  migrate
-```
-
-期望结果：
-
-- V1、V2、V3 均显示 `Success`。
-- 不再出现 SQL State `42804`。
-- schema version 到达 `3`。
-
-#### 8.6.2 迁移信息
-
-```bash
-docker run --rm \
-  --network "$PFH_TEST_NETWORK" \
-  -v "$PWD/migrations:/flyway/sql:ro" \
-  "$FLYWAY_IMAGE" \
-  -url="$FLYWAY_URL" \
-  -user="$PFH_TEST_USER" \
-  -password="$PFH_TEST_PASSWORD" \
-  info
-```
-
-期望结果：V1-V3 的状态均为 `Success`，不存在 `Failed`、`Pending` 或 `Missing`。
-
-#### 8.6.3 Checksum 验证
-
-```bash
-docker run --rm \
-  --network "$PFH_TEST_NETWORK" \
-  -v "$PWD/migrations:/flyway/sql:ro" \
-  "$FLYWAY_IMAGE" \
-  -url="$FLYWAY_URL" \
-  -user="$PFH_TEST_USER" \
-  -password="$PFH_TEST_PASSWORD" \
-  validate
-```
-
-期望结果：`Successfully validated 3 migrations` 或同版本等价成功信息。
-
-#### 8.6.4 第二次 migrate
-
-使用 8.6.1 的同一命令再次执行 `migrate`。
-
-期望结果：schema 已是最新版本，不重复执行 V1-V3，不新增或修改种子数据。
-
-### 8.7 数据完整性断言
-
-迁移成功后执行：
-
-```bash
-docker exec -i "$PFH_TEST_CONTAINER" \
-  psql -v ON_ERROR_STOP=1 -U "$PFH_TEST_USER" -d "$PFH_TEST_DB" <<'SQL'
-SELECT version, description, success
-FROM flyway_schema_history
-ORDER BY installed_rank;
-
-SELECT COUNT(*) AS currency_count
-FROM currencies;
-
-SELECT COUNT(*) AS template_count,
-       COUNT(*) FILTER (WHERE parent_id IS NULL) AS root_count,
-       COUNT(*) FILTER (WHERE parent_id IS NOT NULL) AS child_count
-FROM system_category_templates;
-
-SELECT default_board, COUNT(*)
-FROM system_category_templates
-GROUP BY default_board
-ORDER BY default_board;
-
-SELECT COUNT(*) AS orphan_count
-FROM system_category_templates child
-LEFT JOIN system_category_templates parent ON parent.id = child.parent_id
-WHERE child.parent_id IS NOT NULL AND parent.id IS NULL;
-
-SELECT COUNT(*) AS parent_board_mismatch_count
-FROM system_category_templates child
-JOIN system_category_templates parent ON parent.id = child.parent_id
-WHERE child.default_board IS DISTINCT FROM parent.default_board;
-
-SELECT COUNT(*) AS non_zh_cn_count
-FROM system_category_templates
-WHERE locale <> 'zh-CN';
-SQL
-```
-
-期望值：
-
-| 断言 | 期望值 |
-| ---- | ------ |
-| `flyway_schema_history` | V1/V2/V3 均为 `success=true` |
-| `currency_count` | 33 |
-| `template_count` | 55 |
-| `root_count` | 27 |
-| `child_count` | 28 |
-| `default_board=expense` | 40 |
-| `default_board=income` | 15 |
-| `orphan_count` | 0 |
-| `parent_board_mismatch_count` | 0 |
-| `non_zh_cn_count` | 0 |
-
-第二次 `migrate` 后应再次执行数量断言，结果必须保持不变。
-
-### 8.8 CTest 回归
-
-在待测提交上重新配置后执行离线迁移门禁和完整测试：
-
-```bash
-cmake -S . -B build/linux-gcc-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug
-cmake --build build/linux-gcc-debug
-ctest --test-dir build/linux-gcc-debug -R migration_enum_casts --output-on-failure
-ctest --test-dir build/linux-gcc-debug --output-on-failure
-```
-
-预期：
-
-- `migration_enum_casts` 单测通过。
-- 当前基线共 254 个测试：240 个 unit/use-case、13 个 In-Memory integration、1 个 migration gate。
-- 本轮仍没有 PostgreSQL Repository integration target，因此不得把 254/254 描述为真实持久化测试通过。
-
-### 8.9 结果回填模板
-
-复测完成后在本文后追加“第二次测试结果”，至少填写：
-
-```text
-测试日期：
-测试提交：
-Host / VM：
-PostgreSQL：
-Flyway：
-
-空库确认：PASS / FAIL
-flyway migrate：PASS / FAIL
-flyway info：PASS / FAIL
-flyway validate：PASS / FAIL
-第二次 migrate：PASS / FAIL
-数据完整性断言：PASS / FAIL
-migration_enum_casts：PASS / FAIL
-完整 CTest：通过数 / 总数
-
-异常 SQL State：无 / 具体值
-实际分类模板计数：
-实际 board 分布：
-结论：PASS / FAIL / BLOCKED
-```
-
-如果失败，必须保留 Flyway 完整错误、SQL State、失败 migration、`flyway info`、`flyway_schema_history` 和分类模板计数；不得只记录最后一行错误。
-
-### 8.10 本轮通过标准
-
-只有同时满足以下条件，V3 修复复测才可记为 `PASS`：
-
-1. 全新 PostgreSQL 16+ 空库可以从 V1 连续迁移到 V3。
-2. `info` 与 `validate` 均成功，V1-V3 checksum 一致。
-3. 33 条币种、55 条分类模板、根/子分类和 board 分布全部符合预期。
-4. 不存在孤儿分类、父子 board 不一致或非 `zh-CN` 种子。
-5. 第二次 `migrate` 为 no-op，数据计数不变。
-6. 离线 `migration_enum_casts` 和当前完整 CTest 通过。
-
-本轮通过后可将 `Tasks.md` #58 标记为完成，并补充真实环境、commit hash 和结果；它不会自动完成 #46、#57，也不会证明 PostgreSQL Repository/UoW/RLS 语义。
-
-### 8.11 环境清理
-
-结果记录完成后清理一次性资源：
-
-```bash
-docker rm -f "$PFH_TEST_CONTAINER"
-docker network rm "$PFH_TEST_NETWORK"
-```
-
----
-
-## 9. 第二次测试结果
-
-**测试日期**: 2026-07-13
-
-**测试提交**: `4621f69ef940868e10591f5449ac8be1dd9c95e3`
-
-**修复提交祖先检查**:
+修复提交祖先检查通过：
 
 ```text
 183378981e33a8aa9853e19cdd4a19c75d5a6e77 is ancestor of HEAD: PASS
 ```
 
-### 9.1 实际环境
-
-- Host: macOS / Darwin ARM64
-- Linux VM: Colima / Ubuntu 24.04 / Linux 6.8 / aarch64
-- PostgreSQL: 16.14 (`postgres:16-alpine`)
-- Flyway: OSS 10.22.0 (`flyway/flyway:10.22.0`)
-- GCC / G++: 13.3.0
-- CMake: 3.28.3
-- Ninja: 1.11.1
-- Python: 3.12.3
-- Database: 全新 tmpfs 空库 `pfh_validation`
-
-### 9.2 复测结果
+最终结果：
 
 | 检查项 | 结果 | 实际结果 |
 | ------ | ---- | -------- |
-| 修复提交祖先检查 | PASS | `1833789` 已包含在测试 HEAD 中 |
 | 空库确认 | PASS | 迁移前 public schema table count = 0 |
 | `flyway migrate` | PASS | V1、V2、V3 连续成功，schema 到达 v3 |
 | `flyway info` | PASS | V1-V3 均为 `Success`，无 Pending/Failed/Missing |
 | `flyway validate` | PASS | `Successfully validated 3 migrations` |
-| 第二次 `migrate` | PASS | `Schema "public" is up to date. No migration necessary.` |
-| 数据完整性断言 | PASS | 所有数量、层级、board 和 locale 断言符合预期 |
+| 第二次 `migrate` | PASS | Schema 已是最新版本，无需迁移 |
+| 数据完整性断言 | PASS | 数量、层级、board 和 locale 全部符合预期 |
 | `migration_enum_casts` | PASS | 1/1 passed |
 | 完整 CTest | PASS | 254/254 passed，0 failed |
 
-本轮没有出现异常 SQL State，原 SQL State `42804` 未复现。
+本轮没有异常 SQL State，原 SQL State `42804` 未复现。
 
-### 9.3 数据完整性实际值
+### 5.1 数据完整性实际值
 
 ```text
 flyway_schema_history: 1=true, 2=true, 3=true
@@ -518,18 +152,9 @@ parent_board_mismatch_count: 0
 non_zh_cn_count: 0
 ```
 
-第二次 `migrate` 后再次检查：
+第二次 `migrate` 后计数保持为 33 条币种、55 条分类模板、27 个根分类和 28 个子分类。
 
-```text
-currency_count: 33
-template_count: 55
-root_count: 27
-child_count: 28
-```
-
-数据计数未发生变化。
-
-### 9.4 CTest 实际结果
+### 5.2 CTest 实际值
 
 ```text
 migration_enum_casts: 1/1 passed
@@ -538,33 +163,55 @@ failed: 0
 total test time: 0.87 sec
 ```
 
-254 个测试仍由以下部分组成：
+254 项测试由以下部分组成：
 
 - 240 个 unit/use-case tests。
 - 13 个 In-Memory repository integration tests。
 - 1 个 migration enum-cast gate。
 
-本轮不存在 PostgreSQL Repository integration target，因此该 CTest 结果不构成真实 Repository/UoW/RLS 验收证据。
+---
 
-### 9.5 第二轮结论
+## 6. 最终验收判断
 
-**V3 enum cast 修复复测结论**: **PASS**
+### 6.1 已通过
 
-本轮满足 8.10 节全部通过标准：
+- PostgreSQL 16.14 空库 V1-V3 连续迁移。
+- Flyway `migrate`、`info`、`validate` 与第二次 no-op。
+- V2 币种和 V3 分类模板数据完整性。
+- V3 enum cast 离线回归门禁。
+- Linux ARM64 Debug/Release 构建与测试基线。
 
-1. PostgreSQL 16.14 全新空库从 V1 连续迁移到 V3。
-2. Flyway `info` 与 `validate` 成功，V1-V3 checksum 一致。
-3. currencies、分类模板、根/子分类和 board 分布符合预期。
-4. 不存在孤儿分类、父子 board 不一致或非 `zh-CN` 种子。
-5. 第二次 migrate 为 no-op，数据计数不变。
-6. 离线迁移门禁和完整 CTest 全部通过。
+### 6.2 仍阻断
 
-**任务 #46 整体结论**: **BLOCKED**
+在 PostgreSQL adapter 和共享测试 fixture 落地前，以下行为仍无真实数据库证据：
 
-V3 迁移阻断已经关闭，但 `DrogonUnitOfWork`、PostgreSQL `*RepositoryImpl`、composition root 接线和真实 PostgreSQL integration scenarios 仍未实现。因此本轮 PASS 只适用于 V3 修复，不自动完成 #46 或 #57，也不证明真实事务、RLS、行锁、乐观锁、连接池 session reset 或 NUMERIC round-trip 语义。
+- 业务写入与 outbox 同事务提交/回滚。
+- `SELECT ... FOR UPDATE` 与真实并发行为。
+- `Account.version` 乐观锁冲突。
+- 余额缓存 `source_version` 与 schema 版本语义。
+- `NUMERIC(20,8/10)` 数据库 round-trip。
+- RLS fail-closed 与连接池 session reset。
+- Transfer 双边流水和 Adjustment 原子写入。
+- Exchange rate append-only 与历史查询。
+- 复合外键、唯一约束和跨用户写入拒绝。
 
-### 9.6 执行备注
+---
 
-- Flyway 输出了默认 `sql` location 未来可能弃用的 warning，不影响本轮迁移结果。
-- 本轮未修改生产源码、迁移脚本或 `Tasks.md` 状态。
-- 结果记录后应删除一次性 PostgreSQL 容器与 Docker network，并关闭 Colima。
+## 7. 任务状态结论
+
+| 任务 | 结论 |
+| ---- | ---- |
+| #28 PostgreSQL/Flyway 基础 | 保持 `[~]`；迁移已验证，运行期 DbClient 尚未接线 |
+| #46 真实持久化 | 保持 `[ ]`；adapter 与真实 integration scenarios 未实现 |
+| #57 外部环境门禁 | 保持 `[ ]`；Linux/Flyway 子项通过，完整 API/Outbox/Scheduler 门禁未完成 |
+| #58 V3 真实空库复跑 | 可标记 `[x]` |
+
+Flyway 关于默认 `sql` location 未来可能弃用的 warning 不影响本轮结果，后续升级 Flyway 时再显式配置 location。
+
+---
+
+## 8. 最终结论
+
+**V3 enum cast 修复复测：PASS。**
+
+V3 迁移阻断已经关闭。真实 PostgreSQL Repository/UoW/RLS 验收仍保持 `BLOCKED`，必须在 P1-S10-03/S10-04 实现后使用真实 fixture 重新验证。本报告的最终结果已纳入 `Phase_1_S10_Delivery_Summary.md`，后续 S10 开发不再改写本次外部复测基线。

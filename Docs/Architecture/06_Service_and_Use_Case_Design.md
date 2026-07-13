@@ -1,6 +1,6 @@
 # Personal Finance Hub - Service & Use Case Design
 
-Version: 1.0
+Version: 1.1
 
 Backend: C++23
 
@@ -34,7 +34,7 @@ Architecture: Clean Architecture + Lightweight DDD
 
 ## 2. 领域服务设计 (Domain Services)
 
-领域服务位于 `domain/services/`。它们是无状态的，专门用来解决不属于单一实体、而是涉及多个实体交互的核心业务规则。
+领域服务接口位于 `include/pfh/domain/`，实现位于 `src/domain/`。它们是无状态的，专门用来解决不属于单一实体、而是涉及多个实体交互的核心业务规则。
 
 ### 2.1 转账领域服务接口 (`TransferDomainService`)
 
@@ -42,341 +42,87 @@ Architecture: Clean Architecture + Lightweight DDD
 不要再定义跨层、跨职责的 `AccountingService`。
 
 ```cpp
-// domain/services/TransferDomainService.hpp
-#pragma once
-#include <expected>
-#include <optional>
-#include "domain/entities/Account.hpp"
-#include "domain/aggregates/TransferAggregate.hpp"
-#include "domain/entities/Transaction.hpp"
-
-enum class TransferRuleError {
-    CurrencyMismatch,
-    NegativeAmount,
-    InvalidExchangeRate,
-    AccountFrozenOrArchived,
-    TransferImbalance
+enum class FeeSource {
+    SourceAccount,
+    TargetAccount,
+    ThirdParty
 };
 
-enum class FeeSource {
-    SourceAccount,  // 从源账户（出账账户）扣除
-    TargetAccount,  // 从目标账户（入账账户）扣除
-    ThirdParty      // 从独立的第三方账户扣除（需额外传入 feeAccountId）
+struct TransferFee {
+    FeeSource source;
+    AccountId account_id; // Application 已解析并锁定的实际扣费账户
+    Money amount;         // 该账户币种下的正数 magnitude
 };
 
 class TransferDomainService {
 public:
-    // 核心规则：校验并构造一个转账聚合（处理出账、入账、汇率三选二推导及手续费隔离）
-    static std::expected<TransferAggregate, TransferRuleError> buildTransfer(
-        const Account& sourceAccount,
-        const Account& targetAccount,
-        TransferMode mode,
-        std::optional<Money> sourceAmount,
-        std::optional<Money> targetAmount,
-        std::optional<Decimal> exchangeRate,
-        std::optional<Money> feeAmount, // 独立的手续费调整项
-        FeeSource feeSource,            // 手续费扣除来源
-        std::optional<AccountId> feeAccountId, // 第三方手续费账户 ID
-        const std::string& description
-    );
-};
+    static DomainResult<TransferAggregate> build_from_outgoing_and_rate(
+        Money outgoing, AccountId source, AccountId target, ExchangeRate rate,
+        UserId user, TimePoint occurred_at, std::string description,
+        TransferGroupId placeholder_group,
+        std::optional<TransferFee> fee = std::nullopt);
 
+    static DomainResult<TransferAggregate> build_from_both_amounts(/* 同一公共尾参数 */);
+    static DomainResult<TransferAggregate> build_from_incoming_and_rate(/* 同一公共尾参数 */);
+    static DomainVoidResult validate(const TransferAggregate& aggregate);
+};
 ```
+
+完整签名以 `include/pfh/domain/transfer_domain_service.h` 为准。Domain Service 只接收已加载实体的值和强类型 ID，不加载账户、不检查 Repository、不打开事务，也不发布事件。
 
 ### 2.2 核心业务规则落地实现 (纯 C++23)
 
-以下展示跨币种转账在领域层如何进行严格的三选二公式推导，并强力确保手续费作为 `Adjustment` 离散。
+领域实现必须满足：
 
-```cpp
-// domain/services/TransferDomainService.cpp
-#include "domain/services/TransferDomainService.hpp"
-#include <cmath>
-
-std::expected<TransferAggregate, TransferRuleError> TransferDomainService::buildTransfer(
-    const Account& sourceAccount,
-    const Account& targetAccount,
-    TransferMode mode,
-    std::optional<Money> sourceAmount,
-    std::optional<Money> targetAmount,
-    std::optional<Decimal> exchangeRate,
-    std::optional<Money> feeAmount,
-    FeeSource feeSource,
-    std::optional<AccountId> feeAccountId,
-    const std::string& description)
-{
-    // 约束 1：冻结或归档账户禁止发生资金变动
-    if (sourceAccount.isArchived() || targetAccount.isArchived()) {
-        return std::unexpected(TransferRuleError::AccountFrozenOrArchived);
-    }
-
-    Money finalSource = sourceAmount.value_or(Money(Decimal(0), sourceAccount.getCurrency()));
-    Money finalTarget = targetAmount.value_or(Money(Decimal(0), targetAccount.getCurrency()));
-    Decimal finalRate = exchangeRate.value_or(Decimal(1));
-
-    // 约束 2：同币种转账特殊简化校验
-    if (sourceAccount.getCurrency() == targetAccount.getCurrency()) {
-        if (mode == TransferMode::OutgoingAndIncoming && finalSource.getAmount() != finalTarget.getAmount()) {
-            return std::unexpected(TransferRuleError::TransferImbalance);
-        }
-        finalTarget = finalSource;
-        finalRate = Decimal(1);
-    } else {
-        // 约束 3：跨币种转账根据模式强制推导第三变量（根据 04_Money_Currency_System_Design 规范）
-        switch (mode) {
-            case TransferMode::OutgoingAndRate:
-                if (!sourceAmount || !exchangeRate) return std::unexpected(TransferRuleError::TransferImbalance);
-                finalTarget = Money(finalSource.getAmount() * finalRate, targetAccount.getCurrency());
-                break;
-            case TransferMode::OutgoingAndIncoming:
-                if (!sourceAmount || !targetAmount) return std::unexpected(TransferRuleError::TransferImbalance);
-                finalRate = finalTarget.getAmount() / finalSource.getAmount();
-                break;
-            case TransferMode::IncomingAndRate:
-                if (!targetAmount || !exchangeRate) return std::unexpected(TransferRuleError::TransferImbalance);
-                finalSource = Money(finalTarget.getAmount() / finalRate, sourceAccount.getCurrency());
-                break;
-        }
-    }
-
-    if (finalSource.getAmount() <= 0 || finalTarget.getAmount() <= 0) {
-        return std::unexpected(TransferRuleError::NegativeAmount);
-    }
-
-    // 构造转账双流水聚合根
-    TransferAggregate aggregate(sourceAccount.getId(), targetAccount.getId(), finalSource, finalTarget, finalRate, description);
-
-    // 约束 4：手续费绝不隐藏在转账主金额中，作为独立 Adjustment 流水附属于聚合根
-    if (feeAmount && feeAmount->getAmount() > 0) {
-        AccountId feeOwnerAccountId = sourceAccount.getId();
-        if (feeSource == FeeSource::TargetAccount) {
-            feeOwnerAccountId = targetAccount.getId();
-        } else if (feeSource == FeeSource::ThirdParty) {
-            if (!feeAccountId) return std::unexpected(TransferRuleError::TransferImbalance);
-            feeOwnerAccountId = *feeAccountId;
-        }
-
-        Transaction feeTx(
-            TransactionId(0), // 由基础设施生成
-            feeOwnerAccountId,
-            TransactionType::Adjustment, // 显式标记为调整项
-            *feeAmount,
-            CategoryCode("SYSTEM_FEE"),
-            "手续费: " + description
-        );
-        aggregate.addAdjustment(std::move(feeTx));
-    }
-
-    return aggregate;
-}
-
-```
+1. 三种 mode 只负责三选二推导；用户提供的 authoritative amount 不得被反向重写。
+2. 同币种转账要求两端金额完全一致且不保存 exchange rate。
+3. 跨币种金额按 `NUMERIC(20,8)` Half-Even 舍入，rate 按 `NUMERIC(20,10)` 校验。
+4. 双边流水在 Domain 中使用正数 magnitude；Repository 映射为 outgoing 负、incoming 正。
+5. 手续费输入必须为正数 magnitude，`SourceAccount`/`TargetAccount` 必须匹配对应账户和币种，`ThirdParty` 必须使用不同账户。
+6. 手续费构造为负数 `Adjustment`，与两端共享 user、group 和 occurred_at，不隐藏在主金额中。
+7. Adjustment 按 signed 语义校验：零值非法，负数表示手续费/FX loss，正数预留返利/FX gain。
+8. Domain Service 不判断账户归属或归档状态；这些依赖持久化读取的规则由 Application Use Case 在同一事务中完成。
 
 ---
 
 ## 3. 应用层用例设计 (Application Use Cases)
 
-应用层位于 `application/use_cases/`。它通过依赖注入获取 Domain 仓储接口与工作单元，负责处理 I/O 编排与数据库事务。
+应用层用例位于 `include/pfh/application/use_cases/`。它通过依赖注入获取 Domain 仓储接口与工作单元，负责处理 I/O 编排与数据库事务。
 
 ### 3.1 创建跨账户转账用例 (`CreateTransferUseCase`)
 
 这是系统中最复杂的写入用例，涉及多表写入、事务保证以及领域服务的协同。
 
-```cpp
-// application/use_cases/CreateTransferUseCase.hpp
-#pragma once
-#include <memory>
-#include "domain/repositories/IAccountRepository.hpp"
-#include "domain/repositories/ITransactionRepository.hpp"
-#include "application/persistence/IUnitOfWork.hpp"
-#include "application/dto/TransferInputDTO.hpp"
+当前执行顺序固定如下：
 
-enum class UseCaseError {
-    AccountNotFound,
-    DomainRuleViolation,
-    InfrastructureFailure
-};
+1. 在事务外校验强类型 ID、mode 字段组合和手续费字段组合，非法契约直接返回 ValidationError。
+2. 打开一个 Unit of Work 事务，收集源、目标及可选第三方手续费账户 ID，去重后按 ID 升序调用 `find_by_id_for_update`。
+3. 在同一事务中校验所有账户属于当前用户且未归档；第三方手续费账户必须与两端不同。
+4. 按各账户币种解析十进制字符串，将手续费解析为选中账户币种下的 `TransferFee`。
+5. 调用纯 `TransferDomainService` 构造并校验聚合。
+6. 调用 `ITransactionRepository::save_transfer(tx_ctx, aggregate)` 原子保存 transfer group、双边流水和全部 Adjustment。
+7. 用 Repository 返回的 group/leg ID 构造 `TransferCompletedEvent`，登记到同一 Unit of Work 的 outbox。
+8. Commit 成功后返回 `TransferResultDto`；任一步失败时业务记录和 outbox 一起回滚。
 
-class CreateTransferUseCase {
-private:
-    std::shared_ptr<IAccountRepository> accountRepo_;
-    std::shared_ptr<ITransactionRepository> txRepo_;
-    std::shared_ptr<IUnitOfWork> uow_;
-
-public:
-    CreateTransferUseCase(
-        std::shared_ptr<IAccountRepository> accountRepo,
-        std::shared_ptr<ITransactionRepository> txRepo,
-        std::shared_ptr<IUnitOfWork> uow)
-        : accountRepo_(accountRepo), txRepo_(txRepo), uow_(uow) {}
-
-    std::expected<void, UseCaseError> execute(const TransferInputDTO& dto) {
-        // 1. I/O 阶段：从仓储读取源账户与目标账户实体
-        auto sourceOpt = accountRepo_->findById(AccountId(dto.sourceAccountId));
-        if (!sourceOpt) return std::unexpected(UseCaseError::AccountNotFound);
-
-        auto targetOpt = accountRepo_->findById(AccountId(dto.targetAccountId));
-        if (!targetOpt) return std::unexpected(UseCaseError::AccountNotFound);
-
-        // 2. 领域计算阶段：调用无状态领域服务执行金融核心推导规则
-        auto aggregateResult = TransferDomainService::buildTransfer(
-            *sourceOpt,
-            *targetOpt,
-            dto.mode,
-            dto.sourceAmount,
-            dto.targetAmount,
-            dto.exchangeRate,
-            dto.feeAmount,
-            dto.feeSource,
-            dto.feeAccountId,
-            dto.description
-        );
-
-        if (!aggregateResult) {
-            return std::unexpected(UseCaseError::DomainRuleViolation);
-        }
-
-        // 3. 编排持久化阶段：通过 Unit Of Work 开启强 ACID 事务
-        auto txResult = uow_->executeInTransaction([&]() -> std::expected<void, RepositoryError> {
-            // 保存转账聚合，返回持久化后的 transfer_group_id
-            auto transferGroupIdResult = txRepo_->saveTransfer(*aggregateResult);
-            if (!transferGroupIdResult) {
-                return std::unexpected(transferGroupIdResult.error());
-            }
-
-            // 将领域事件登记到当前 UoW，随后由 outbox 写入同一事务
-            uow_->registerEvent(std::make_shared<TransferCompletedEvent>(
-                sourceOpt->getId(),
-                targetOpt->getId(),
-                *transferGroupIdResult
-            ));
-
-            return {};
-        });
-
-        if (!txResult) {
-            return std::unexpected(UseCaseError::InfrastructureFailure);
-        }
-
-        return {};
-    }
-};
-
-```
+Application 必须保留精确错误语义：跨用户/不存在账户返回 NotFound，归档账户返回 ArchivedAccountOperation，契约和数值错误返回 ValidationError/DomainRuleViolation，数据库错误脱敏为 InfrastructureFailure。
 
 ### 3.2 创建常规收支用例 (`CreateTransactionUseCase`)
 
-处理单笔独立的 Income（收入）或 Expense（支出）。
+处理单笔独立的 Income、Expense 或 Adjustment。执行顺序为：
 
-```cpp
-// application/use_cases/CreateTransactionUseCase.hpp
-#pragma once
-#include <chrono>
-#include <memory>
-#include "domain/repositories/IAccountRepository.hpp"
-#include "domain/repositories/ITransactionRepository.hpp"
-#include "application/persistence/IUnitOfWork.hpp"
-#include "application/dto/TransactionInputDTO.hpp"
-
-class CreateTransactionUseCase {
-private:
-    std::shared_ptr<IAccountRepository> accountRepo_;
-    std::shared_ptr<ITransactionRepository> txRepo_;
-    std::shared_ptr<IUnitOfWork> uow_;
-
-public:
-    CreateTransactionUseCase(
-        std::shared_ptr<IAccountRepository> accountRepo,
-        std::shared_ptr<ITransactionRepository> txRepo,
-        std::shared_ptr<IUnitOfWork> uow)
-        : accountRepo_(accountRepo), txRepo_(txRepo), uow_(uow) {}
-
-    std::expected<void, UseCaseError> execute(const TransactionInputDTO& dto) {
-        auto accountOpt = accountRepo_->findById(AccountId(dto.accountId));
-        if (!accountOpt) return std::unexpected(UseCaseError::AccountNotFound);
-
-        if (accountOpt->getCurrency() != Currency(dto.currencyCode)) {
-            return std::unexpected(UseCaseError::DomainRuleViolation);
-        }
-
-        // 单笔收支不通过通用 AccountingService。
-        // Use Case 校验账户、币种、分类板块后，构造普通 Transaction。
-        Transaction transaction(
-            TransactionId(0),
-            accountOpt->getId(),
-            dto.type,
-            Money(dto.amount, Currency(dto.currencyCode)),
-            CategoryCode(dto.categoryCode),
-            dto.description
-        );
-
-        // 利用事务持久化
-        auto saveResult = uow_->executeInTransaction([&]() -> std::expected<void, RepositoryError> {
-            auto transactionIdResult = txRepo_->saveSingle(transaction);
-            if (!transactionIdResult) {
-                return std::unexpected(transactionIdResult.error());
-            }
-
-            uow_->registerEvent(std::make_shared<TransactionCreatedEvent>(
-                accountOpt->getOwner(),
-                *transactionIdResult,
-                accountOpt->getId(),
-                std::chrono::system_clock::now()
-            ));
-
-            return {};
-        });
-
-        if (!saveResult) return std::unexpected(UseCaseError::InfrastructureFailure);
-        return {};
-    }
-};
-
-```
+1. 拒绝直接创建 Transfer；Transfer 只能通过聚合用例产生。
+2. 在同一事务内锁定当前用户账户，并校验账户未归档、请求币种等于账户币种。
+3. 按 `NUMERIC(20,8)` 解析金额；Income/Expense 只接受正 magnitude，Adjustment 接受非零 signed amount。
+4. 如提供分类，通过 `ICategoryRepository` 锁定读取真实分类并校验用户归属与 board，不接受调用方伪造 board。
+5. 调用 `save_single(tx_ctx, transaction)`，并在同一 Unit of Work 登记 `TransactionCreatedEvent`。
+6. 返回 Repository 分配 ID 和规范化存储符号后的 DTO；失败时业务写入与 outbox 一起回滚。
 
 ### 3.3 初始化用户默认数据 (`InitializeUserDefaultsUseCase`)
 
 用户注册后不能面对空分类、空偏好和没有可选账户 subtype 的状态。
 注册流程必须在同一个应用层编排中初始化默认数据。
 
-```cpp
-// application/use_cases/InitializeUserDefaultsUseCase.hpp
-#pragma once
-#include <memory>
-#include "domain/repositories/ICategoryRepository.hpp"
-#include "domain/repositories/IUserPreferenceRepository.hpp"
-#include "domain/repositories/IAuditLogRepository.hpp"
-#include "application/persistence/IUnitOfWork.hpp"
-
-class InitializeUserDefaultsUseCase {
-private:
-    std::shared_ptr<ICategoryRepository> categoryRepo_;
-    std::shared_ptr<IUserPreferenceRepository> preferenceRepo_;
-    std::shared_ptr<IAuditLogRepository> auditRepo_;
-    std::shared_ptr<IUnitOfWork> uow_;
-
-public:
-    std::expected<void, UseCaseError> execute(UserId userId, Currency defaultCurrency) {
-        return uow_->executeInTransaction([&]() -> std::expected<void, RepositoryError> {
-            UserPreference preference = UserPreference::defaults(userId, defaultCurrency);
-            auto prefResult = preferenceRepo_->save(preference);
-            if (!prefResult) return prefResult;
-
-            auto categoryResult = categoryRepo_->initializeDefaultsForUser(userId);
-            if (!categoryResult) return categoryResult;
-
-            AuditLog log = AuditLog::system(
-                userId,
-                AuditAction::Create,
-                "UserDefaults",
-                std::to_string(userId.value())
-            );
-            return auditRepo_->record(log);
-        }).transform_error([](const RepositoryError&) {
-            return UseCaseError::InfrastructureFailure;
-        });
-    }
-};
-```
+该用例在 P1-S10-06/S10-07 随注册与基础资源 API 落地。它必须通过一个 Unit of Work 使用同一事务上下文调用 `IUserPreferenceRepository`、`ICategoryRepository` 与 `IAuditLogRepository`，并把 Repository 错误映射为稳定的 Application `Error`，不得在 Domain Service 中执行 seed 或数据库访问。
 
 初始化内容：
 
@@ -411,48 +157,39 @@ Seed 规则：
 
 ## 4. 数据传输对象 (DTO) 定义
 
-DTO 位于 `application/dto/`。它们是纯粹的结构体（POD），没有任何业务行为，专门用于在 Presentation 层（HTTP/JSON）与 Application 层之间安全传输数据，使应用层不直接暴露 Domain 实体。
+DTO 当前集中在 `include/pfh/application/dto.h`。它们是没有业务行为的边界结构体，专门用于在 Presentation 层（HTTP/JSON）与 Application 层之间安全传输数据，使应用层不直接暴露 Domain 实体。
 
 ```cpp
-// application/dto/TransactionInputDTO.hpp
-#pragma once
-#include <string>
-#include "domain/entities/Transaction.hpp" // 引入 TransactionType 枚举
-
-struct TransactionInputDTO {
-    int64_t accountId;
-    TransactionType type; // income 或 expense
-    Decimal amount;
-    std::string currencyCode;
-    std::string categoryCode;
+struct CreateTransactionCommand {
+    UserId user_id;
+    AccountId account_id;
+    TransactionType type;
+    std::string amount;        // Income/Expense 正 magnitude；Adjustment signed
+    std::string currency_code;
     std::string description;
+    std::optional<CategoryId> category_id;
+    std::optional<TimePoint> occurred_at;
 };
-
 ```
 
 ```cpp
-// application/dto/TransferInputDTO.hpp
-#pragma once
-#include <string>
-#include <optional>
-#include "domain/value_objects/Money.hpp"
-#include "domain/value_objects/Decimal.hpp"
-#include "domain/value_objects/TransferMode.hpp"
-
-struct TransferInputDTO {
-    int64_t sourceAccountId;
-    int64_t targetAccountId;
-    TransferMode mode;
-    std::optional<Money> sourceAmount;
-    std::optional<Money> targetAmount;
-    std::optional<Decimal> exchangeRate;
-    std::optional<Money> feeAmount;
-    FeeSource feeSource = FeeSource::SourceAccount;
-    std::optional<AccountId> feeAccountId;
+struct CreateTransferCommand {
+    UserId user_id;
+    AccountId source_account_id;
+    AccountId target_account_id;
+    TransferInputMode mode;
+    std::string outgoing_amount;
+    std::string incoming_amount;
+    std::string rate;
+    std::optional<std::string> fee_amount;
+    std::optional<FeeSource> fee_source;
+    std::optional<AccountId> fee_account_id;
     std::string description;
+    std::optional<TimePoint> occurred_at;
 };
-
 ```
+
+Application DTO 保留字符串金额，只有 Use Case/Domain 解析为 `Decimal`/`Money`。HTTP 使用 camelCase 的映射由 Presentation 层负责，不能让 JSON 模型直接进入 Domain。
 
 ---
 
@@ -462,9 +199,9 @@ struct TransferInputDTO {
 
 ### 5.1 错误链条单向传导机制
 
-- **Domain 层错误**：`TransferRuleError`（表达违反纯粹转账规则，如：金额平衡失败）。
+- **Domain 层错误**：`DomainError` / `DomainErrorCode`（表达纯领域规则，如金额平衡或币种不匹配）。
 - **Infrastructure 层错误**：`RepositoryError`（表达底层数据库连接中断、违反唯一索引等故障）。
-- **Application 层错误**：`UseCaseError`（对表现层暴露的顶层高维概括错误）。
+- **Application 层错误**：`Error` / `ErrorCode`（对 Presentation 暴露稳定、脱敏的错误类别）。
 
 ### 5.2 表现层（Presentation）响应映射准则
 
@@ -472,17 +209,20 @@ struct TransferInputDTO {
 
 ```cpp
 // 示例：在 presentation 模块中如何消费用例的返回值并转化为 HTTP 状态码
-void HandleTransferResult(const std::expected<void, UseCaseError>& result) {
+void HandleTransferResult(const Result<TransferResultDto>& result) {
     if (!result) {
-        switch (result.error()) {
-            case UseCaseError::AccountNotFound:
+        switch (result.error().code) {
+            case ErrorCode::NotFound:
                 // 映射为 HTTP 404 Not Found
                 break;
-            case UseCaseError::DomainRuleViolation:
+            case ErrorCode::DomainRuleViolation:
                 // 映射为 HTTP 422 Unprocessable Entity (业务规则冲突)
                 break;
-            case UseCaseError::InfrastructureFailure:
+            case ErrorCode::InfrastructureFailure:
                 // 映射为 HTTP 500 Internal Server Error
+                break;
+            default:
+                // 其余映射遵循 15_Error_Handling_Design.md
                 break;
         }
     } else {

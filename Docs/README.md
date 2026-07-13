@@ -37,6 +37,8 @@ Docs/
 │   ├── Phase_1_S07_Delivery_Summary.md # Phase 1 S07 数据库迁移与持久化基础交付记录
 │   ├── Phase_1_S08_Delivery_Summary.md # Phase 1 S08 Repository 与 Unit of Work 交付记录
 │   ├── Phase_1_S09_Delivery_Summary.md # Phase 1 S09 Application Use Cases 交付记录
+│   ├── Phase_1_S10_Delivery_Summary.md # Phase 1 S10 累计交付记录（进行中）
+│   ├── Phase_1_S10_PostgreSQL_Persistence_Validation_Report.md # V3 外部复测最终报告
 │   └── Tasks.md                        # 待办任务跟踪
 │
 ├── Development_Plans/                  # 阶段性开发计划
@@ -78,7 +80,7 @@ Docs/
 5. **事务后事件派发 (Post-Commit Dispatch)**：在 `DrogonUnitOfWork` 物理 Commit 成功后才派发领域事件，防止事务回滚导致事件错误派发。
 6. **全局异常拦截**：通过 Drogon 全局异常处理器捕获非预期异常，生成唯一 `TraceId`，在保障生产环境安全（不泄露敏感信息）的同时提供完整的服务端日志追溯。
 
-当前进度（2026-07-13）：P1-S01 至 P1-S09 已完成，正在进入 P1-S10。Windows GCC 16 的 253 个现有测试已通过；Drogon/PostgreSQL 生产接线、REST API、后台任务和 P1-S12 真实环境验收尚未完成。Linux、Docker、PostgreSQL 16+、Debug/Release 与真实运行时测试将在另一台机器执行，结果回写前不得视为 Phase 1 已完成。
+当前进度（2026-07-13）：P1-S01 至 P1-S09 与 P1-S10-01 已完成，正在执行 P1-S10-02 及后续内容。Windows GCC 16 当前 271/271 通过；V3 已在外部 PostgreSQL 16.14 + Flyway 10.22.0 空库复测通过。Drogon/PostgreSQL 生产接线、REST API、后台任务和 P1-S12 完整真实环境验收尚未完成，不能据此视为 Phase 1 已完成。
 
 ---
 
@@ -88,7 +90,7 @@ Docs/
 
 - **UserPreference 存储设计**：`02_Database_Design.md`、`03_Domain_Model_Design.md`、`04_Money_Currency_System_Design.md` 与 `05_Repository_and_Persistence_Design.md` 已统一为“领域对象由 `users.base_currency_code` 默认值与 `user_preferences` 扩展偏好组合映射”。
 - **服务命名与职责边界**：应用层统一使用 `RefreshExchangeRatesUseCase` 负责调度和 I/O 编排，领域层统一使用 `CurrencyConversionService` 负责纯内存汇率折算。
-- **手续费扣除灵活性**：`TransferDomainService::buildTransfer` 已引入 `FeeSource`，覆盖源账户、目标账户与第三方账户扣费场景。
+- **手续费扣除灵活性**：`TransferDomainService` 三种构造模式均支持可选 `TransferFee`，覆盖源账户、目标账户与第三方账户扣费，并落为独立负 Adjustment。
 - **事务与事件一致性**：`DrogonUnitOfWork` 的事务闭包必须绑定同一个数据库事务上下文，业务写入和 outbox 写入同事务提交，提交前不直接派发事件。
 - **报表大数据折算优化**：`09_Reporting_and_Analytics_Design.md` 已补充 SQL 端提前折算方案；缺失汇率时返回明确错误，不使用 `0` 或 `1` 等默认值参与财务计算。
 

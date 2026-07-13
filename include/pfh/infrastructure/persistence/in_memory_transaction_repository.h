@@ -72,9 +72,9 @@ public:
                 "Transaction amount does not fit NUMERIC(20,8)"));
         }
 
-        // Ownership isolation: account must exist and belong to same user.
-        if (auto account_check = ensure_account_owned_by(
-                transaction.account_id(), transaction.user_id());
+        // Ownership and currency isolation: every transaction amount is
+        // denominated in the account's own currency.
+        if (auto account_check = ensure_account_matches_transaction(transaction);
             !account_check.has_value()) {
             return std::unexpected(account_check.error());
         }
@@ -148,6 +148,23 @@ public:
             if (!adjustment.amount().amount().fits_numeric_20_8()) {
                 return std::unexpected(domain::RepositoryError::validation(
                     "Transfer adjustment does not fit NUMERIC(20,8)"));
+            }
+            if (adjustment.type() != domain::TransactionType::Adjustment ||
+                adjustment.user_id() != outgoing.user_id()) {
+                return std::unexpected(domain::RepositoryError::validation(
+                    "Transfer adjustments must be Adjustment rows owned by the transfer user"));
+            }
+            if (adjustment.transfer_group_id().has_value() &&
+                adjustment.transfer_group_id()->is_valid() &&
+                outgoing.transfer_group_id().has_value() &&
+                outgoing.transfer_group_id()->is_valid() &&
+                adjustment.transfer_group_id() != outgoing.transfer_group_id()) {
+                return std::unexpected(domain::RepositoryError::validation(
+                    "Transfer adjustment must share transfer_group_id"));
+            }
+            if (auto check = ensure_account_matches_transaction(adjustment);
+                !check.has_value()) {
+                return std::unexpected(check.error());
             }
         }
 
@@ -251,9 +268,23 @@ public:
             incoming.deleted_at());
         store_.staged_transactions.insert_or_assign(in_tx.id().value(), in_tx);
 
-        // Persist adjustments (if any) as independent transactions.
+        // Persist adjustments as independent rows in the assigned aggregate.
+        // Domain instances carry an invalid placeholder group id at create
+        // time, so reconstruct each row with the database-assigned id first.
         for (const auto& adj : transfer.adjustments()) {
-            auto adj_result = save_single(tx, adj);
+            domain::Transaction grouped_adjustment(
+                adj.id(),
+                adj.user_id(),
+                adj.account_id(),
+                adj.amount(),
+                adj.type(),
+                adj.occurred_at(),
+                adj.description(),
+                adj.category_id(),
+                assigned_group,
+                adj.created_at(),
+                adj.deleted_at());
+            auto adj_result = save_single(tx, grouped_adjustment);
             if (!adj_result.has_value()) {
                 return std::unexpected(adj_result.error());
             }
@@ -371,23 +402,22 @@ public:
         }
         auto merged = merge_transactions();
 
-        // 1. Collect the transfer groups that have at least one leg on this
-        //    account.
+        // 1. Collect every transfer group with any member on this account.
+        //    A grouped fee Adjustment makes its third-party account part of
+        //    the aggregate just as the two Transfer legs do.
         std::set<std::int64_t> group_ids;
         for (const auto& [id, tx] : merged) {
-            if (tx.type() == domain::TransactionType::Transfer &&
-                tx.account_id() == account_id &&
+            if (tx.account_id() == account_id &&
                 tx.transfer_group_id().has_value() &&
                 tx.transfer_group_id()->is_valid()) {
                 group_ids.insert(tx.transfer_group_id()->value());
             }
         }
 
-        // 2. Delete every leg belonging to those groups (both sides), then the
-        //    group rows themselves.
+        // 2. Delete every row belonging to those groups: both Transfer legs
+        //    and all grouped Adjustments, then the group rows themselves.
         for (const auto& [id, tx] : merged) {
-            if (tx.type() == domain::TransactionType::Transfer &&
-                tx.transfer_group_id().has_value() &&
+            if (tx.transfer_group_id().has_value() &&
                 group_ids.count(tx.transfer_group_id()->value()) > 0) {
                 store_.staged_transactions.erase(id);
                 store_.staged_deleted_transactions.push_back(id);
@@ -429,29 +459,34 @@ private:
         return false;
     }
 
-    [[nodiscard]] domain::RepositoryVoidResult ensure_account_owned_by(
-        domain::AccountId account_id,
-        domain::UserId user_id) const {
+    [[nodiscard]] domain::RepositoryVoidResult ensure_account_matches_transaction(
+        const domain::Transaction& transaction) const {
         const domain::Account* acc = nullptr;
         if (store_.in_transaction) {
-            if (auto it = store_.staged_accounts.find(account_id.value());
+            if (auto it = store_.staged_accounts.find(transaction.account_id().value());
                 it != store_.staged_accounts.end()) {
                 acc = &it->second;
             }
         }
         if (acc == nullptr) {
-            if (auto it = store_.accounts.find(account_id.value());
+            if (auto it = store_.accounts.find(transaction.account_id().value());
                 it != store_.accounts.end()) {
                 acc = &it->second;
             }
         }
         if (acc == nullptr) {
             return std::unexpected(domain::RepositoryError::not_found(
-                "Account not found: " + account_id.to_string()));
+                "Account not found: " + transaction.account_id().to_string()));
         }
-        if (acc->owner() != user_id) {
+        if (acc->owner() != transaction.user_id()) {
             return std::unexpected(domain::RepositoryError::validation(
                 "Account does not belong to user"));
+        }
+        if (!(acc->currency() == transaction.amount().currency())) {
+            return std::unexpected(domain::RepositoryError::validation(
+                "Transaction currency does not match account currency: " +
+                transaction.amount().currency().code() + " vs " +
+                acc->currency().code()));
         }
         return {};
     }
@@ -501,33 +536,7 @@ private:
     // must exist, belong to the leg's user, and carry the leg's currency.
     [[nodiscard]] domain::RepositoryVoidResult ensure_account_matches_leg(
         const domain::Transaction& leg) const {
-        const domain::Account* acc = nullptr;
-        if (store_.in_transaction) {
-            if (auto it = store_.staged_accounts.find(leg.account_id().value());
-                it != store_.staged_accounts.end()) {
-                acc = &it->second;
-            }
-        }
-        if (acc == nullptr) {
-            if (auto it = store_.accounts.find(leg.account_id().value());
-                it != store_.accounts.end()) {
-                acc = &it->second;
-            }
-        }
-        if (acc == nullptr) {
-            return std::unexpected(domain::RepositoryError::not_found(
-                "Account not found: " + leg.account_id().to_string()));
-        }
-        if (acc->owner() != leg.user_id()) {
-            return std::unexpected(domain::RepositoryError::validation(
-                "Account does not belong to user"));
-        }
-        if (!(acc->currency() == leg.amount().currency())) {
-            return std::unexpected(domain::RepositoryError::validation(
-                "Transfer leg currency does not match account currency: " +
-                leg.amount().currency().code() + " vs " + acc->currency().code()));
-        }
-        return {};
+        return ensure_account_matches_transaction(leg);
     }
 
     InMemoryStore& store_;

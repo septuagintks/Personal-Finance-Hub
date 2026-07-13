@@ -190,4 +190,119 @@ TEST(TransferDomainService, WhenValidatingConsistentTransfer_Passes) {
     EXPECT_TRUE(validation.has_value());
 }
 
+// ---- Fee adjustments ----
+
+TEST(TransferDomainService, WhenSourceFeeProvided_CreatesNegativeAdjustment) {
+    auto transfer = TransferDomainService::build_from_both_amounts(
+        money("100", "USD"),
+        money("100", "USD"),
+        AccountId(1),
+        AccountId(2),
+        UserId(100),
+        sample_time(),
+        "Internal move",
+        TransferGroupId(999),
+        TransferFee{FeeSource::SourceAccount, AccountId(1), money("2.5", "USD")});
+
+    ASSERT_TRUE(transfer.has_value()) << transfer.error().message;
+    ASSERT_EQ(transfer->adjustments().size(), 1u);
+    const auto& fee = transfer->adjustments().front();
+    EXPECT_EQ(fee.type(), TransactionType::Adjustment);
+    EXPECT_EQ(fee.account_id(), AccountId(1));
+    EXPECT_EQ(fee.user_id(), UserId(100));
+    EXPECT_EQ(fee.amount().to_string(), "-2.5 USD");
+    EXPECT_EQ(fee.transfer_group_id(), transfer->transfer_group_id());
+    EXPECT_EQ(fee.occurred_at(), sample_time());
+    EXPECT_EQ(fee.description(), "Transfer fee: Internal move");
+}
+
+TEST(TransferDomainService, WhenTargetFeeProvided_UsesTargetCurrencyAndAccount) {
+    auto transfer = TransferDomainService::build_from_outgoing_and_rate(
+        money("100", "USD"),
+        AccountId(1),
+        AccountId(2),
+        rate("USD", "CNY", "7.18"),
+        UserId(100),
+        sample_time(),
+        "Cross-currency move",
+        TransferGroupId(999),
+        TransferFee{FeeSource::TargetAccount, AccountId(2), money("3", "CNY")});
+
+    ASSERT_TRUE(transfer.has_value()) << transfer.error().message;
+    ASSERT_EQ(transfer->adjustments().size(), 1u);
+    EXPECT_EQ(transfer->adjustments().front().account_id(), AccountId(2));
+    EXPECT_EQ(transfer->adjustments().front().amount().to_string(), "-3 CNY");
+}
+
+TEST(TransferDomainService, WhenThirdPartyFeeProvided_AllowsItsOwnCurrency) {
+    auto transfer = TransferDomainService::build_from_both_amounts(
+        money("100", "USD"),
+        money("100", "USD"),
+        AccountId(1),
+        AccountId(2),
+        UserId(100),
+        sample_time(),
+        "Internal move",
+        TransferGroupId(999),
+        TransferFee{FeeSource::ThirdParty, AccountId(3), money("5", "CNY")});
+
+    ASSERT_TRUE(transfer.has_value()) << transfer.error().message;
+    ASSERT_EQ(transfer->adjustments().size(), 1u);
+    EXPECT_EQ(transfer->adjustments().front().account_id(), AccountId(3));
+    EXPECT_EQ(transfer->adjustments().front().amount().to_string(), "-5 CNY");
+}
+
+TEST(TransferDomainService, WhenFeeIsNotPositive_ReturnsError) {
+    for (const auto* invalid_amount : {"0", "-1"}) {
+        auto transfer = TransferDomainService::build_from_both_amounts(
+            money("100", "USD"),
+            money("100", "USD"),
+            AccountId(1),
+            AccountId(2),
+            UserId(100),
+            sample_time(),
+            "Internal move",
+            TransferGroupId(999),
+            TransferFee{
+                FeeSource::SourceAccount,
+                AccountId(1),
+                money(invalid_amount, "USD")});
+
+        ASSERT_FALSE(transfer.has_value());
+        EXPECT_EQ(transfer.error().code, DomainErrorCode::InvalidAmount);
+    }
+}
+
+TEST(TransferDomainService, WhenFeeSourceAccountDoesNotMatch_ReturnsError) {
+    auto transfer = TransferDomainService::build_from_both_amounts(
+        money("100", "USD"),
+        money("100", "USD"),
+        AccountId(1),
+        AccountId(2),
+        UserId(100),
+        sample_time(),
+        "Internal move",
+        TransferGroupId(999),
+        TransferFee{FeeSource::SourceAccount, AccountId(2), money("2", "USD")});
+
+    ASSERT_FALSE(transfer.has_value());
+    EXPECT_EQ(transfer.error().code, DomainErrorCode::InvalidOperation);
+}
+
+TEST(TransferDomainService, WhenFeeCurrencyDoesNotMatchSelectedLeg_ReturnsError) {
+    auto transfer = TransferDomainService::build_from_outgoing_and_rate(
+        money("100", "USD"),
+        AccountId(1),
+        AccountId(2),
+        rate("USD", "CNY", "7.18"),
+        UserId(100),
+        sample_time(),
+        "Cross-currency move",
+        TransferGroupId(999),
+        TransferFee{FeeSource::TargetAccount, AccountId(2), money("3", "USD")});
+
+    ASSERT_FALSE(transfer.has_value());
+    EXPECT_EQ(transfer.error().code, DomainErrorCode::CurrencyMismatch);
+}
+
 } // namespace pfh::test

@@ -5,8 +5,8 @@
 // TransferAggregate is the root of a transfer operation, which always consists
 // of exactly two Transaction records (outgoing + incoming) linked by a
 // transfer_group_id, both marked as TransactionType::Transfer. Optional
-// adjustments (fees, FX loss/gain) are represented as separate Adjustment or
-// Expense transactions.
+// adjustments (fees, FX loss/gain) are represented as separate signed
+// Adjustment transactions.
 //
 // Three construction modes are supported:
 // 1. Outgoing + Rate => Incoming (user specifies source amount and exchange rate)
@@ -23,6 +23,7 @@
 #include "pfh/domain/exchange_rate.h"
 #include "pfh/domain/transaction.h"
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace pfh::domain {
@@ -40,6 +41,17 @@ enum class FeeSource {
     SourceAccount,  ///< Fee deducted from the source account (most common).
     TargetAccount,  ///< Fee deducted from the target account.
     ThirdParty      ///< Fee charged to a separate account (e.g., fee account).
+};
+
+/// @brief Resolved fee input passed to the pure domain service.
+///
+/// Application code resolves and locks the selected account first. The amount
+/// is a positive magnitude in that account's currency; the domain service
+/// converts it to a negative Adjustment inside the transfer aggregate.
+struct TransferFee {
+    FeeSource source;
+    AccountId account_id;
+    Money amount;
 };
 
 /// @brief Transfer aggregate root — encapsulates a paired transfer.

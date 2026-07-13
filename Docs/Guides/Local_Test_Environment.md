@@ -189,6 +189,10 @@ Initialization complete (application logic pending)
   implementation. Current HEAD requires the CMake chrono-tzdb probe to pass and
   must be revalidated on Linux with `tzdata`; this historical result is not a
   current-head Linux sign-off.
+- A later external PostgreSQL 16.14/Flyway 10.22.0 run validated V1-V3 and the
+  then-current 254-test baseline; see
+  `Docs/Development/Phase_1_S10_PostgreSQL_Persistence_Validation_Report.md`.
+  The P1-S10-01 271-test HEAD still requires the final P1-S12 Linux rerun.
 - Keep `build/` and `config/config.local.json` local.
 - Run Linux validation before phase delivery or before merging phase work back to `main`.
 - Implement PostgreSQL/Drogon production adapters in P1-S10, then re-run the shared repository scenarios against PostgreSQL 16+ on the external P1-S12 machine.

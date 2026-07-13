@@ -30,16 +30,16 @@ Status: Active
 
 ### 2.1 近期顺序
 
-1. 执行 P1-S10-01，先固定 REST 契约、金额符号、流水并发策略与转账删除边界，并完成 #48。
-2. 执行 P1-S10-02 至 S10-04，落地 CMake 分层目标、PostgreSQL Repository、`DrogonUnitOfWork`、composition root 与 RLS 上下文。
-3. 执行 P1-S10-05 至 S10-10，按统一 HTTP 边界、认证、基础资源、Transaction、Transfer、Report 的顺序接入 `/api/v1`。
-4. 执行 P1-S10-11，补齐 API 测试和 S10 交付总结；S10 完整通过后进入 P1-S11。
-5. P1-S12 在另一台机器完成 Linux、Docker、PostgreSQL 16+、Debug/Release 和真实运行时阻断门禁。
+1. 执行 P1-S10-02 至 S10-04，落地 CMake 分层目标、PostgreSQL Repository、`DrogonUnitOfWork`、composition root 与 RLS 上下文。
+2. 执行 P1-S10-05 至 S10-10，按统一 HTTP 边界、认证、基础资源、Transaction、Transfer、Report 的顺序接入 `/api/v1`。
+3. 执行 P1-S10-11，补齐 API 测试并完成 S10 交付总结；S10 完整通过后进入 P1-S11。
+4. P1-S12 在另一台机器完成 Linux、Docker、PostgreSQL 16+、Debug/Release 和真实运行时阻断门禁。
 
 ### 2.2 当前前置条件
 
 - P1-S01 至 P1-S09 的 Domain、Application 与 In-Memory 验证基线已完成。
 - P1-S10 以 `Docs/Development_Plans/Phase_1/Phase_1_Detailed_Development_Plan.md` 的 3.10 节为执行边界。
+- P1-S10-01 已完成，当前 Windows GCC 16 基线为 254 个 unit/use-case、16 个 In-Memory integration 和 1 个 migration gate，共 271/271。
 - CMake configure 必须通过 `std::chrono` IANA tzdb 能力探测；Linux 运行环境必须安装 `tzdata`。
 - PostgreSQL/Drogon 真实适配器仍属于 #46，生产写路径不得以 In-Memory 结果代替连库验收。
 
@@ -132,7 +132,7 @@ Status: Active
 
 - [ ] 实现注册、登录、刷新、登出、JWT Filter、Refresh Token rotation/revocation 与黑名单撤销（P1-S10-06）<!-- id: 40 -->
 - [ ] 补齐账户创建/归档、分类、标签、用户偏好 Application Use Case，并实现基础资源、`AccountController` 与 `TransactionController`；Presentation 不直接编排 Repository，金额字段以字符串接收和返回（P1-S10-07/S10-08）<!-- id: 41 -->
-- [ ] 实现 `TransferController`，覆盖三种转账输入模式、手续费来源和 422 业务错误响应（P1-S10-09，依赖 #48）<!-- id: 42 -->
+- [ ] 实现 `TransferController`，覆盖三种转账输入模式、手续费来源和 422 业务错误响应（P1-S10-09；#48 已完成）<!-- id: 42 -->
 - [ ] 实现 `ReportController`，支持 net worth、cash flow 与 dashboard summary（P1-S10-10）<!-- id: 43 -->
 - [ ] 实现 HTTP DTO/parser/mapper 与统一错误响应，将 `std::expected` 映射到 HTTP 状态码并附带 TraceId（P1-S10-05）<!-- id: 44 -->
 - [ ] 注册 Drogon 全局异常处理器，确保生产响应不泄露堆栈、SQL、路径、密钥或底层异常文本（P1-S10-05）<!-- id: 45 -->
@@ -177,8 +177,8 @@ Status: Active
 - [~] 实现 `ICategoryRepository`，由仓储解析分类 board，替换 `CreateTransactionCommand.category_board` 的显式传入方式 <!-- id: 47 -->
   - 进展（S09 review 收尾）：已交付接口 + In-Memory 实现（含锁定读取与 `resolve_root_id_for_user`），`CreateTransactionUseCase` 已将分类仓储设为必需依赖并按 `user_id + category_id` 读取真实 board；命令中的 `category_board` 已移除，报表也已接入一级分类聚合。
   - 剩余：实现 PostgreSQL `CategoryRepositoryImpl` 并用真实事务/并发场景复核（随 #46、S12）。
-- [ ] 实现转账手续费 / 汇兑损益路径：`CreateTransferCommand` 支持 `FeeSource` 与手续费金额，用例构造独立 `Adjustment` 流水，并测试「手续费不误计入 income/expense」 <!-- id: 48 -->
-  - 执行归属：P1-S10-01 完成 Application 契约与用例，P1-S10-09 接入 Transfer API；该项完成前不得暴露手续费字段。
+- [x] 实现转账手续费 / 汇兑损益承载路径：`CreateTransferCommand` 支持 `FeeSource`、手续费金额与可选第三方账户，用例构造独立 signed `Adjustment`，并测试余额、cash flow、原子回滚与级联删除 <!-- id: 48 -->
+  - P1-S10-01 已完成 Application/Domain/Repository 接线；P1-S10-09 只负责 Transfer API 暴露。手续费为负 Adjustment，未来 FX gain/loss 继续复用 signed Adjustment；在没有市场基准汇率输入时不自动虚构汇兑损益。
 
 ### 5.2 中优先级
 
@@ -199,8 +199,8 @@ Status: Active
 - [ ] 在另一台机器执行 P1-S12：Linux Debug/Release 构建、Docker 服务启动、PostgreSQL 16+ 空库迁移、真实 Repository/UoW/RLS/并发/数值边界、API smoke、Outbox/Scheduler 测试，并记录 commit hash、环境版本、命令和结果 <!-- id: 57 -->
   - 说明：当前开发机无可用 WSL/Docker；该任务必须保留到取得可追溯测试结果，不能用 Windows 或 In-Memory 基线代替。
 
-- [ ] V3 修复后在 PostgreSQL 16+ + Flyway OSS 10.22+ 环境上对 V1–V3 全部迁移做真实空库 `flyway migrate` / `info` / `validate` 复跑，确认 §6.5 的 28 处 enum cast 修复有效（本机已通过离线门禁但未连真实 DB） <!-- id: 58 -->
-  - 本轮已交付 `migration_enum_casts` CTest 门禁，mutation 验证通过；但仅抓语法/cast 模式，CHECK / FK / RLS / trigger 等运行时约束需真实 PostgreSQL。
+- [x] V3 修复后在 PostgreSQL 16.14 + Flyway OSS 10.22.0 环境对 V1-V3 执行真实空库 `migrate` / `info` / `validate`、第二次 no-op、种子数据断言和完整 CTest，确认 28 处 enum cast 修复有效 <!-- id: 58 -->
+  - 外部复测提交 `4621f69`：33 条币种、55 条分类模板、27 root + 28 child、40 expense + 15 income 全部符合预期，254/254 CTest 通过；该结论只关闭迁移缺陷，不替代 #46 的真实 Repository/UoW/RLS 验收。
 
 ---
 
@@ -241,8 +241,19 @@ S10 报告 §4.2 暴露：V3 中 7 段二级分类 `INSERT ... SELECT ... UNION 
 3. 在根 `CMakeLists.txt` 用 `add_test(migration_enum_casts ...)` 挂入 CTest，离线可跑，无需 PostgreSQL/Flyway/Docker；带 `migrations` / `sql` 标签。
 4. Mutation 验证：临时把一行 `'expense'::category_board` 改回 `'expense'`，门禁 FAIL；还原后 PASS（不漏报、不误报）。
 
-未做（按用户在第二轮的指示）：
-- 本机无 PostgreSQL/Flyway/Docker，**未做真实空库 `flyway migrate` 复跑**。修复后能否在 PG 16.14 + Flyway OSS 10.22 上跑通，仍需在具备 DB 环境的 S12（或本地起临时实例）实测后再定稿。
+后续已在外部 macOS ARM64 + Colima Ubuntu 24.04 环境完成真实复测：PostgreSQL 16.14 空库 V1-V3、Flyway `migrate/info/validate`、第二次 no-op、全部种子断言与 254/254 CTest 均通过。详细结果见 `Phase_1_S10_PostgreSQL_Persistence_Validation_Report.md`。
 
 新增跟踪项：
 - 当前机器无可用 WSL 发行版或 Docker，未执行当前 HEAD 的 Linux 测试；仅确认 Windows GCC 16 的 CMake tzdb 探针通过。合并 Phase 分支前必须按 `Docs/Guides/Linux_Development_Workflow.md` 在安装 `tzdata` 的 Linux 环境重新构建并全量测试。
+
+---
+
+## 7. P1-S10-01 交付记录
+
+- 固定三种转账 mode 的严格字段组合，派生字段不得与输入字段同时出现。
+- `CreateTransferCommand` 增加 `fee_amount`、`fee_source`、`fee_account_id`；Source/Target 禁止第三方 ID，ThirdParty 要求同用户、未归档且不同于两端账户。
+- 手续费按所选账户币种解析正数 magnitude，并在 `TransferAggregate` 内构造负数 `Adjustment`；Transfer 双边流水不计收支，手续费计入 expense。
+- 源、目标和第三方手续费账户在同一事务内按 ID 升序锁定；聚合保存为 group + 双边流水 + Adjustment + outbox 原子边界。
+- 修复 In-Memory grouped Adjustment 未替换真实 group ID、聚合删除遗漏 Adjustment、普通流水仓储未校验账户币种三个缺口。
+- 新增 17 项测试；当前 Windows GCC 16 Debug 基线为 254 unit/use-case + 16 In-Memory integration + 1 migration gate，合计 271/271 PASS。
+- P1-S10 仍在进行中；下一步为 P1-S10-02，真实 PostgreSQL 聚合语义继续由 #46 与 P1-S12 阻断。

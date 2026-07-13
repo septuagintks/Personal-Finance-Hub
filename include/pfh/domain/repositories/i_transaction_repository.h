@@ -84,9 +84,9 @@ public:
         AccountId account_id) = 0;
 
     /// @brief Physically delete every transfer aggregate that touches this
-    /// account: both legs (including the one on the counterpart account) and the
-    /// transfer_groups row. This prevents dangerous account deletion from
-    /// leaving a dangling half-transfer on the other side.
+    /// account through either a Transfer leg or grouped Adjustment: both legs,
+    /// every grouped Adjustment, and the transfer_groups row. This prevents
+    /// dangerous account deletion from leaving a partial aggregate.
     [[nodiscard]] virtual RepositoryVoidResult physical_delete_transfers_touching_account(
         ITransactionContext& tx,
         AccountId account_id) = 0;

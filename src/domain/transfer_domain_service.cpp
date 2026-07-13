@@ -29,6 +29,81 @@ namespace {
         transfer_group_id);
 }
 
+[[nodiscard]] DomainResult<std::vector<Transaction>> make_fee_adjustments(
+    const std::optional<TransferFee>& fee,
+    AccountId source_account,
+    AccountId target_account,
+    const Currency& source_currency,
+    const Currency& target_currency,
+    UserId user_id,
+    Transaction::TimePoint occurred_at,
+    const std::string& description,
+    TransferGroupId transfer_group_id) {
+    if (!fee.has_value()) {
+        return std::vector<Transaction>{};
+    }
+    if (!fee->account_id.is_valid()) {
+        return std::unexpected(DomainError::invalid_operation(
+            "Transfer fee account must be valid"));
+    }
+    if (!fee->amount.amount().is_positive()) {
+        return std::unexpected(DomainError::invalid_amount(
+            "transfer fee must be a positive magnitude"));
+    }
+    if (!fee->amount.amount().fits_numeric_20_8()) {
+        return std::unexpected(DomainError::invalid_amount(
+            "transfer fee does not fit NUMERIC(20,8)"));
+    }
+
+    switch (fee->source) {
+    case FeeSource::SourceAccount:
+        if (fee->account_id != source_account) {
+            return std::unexpected(DomainError::invalid_operation(
+                "SourceAccount fee must use the transfer source account"));
+        }
+        if (!(fee->amount.currency() == source_currency)) {
+            return std::unexpected(DomainError::currency_mismatch(
+                source_currency.code(), fee->amount.currency().code()));
+        }
+        break;
+    case FeeSource::TargetAccount:
+        if (fee->account_id != target_account) {
+            return std::unexpected(DomainError::invalid_operation(
+                "TargetAccount fee must use the transfer target account"));
+        }
+        if (!(fee->amount.currency() == target_currency)) {
+            return std::unexpected(DomainError::currency_mismatch(
+                target_currency.code(), fee->amount.currency().code()));
+        }
+        break;
+    case FeeSource::ThirdParty:
+        if (fee->account_id == source_account || fee->account_id == target_account) {
+            return std::unexpected(DomainError::invalid_operation(
+                "ThirdParty fee account must differ from both transfer accounts"));
+        }
+        break;
+    default:
+        return std::unexpected(DomainError::invalid_operation(
+            "Unsupported transfer fee source"));
+    }
+
+    const std::string fee_description = description.empty()
+        ? "Transfer fee"
+        : "Transfer fee: " + description;
+    std::vector<Transaction> adjustments;
+    adjustments.emplace_back(
+        TransactionId{},
+        user_id,
+        fee->account_id,
+        fee->amount.negated(),
+        TransactionType::Adjustment,
+        occurred_at,
+        fee_description,
+        std::nullopt,
+        transfer_group_id);
+    return adjustments;
+}
+
 // NOTE: The domain service must NOT generate persistence IDs. It builds
 // transactions with unassigned (invalid) ids; the repository / DB sequence
 // assigns the real TransactionId and TransferGroupId at save time. This avoids
@@ -44,7 +119,8 @@ DomainResult<TransferAggregate> TransferDomainService::build_from_outgoing_and_r
     UserId user_id,
     Transaction::TimePoint occurred_at,
     std::string description,
-    TransferGroupId transfer_group_id) {
+    TransferGroupId transfer_group_id,
+    std::optional<TransferFee> fee) {
     if (!outgoing_amount.amount().fits_numeric_20_8()) {
         return std::unexpected(DomainError::invalid_amount(
             "outgoing transfer amount does not fit NUMERIC(20,8)"));
@@ -90,12 +166,26 @@ DomainResult<TransferAggregate> TransferDomainService::build_from_outgoing_and_r
         description,
         transfer_group_id);
 
+    auto adjustments = make_fee_adjustments(
+        fee,
+        source_account,
+        target_account,
+        outgoing_amount.currency(),
+        persisted_incoming.currency(),
+        user_id,
+        occurred_at,
+        description,
+        transfer_group_id);
+    if (!adjustments) {
+        return std::unexpected(adjustments.error());
+    }
+
     TransferAggregate aggregate(
         TransferMode::OutgoingAndRate,
         std::move(outgoing_tx),
         std::move(incoming_tx),
         rate,
-        {});
+        std::move(*adjustments));
 
     // Validate consistency.
     if (auto validation = validate(aggregate); !validation) {
@@ -113,7 +203,8 @@ DomainResult<TransferAggregate> TransferDomainService::build_from_both_amounts(
     UserId user_id,
     Transaction::TimePoint occurred_at,
     std::string description,
-    TransferGroupId transfer_group_id) {
+    TransferGroupId transfer_group_id,
+    std::optional<TransferFee> fee) {
     if (!outgoing_amount.amount().fits_numeric_20_8() ||
         !incoming_amount.amount().fits_numeric_20_8()) {
         return std::unexpected(DomainError::invalid_amount(
@@ -167,12 +258,26 @@ DomainResult<TransferAggregate> TransferDomainService::build_from_both_amounts(
         description,
         transfer_group_id);
 
+    auto adjustments = make_fee_adjustments(
+        fee,
+        source_account,
+        target_account,
+        outgoing_amount.currency(),
+        incoming_amount.currency(),
+        user_id,
+        occurred_at,
+        description,
+        transfer_group_id);
+    if (!adjustments) {
+        return std::unexpected(adjustments.error());
+    }
+
     TransferAggregate aggregate(
         TransferMode::OutgoingAndIncoming,
         std::move(outgoing_tx),
         std::move(incoming_tx),
         rate,
-        {});
+        std::move(*adjustments));
 
     // Validate consistency.
     if (auto validation = validate(aggregate); !validation) {
@@ -190,7 +295,8 @@ DomainResult<TransferAggregate> TransferDomainService::build_from_incoming_and_r
     UserId user_id,
     Transaction::TimePoint occurred_at,
     std::string description,
-    TransferGroupId transfer_group_id) {
+    TransferGroupId transfer_group_id,
+    std::optional<TransferFee> fee) {
     if (!incoming_amount.amount().fits_numeric_20_8()) {
         return std::unexpected(DomainError::invalid_amount(
             "incoming transfer amount does not fit NUMERIC(20,8)"));
@@ -241,12 +347,26 @@ DomainResult<TransferAggregate> TransferDomainService::build_from_incoming_and_r
         description,
         transfer_group_id);
 
+    auto adjustments = make_fee_adjustments(
+        fee,
+        source_account,
+        target_account,
+        outgoing_amount.currency(),
+        incoming_amount.currency(),
+        user_id,
+        occurred_at,
+        description,
+        transfer_group_id);
+    if (!adjustments) {
+        return std::unexpected(adjustments.error());
+    }
+
     TransferAggregate aggregate(
         TransferMode::IncomingAndRate,
         std::move(outgoing_tx),
         std::move(incoming_tx),
         rate,
-        {});
+        std::move(*adjustments));
 
     // Validate consistency.
     if (auto validation = validate(aggregate); !validation) {
@@ -294,6 +414,41 @@ DomainVoidResult TransferDomainService::validate(const TransferAggregate& aggreg
         !aggregate.incoming().amount().amount().is_positive()) {
         return std::unexpected(DomainError::invalid_operation(
             "Transfer amounts must be positive"));
+    }
+
+    if (!aggregate.outgoing().amount().amount().fits_numeric_20_8() ||
+        !aggregate.incoming().amount().amount().fits_numeric_20_8()) {
+        return std::unexpected(DomainError::invalid_amount(
+            "transfer amounts must fit NUMERIC(20,8)"));
+    }
+
+    // Adjustments are signed financial effects. Fees are negative, while a
+    // future rebate or FX gain may be positive, so only zero is forbidden.
+    for (const auto& adjustment : aggregate.adjustments()) {
+        if (adjustment.type() != TransactionType::Adjustment) {
+            return std::unexpected(DomainError::invalid_operation(
+                "Transfer adjustments must use TransactionType::Adjustment"));
+        }
+        if (adjustment.user_id() != aggregate.outgoing().user_id()) {
+            return std::unexpected(DomainError::invalid_operation(
+                "Transfer adjustments must belong to the transfer user"));
+        }
+        if (adjustment.transfer_group_id() != aggregate.outgoing().transfer_group_id()) {
+            return std::unexpected(DomainError::invalid_operation(
+                "Transfer adjustments must share the transfer_group_id"));
+        }
+        if (adjustment.occurred_at() != aggregate.outgoing().occurred_at()) {
+            return std::unexpected(DomainError::invalid_operation(
+                "Transfer adjustments must share the transfer timestamp"));
+        }
+        if (adjustment.amount().is_zero()) {
+            return std::unexpected(DomainError::invalid_amount(
+                "transfer adjustment must be non-zero"));
+        }
+        if (!adjustment.amount().amount().fits_numeric_20_8()) {
+            return std::unexpected(DomainError::invalid_amount(
+                "transfer adjustment does not fit NUMERIC(20,8)"));
+        }
     }
 
     // Rule 6: Currency consistency.

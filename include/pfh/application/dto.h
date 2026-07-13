@@ -10,6 +10,7 @@
 #include "pfh/domain/category.h"
 #include "pfh/domain/money.h"
 #include "pfh/domain/transaction.h"
+#include "pfh/domain/transfer_aggregate.h"
 #include "pfh/domain/user.h"
 #include <chrono>
 #include <cstdint>
@@ -91,6 +92,12 @@ struct CreateTransferCommand {
     std::string outgoing_amount; // optional depending on mode
     std::string incoming_amount; // optional depending on mode
     std::string rate;            // optional depending on mode
+    // Fee fields are an all-or-nothing contract. fee_amount is a positive
+    // magnitude in the selected fee account's currency. ThirdParty additionally
+    // requires fee_account_id; SourceAccount/TargetAccount forbid it.
+    std::optional<std::string> fee_amount;
+    std::optional<domain::FeeSource> fee_source;
+    std::optional<domain::AccountId> fee_account_id;
     std::string description;
     // nullopt => the use case stamps the current time. Never epoch 0.
     std::optional<std::chrono::system_clock::time_point> occurred_at;
@@ -103,6 +110,7 @@ struct TransferResultDto {
     std::string outgoing_amount;
     std::string incoming_amount;
     std::optional<std::string> rate;
+    std::optional<std::string> fee_amount;
 };
 
 struct CashFlowDto {

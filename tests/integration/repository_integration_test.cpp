@@ -460,6 +460,114 @@ TEST_F(RepositoryIntegrationTest, TransactionRepository_WhenSavingCrossCurrencyM
               static_cast<int>(TransferMode::OutgoingAndRate));
 }
 
+TEST_F(RepositoryIntegrationTest, TransactionRepository_WhenSavingTransferFee_PersistsWholeAggregate) {
+    auto ids = seed_user_with_accounts();
+
+    auto write = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            auto aggregate = TransferDomainService::build_from_both_amounts(
+                money("100", "USD"),
+                money("100", "USD"),
+                ids.cash,
+                ids.savings,
+                ids.user,
+                sample_time(),
+                "Internal move",
+                TransferGroupId{},
+                TransferFee{FeeSource::SourceAccount, ids.cash, money("2", "USD")});
+            if (!aggregate) {
+                return std::unexpected(RepositoryError::validation(
+                    aggregate.error().message));
+            }
+            auto saved = tx_repo_->save_transfer(tx, *aggregate);
+            if (!saved) return std::unexpected(saved.error());
+            return {};
+        });
+    ASSERT_TRUE(write.has_value()) << write.error().message;
+
+    ASSERT_EQ(store_->transfer_groups.size(), 1u);
+    auto all = tx_repo_->find_by_user(ids.user);
+    ASSERT_TRUE(all.has_value());
+    ASSERT_EQ(all->size(), 3u);
+    const auto group_id = store_->transfer_groups.begin()->second.id;
+    std::size_t adjustment_count = 0;
+    for (const auto& transaction : *all) {
+        ASSERT_TRUE(transaction.transfer_group_id().has_value());
+        EXPECT_EQ(*transaction.transfer_group_id(), group_id);
+        if (transaction.type() == TransactionType::Adjustment) {
+            ++adjustment_count;
+            EXPECT_EQ(transaction.amount().to_string(), "-2 USD");
+            EXPECT_EQ(transaction.account_id(), ids.cash);
+        }
+    }
+    EXPECT_EQ(adjustment_count, 1u);
+}
+
+TEST_F(RepositoryIntegrationTest, TransactionRepository_WhenTransferFeeWriteRollsBack_LeavesNoRows) {
+    auto ids = seed_user_with_accounts();
+
+    auto write = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            auto aggregate = TransferDomainService::build_from_both_amounts(
+                money("100", "USD"),
+                money("100", "USD"),
+                ids.cash,
+                ids.savings,
+                ids.user,
+                sample_time(),
+                "Internal move",
+                TransferGroupId{},
+                TransferFee{FeeSource::ThirdParty, ids.cny, money("5", "CNY")});
+            if (!aggregate) {
+                return std::unexpected(RepositoryError::validation(
+                    aggregate.error().message));
+            }
+            auto saved = tx_repo_->save_transfer(tx, *aggregate);
+            if (!saved) return std::unexpected(saved.error());
+            return std::unexpected(RepositoryError::validation("force rollback"));
+        });
+
+    ASSERT_FALSE(write.has_value());
+    EXPECT_TRUE(store_->transfer_groups.empty());
+    EXPECT_TRUE(store_->transactions.empty());
+}
+
+TEST_F(RepositoryIntegrationTest, TransactionRepository_WhenPurgingTransfer_DeletesGroupedFee) {
+    auto ids = seed_user_with_accounts();
+
+    auto create = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            auto aggregate = TransferDomainService::build_from_both_amounts(
+                money("100", "USD"),
+                money("100", "USD"),
+                ids.cash,
+                ids.savings,
+                ids.user,
+                sample_time(),
+                "Internal move",
+                TransferGroupId{},
+                TransferFee{FeeSource::ThirdParty, ids.cny, money("5", "CNY")});
+            if (!aggregate) {
+                return std::unexpected(RepositoryError::validation(
+                    aggregate.error().message));
+            }
+            auto saved = tx_repo_->save_transfer(tx, *aggregate);
+            return saved ? RepositoryVoidResult{} : std::unexpected(saved.error());
+        });
+    ASSERT_TRUE(create.has_value()) << create.error().message;
+    ASSERT_EQ(store_->transactions.size(), 3u);
+
+    auto purge = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            // Purging the fee-only third-party account must still remove the
+            // entire transfer aggregate, not just its Adjustment row.
+            return tx_repo_->physical_delete_transfers_touching_account(tx, ids.cny);
+        });
+    ASSERT_TRUE(purge.has_value()) << purge.error().message;
+    EXPECT_TRUE(store_->transfer_groups.empty());
+    EXPECT_TRUE(store_->transactions.empty());
+}
+
 // ---- Exchange rate append-only + historical query ----
 
 TEST_F(RepositoryIntegrationTest, ExchangeRateRepository_WhenAppending_NeverOverwritesHistory) {

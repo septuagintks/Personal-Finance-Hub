@@ -11,7 +11,7 @@ Status: Active
 
 本文档是 `Phase_1_Development_Plan.md` 的细化子计划，用于描述 Phase 1 从创建工程目录结构开始，到第一阶段测试收尾为止的具体开发顺序、交付物和验收口径。
 
-当前进度（2026-07-13）：P1-S01 至 P1-S09 的 Domain、Application、迁移脚本及 In-Memory 语义验证已经完成，Windows GCC 16 基线为 240 个单元测试与 13 个 In-Memory 集成测试，共 253 个测试。当前进入 P1-S10；真实 Drogon/PostgreSQL 适配器、API、后台任务以及 Linux/Docker/真实 PostgreSQL 验收尚未完成。
+当前进度（2026-07-13）：P1-S01 至 P1-S09 已完成，P1-S10-01 REST 契约与遗留项收口也已交付。Windows GCC 16 基线为 254 个 unit/use-case、16 个 In-Memory integration 与 1 个 migration gate，共 271/271。V3 已在外部 PostgreSQL 16.14 空库复测通过；真实 Drogon/PostgreSQL 适配器、API、后台任务及完整 P1-S12 门禁尚未完成。
 
 ### 1.1 执行原则
 
@@ -365,13 +365,18 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S10-01 REST 契约与遗留项收口
 
+状态：**已完成（2026-07-13）**。
+
 - 将流水请求统一为 `accountId/type/amount/currencyCode/categoryId/description/occurredAt`，金额仅接受十进制字符串。
-- 将转账请求统一为 `sourceAccountId/targetAccountId/mode/outgoingAmount/incomingAmount/rate/description/occurredAt`；在暴露接口前完成任务 #48，将 `feeSource`、手续费金额及可选第三方手续费账户接入 `CreateTransferCommand`。
+- 将转账请求统一为 `sourceAccountId/targetAccountId/mode/outgoingAmount/incomingAmount/rate/feeAmount/feeSource/feeAccountId/description/occurredAt`；三种 mode 只接受各自输入字段，派生字段必须为空。
+- 完成任务 #48：手续费按选中账户币种接收正数 magnitude，聚合内落为负数 signed `Adjustment`；Source/Target/ThirdParty 三种来源、三账户有序锁定、原子保存/回滚与级联删除均有测试。
 - 固定金额符号边界：Income/Expense 请求使用正数 magnitude，Adjustment 使用 signed amount；Presentation 对外返回业务 magnitude，数据库带符号金额不得直接泄漏。
 - 明确 Phase 1 不开放转账删除接口；在 `DeleteTransferUseCase` 完成前，路由表中不得注册 `DELETE /api/v1/transfers/{id}`。
 - 明确流水采用追加 + 软删除模型，Phase 1 不对流水普通更新增加行级 `version`；账户聚合并发继续使用 `Account.version`。
 
-产物：更新后的 REST 契约、OpenAPI/JSON Schema 边界和遗留任务状态。
+产物：更新后的 REST/Application 契约、手续费领域与持久化路径、任务状态及 `Phase_1_S10_Delivery_Summary.md`。HTTP parser/OpenAPI 代码随 P1-S10-05 实现。
+
+验证：Windows GCC 16 Debug 构建通过，271/271 CTest 通过。真实 PostgreSQL adapter 验证仍归 P1-S10-03/S10-04 与 P1-S12。
 
 #### P1-S10-02 Drogon、PostgreSQL 与 CMake 目标接入
 
@@ -437,7 +442,7 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S10-09 Transfer API
 
-- 在任务 #48 完成后接入三种转账模式、手续费来源和汇兑损益 Adjustment。
+- 复用已完成的任务 #48，接入三种转账模式、手续费来源和 signed Adjustment 响应映射。
 - 响应中的 outgoing/incoming/fee 均使用正数 magnitude；存储层 outgoing 负号不直接返回。
 - 验证同用户账户、同账户拒绝、同币种约束、汇率精度、`NUMERIC(20,8/10)` 边界和事务原子性。
 - Phase 1 仅支持创建与查询，不注册转账删除路由。
@@ -455,8 +460,8 @@ P1-S12 Phase 1 测试收尾与文档回写
 #### P1-S10-11 API 回归与交付总结
 
 - 启动测试版 Drogon App，覆盖认证、主要成功路径、错误映射、TraceId 和异常脱敏。
-- 运行 Windows Debug 构建、253 个既有测试和新增 API 测试。
-- 回写 `Docs/Development/Tasks.md`，新增 `Phase_1_S10_Delivery_Summary.md`，记录尚待外部机器验证的项目。
+- 运行 Windows Debug 构建、当前 271 个既有测试和新增 API 测试。
+- 回写 `Docs/Development/Tasks.md`，更新 `Phase_1_S10_Delivery_Summary.md`，记录尚待外部机器验证的项目。
 
 产物：可重复执行的 API 测试集与 S10 交付总结。
 

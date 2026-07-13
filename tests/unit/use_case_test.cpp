@@ -352,6 +352,262 @@ TEST_F(UseCaseTest, CreateTransfer_WhenBothAmounts_PersistsGroupAndOutbox) {
     EXPECT_EQ(store_->outbox.front().event_name, "TransferCompleted");
 }
 
+TEST_F(UseCaseTest, CreateTransfer_WhenSourceFee_PersistsGroupedAdjustment) {
+    auto s = seed();
+    CreateTransferUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransferCommand cmd;
+    cmd.user_id = s.user;
+    cmd.source_account_id = s.cash;
+    cmd.target_account_id = s.savings;
+    cmd.mode = TransferInputMode::BothAmounts;
+    cmd.outgoing_amount = "100";
+    cmd.incoming_amount = "100";
+    cmd.fee_amount = "2";
+    cmd.fee_source = FeeSource::SourceAccount;
+    cmd.occurred_at = sample_time();
+
+    auto result = uc.execute(cmd);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    ASSERT_EQ(result->fee_amount, std::optional<std::string>("2"));
+
+    auto transactions = tx_repo_->find_by_user(s.user);
+    ASSERT_TRUE(transactions.has_value());
+    ASSERT_EQ(transactions->size(), 3u);
+    std::size_t transfer_count = 0;
+    std::size_t adjustment_count = 0;
+    for (const auto& transaction : *transactions) {
+        ASSERT_TRUE(transaction.transfer_group_id().has_value());
+        EXPECT_EQ(*transaction.transfer_group_id(), result->transfer_group_id);
+        if (transaction.type() == TransactionType::Transfer) {
+            ++transfer_count;
+        } else if (transaction.type() == TransactionType::Adjustment) {
+            ++adjustment_count;
+            EXPECT_EQ(transaction.account_id(), s.cash);
+            EXPECT_EQ(transaction.amount().to_string(), "-2 USD");
+        }
+    }
+    EXPECT_EQ(transfer_count, 2u);
+    EXPECT_EQ(adjustment_count, 1u);
+
+    auto source_balance = account_repo_->balance_of(s.cash);
+    auto target_balance = account_repo_->balance_of(s.savings);
+    ASSERT_TRUE(source_balance.has_value());
+    ASSERT_TRUE(target_balance.has_value());
+    EXPECT_EQ(source_balance->balance.to_string(), "-102 USD");
+    EXPECT_EQ(target_balance->balance.to_string(), "100 USD");
+
+    ReportQueryService reports(*account_repo_, *tx_repo_, *rate_repo_, *pref_repo_);
+    auto cash_flow = reports.cash_flow(s.user);
+    ASSERT_TRUE(cash_flow.has_value()) << cash_flow.error().message;
+    EXPECT_EQ(cash_flow->income_total, "0");
+    EXPECT_EQ(cash_flow->expense_total, "2");
+    EXPECT_EQ(cash_flow->net_total, "-2");
+}
+
+TEST_F(UseCaseTest, CreateTransfer_WhenTargetFee_DeductsFromTargetBalance) {
+    auto s = seed();
+    CreateTransferUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransferCommand cmd;
+    cmd.user_id = s.user;
+    cmd.source_account_id = s.cash;
+    cmd.target_account_id = s.savings;
+    cmd.mode = TransferInputMode::BothAmounts;
+    cmd.outgoing_amount = "100";
+    cmd.incoming_amount = "100";
+    cmd.fee_amount = "3";
+    cmd.fee_source = FeeSource::TargetAccount;
+    cmd.occurred_at = sample_time();
+
+    auto result = uc.execute(cmd);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    auto source_balance = account_repo_->balance_of(s.cash);
+    auto target_balance = account_repo_->balance_of(s.savings);
+    ASSERT_TRUE(source_balance.has_value());
+    ASSERT_TRUE(target_balance.has_value());
+    EXPECT_EQ(source_balance->balance.to_string(), "-100 USD");
+    EXPECT_EQ(target_balance->balance.to_string(), "97 USD");
+}
+
+TEST_F(UseCaseTest, CreateTransfer_WhenThirdPartyFee_DeductsInThirdAccountCurrency) {
+    auto s = seed();
+    CreateTransferUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransferCommand cmd;
+    cmd.user_id = s.user;
+    cmd.source_account_id = s.cash;
+    cmd.target_account_id = s.savings;
+    cmd.mode = TransferInputMode::BothAmounts;
+    cmd.outgoing_amount = "100";
+    cmd.incoming_amount = "100";
+    cmd.fee_amount = "5";
+    cmd.fee_source = FeeSource::ThirdParty;
+    cmd.fee_account_id = s.cny_wallet;
+    cmd.occurred_at = sample_time();
+
+    auto result = uc.execute(cmd);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    auto fee_balance = account_repo_->balance_of(s.cny_wallet);
+    ASSERT_TRUE(fee_balance.has_value());
+    EXPECT_EQ(fee_balance->balance.to_string(), "-5 CNY");
+}
+
+TEST_F(UseCaseTest, CreateTransfer_WhenFeeFieldsAreInconsistent_RejectsWithoutWrites) {
+    auto s = seed();
+    CreateTransferUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransferCommand base;
+    base.user_id = s.user;
+    base.source_account_id = s.cash;
+    base.target_account_id = s.savings;
+    base.mode = TransferInputMode::BothAmounts;
+    base.outgoing_amount = "100";
+    base.incoming_amount = "100";
+    base.occurred_at = sample_time();
+
+    auto amount_without_source = base;
+    amount_without_source.fee_amount = "2";
+    auto first = uc.execute(amount_without_source);
+    ASSERT_FALSE(first.has_value());
+    EXPECT_EQ(first.error().code, ErrorCode::ValidationError);
+
+    auto source_without_amount = base;
+    source_without_amount.fee_source = FeeSource::SourceAccount;
+    auto second = uc.execute(source_without_amount);
+    ASSERT_FALSE(second.has_value());
+    EXPECT_EQ(second.error().code, ErrorCode::ValidationError);
+
+    auto source_with_third_party_id = base;
+    source_with_third_party_id.fee_amount = "2";
+    source_with_third_party_id.fee_source = FeeSource::SourceAccount;
+    source_with_third_party_id.fee_account_id = s.cny_wallet;
+    auto third = uc.execute(source_with_third_party_id);
+    ASSERT_FALSE(third.has_value());
+    EXPECT_EQ(third.error().code, ErrorCode::ValidationError);
+
+    auto third_party_without_id = base;
+    third_party_without_id.fee_amount = "2";
+    third_party_without_id.fee_source = FeeSource::ThirdParty;
+    auto fourth = uc.execute(third_party_without_id);
+    ASSERT_FALSE(fourth.has_value());
+    EXPECT_EQ(fourth.error().code, ErrorCode::ValidationError);
+
+    EXPECT_TRUE(store_->transactions.empty());
+    EXPECT_TRUE(store_->transfer_groups.empty());
+    EXPECT_TRUE(store_->outbox.empty());
+}
+
+TEST_F(UseCaseTest, CreateTransfer_WhenFeeAmountIsInvalid_RejectsWithoutWrites) {
+    auto s = seed();
+    CreateTransferUseCase uc(*account_repo_, *tx_repo_, *uow_);
+
+    for (const auto* invalid_fee : {"0", "-1", "1.123456789"}) {
+        CreateTransferCommand cmd;
+        cmd.user_id = s.user;
+        cmd.source_account_id = s.cash;
+        cmd.target_account_id = s.savings;
+        cmd.mode = TransferInputMode::BothAmounts;
+        cmd.outgoing_amount = "100";
+        cmd.incoming_amount = "100";
+        cmd.fee_amount = invalid_fee;
+        cmd.fee_source = FeeSource::SourceAccount;
+        cmd.occurred_at = sample_time();
+
+        auto result = uc.execute(cmd);
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().code, ErrorCode::ValidationError);
+    }
+
+    EXPECT_TRUE(store_->transactions.empty());
+    EXPECT_TRUE(store_->transfer_groups.empty());
+    EXPECT_TRUE(store_->outbox.empty());
+}
+
+TEST_F(UseCaseTest, CreateTransfer_WhenThirdPartyFeeAccountIsForeign_ReturnsNotFound) {
+    auto s = seed();
+    AccountId foreign_account;
+    auto setup = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            auto other = user_repo_->create(tx, "fee-owner", "hash", ccy("USD"));
+            if (!other) return std::unexpected(other.error());
+            auto saved = account_repo_->save(
+                tx,
+                Account(AccountId{}, *other, "Fee", AccountType::Cash, "wallet", ccy("USD")));
+            if (!saved) return std::unexpected(saved.error());
+            foreign_account = *saved;
+            return {};
+        });
+    ASSERT_TRUE(setup.has_value());
+
+    CreateTransferUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransferCommand cmd;
+    cmd.user_id = s.user;
+    cmd.source_account_id = s.cash;
+    cmd.target_account_id = s.savings;
+    cmd.mode = TransferInputMode::BothAmounts;
+    cmd.outgoing_amount = "100";
+    cmd.incoming_amount = "100";
+    cmd.fee_amount = "2";
+    cmd.fee_source = FeeSource::ThirdParty;
+    cmd.fee_account_id = foreign_account;
+    cmd.occurred_at = sample_time();
+
+    auto result = uc.execute(cmd);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::NotFound);
+    EXPECT_TRUE(store_->transactions.empty());
+    EXPECT_TRUE(store_->transfer_groups.empty());
+}
+
+TEST_F(UseCaseTest, CreateTransfer_WhenThirdPartyFeeAccountIsArchived_Returns422) {
+    auto s = seed();
+    auto loaded = account_repo_->find_by_id(s.cny_wallet);
+    ASSERT_TRUE(loaded.has_value());
+    Account archived = *loaded;
+    archived.archive(sample_time());
+    auto saved = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            auto result = account_repo_->save(tx, archived);
+            return result ? RepositoryVoidResult{} : std::unexpected(result.error());
+        });
+    ASSERT_TRUE(saved.has_value());
+
+    CreateTransferUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransferCommand cmd;
+    cmd.user_id = s.user;
+    cmd.source_account_id = s.cash;
+    cmd.target_account_id = s.savings;
+    cmd.mode = TransferInputMode::BothAmounts;
+    cmd.outgoing_amount = "100";
+    cmd.incoming_amount = "100";
+    cmd.fee_amount = "2";
+    cmd.fee_source = FeeSource::ThirdParty;
+    cmd.fee_account_id = s.cny_wallet;
+    cmd.occurred_at = sample_time();
+
+    auto result = uc.execute(cmd);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::ArchivedAccountOperation);
+    EXPECT_TRUE(store_->transactions.empty());
+    EXPECT_TRUE(store_->transfer_groups.empty());
+}
+
+TEST_F(UseCaseTest, CreateTransfer_WhenModeContainsDerivedField_ReturnsValidationError) {
+    auto s = seed();
+    CreateTransferUseCase uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransferCommand cmd;
+    cmd.user_id = s.user;
+    cmd.source_account_id = s.cash;
+    cmd.target_account_id = s.cny_wallet;
+    cmd.mode = TransferInputMode::OutgoingAndRate;
+    cmd.outgoing_amount = "100";
+    cmd.incoming_amount = "718";
+    cmd.rate = "7.18";
+    cmd.occurred_at = sample_time();
+
+    auto result = uc.execute(cmd);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::ValidationError);
+    EXPECT_TRUE(store_->transactions.empty());
+}
+
 TEST_F(UseCaseTest, ReportQuery_WhenTransferExists_ExcludesFromCashFlow) {
     auto s = seed();
     CreateTransactionUseCase create_uc(
@@ -1274,6 +1530,22 @@ TEST_F(UseCaseTest, UserRepository_ReadYourWrites_FindByUsername) {
 
 TEST_F(UseCaseTest, InMemoryRepositories_RejectBrokenForeignKeys) {
     auto s = seed();
+
+    auto wrong_currency = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            Transaction invalid(
+                TransactionId{},
+                s.user,
+                s.cash,
+                money("10", "CNY"),
+                TransactionType::Income,
+                sample_time(),
+                "Wrong account currency");
+            auto saved = tx_repo_->save_single(tx, invalid);
+            return saved ? RepositoryVoidResult{} : std::unexpected(saved.error());
+        });
+    ASSERT_FALSE(wrong_currency.has_value());
+    EXPECT_EQ(wrong_currency.error().status, RepositoryStatus::ValidationError);
 
     auto missing_pref = uow_->execute_in_transaction(
         [&](ITransactionContext& tx) -> RepositoryVoidResult {

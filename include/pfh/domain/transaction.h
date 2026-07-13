@@ -59,7 +59,7 @@ enum class TransactionType {
 ///     - Income: +amount (expects positive magnitude or positive signed)
 ///     - Expense: -amount when magnitude positive
 ///     - Transfer: use amount as signed (after repository mapping)
-///     - Adjustment: fee-default negate when positive
+///     - Adjustment: use amount as signed (positive inflow, negative outflow)
 /// - Soft deletion: deleted_at is set rather than removing the record.
 class Transaction {
 public:

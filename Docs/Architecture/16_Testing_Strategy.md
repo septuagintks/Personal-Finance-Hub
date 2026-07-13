@@ -21,7 +21,8 @@ Architecture: Clean Architecture + GoogleTest
 
 ### 1.1 Phase 1 当前基线与最终门禁
 
-- 截至 2026-07-13，Windows GCC 16 已通过 240 个单元测试与 13 个 In-Memory integration scenarios，共 253/253。
+- 截至 2026-07-13，Windows GCC 16 已通过 254 个 unit/use-case、16 个 In-Memory integration scenarios 与 1 个 migration gate，共 271/271。
+- V3 已在外部 PostgreSQL 16.14 + Flyway 10.22.0 全新空库完成 `migrate/info/validate`、第二次 no-op 与种子断言；该结果不包含 PostgreSQL Repository fixture。
 - In-Memory scenarios 用于快速固定 Repository/UoW 语义，不是 PostgreSQL Repository Integration Test 的替代品。
 - P1-S12 必须在另一台机器完成 Linux、Docker、PostgreSQL 16+、Debug/Release、真实 Repository/UoW/RLS、API 和后台任务测试；取得可追溯结果前，Phase 1 不得签署完成或合并到 `main`。
 
