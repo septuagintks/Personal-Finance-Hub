@@ -1,29 +1,23 @@
 # API Tests CMake Configuration
-# These tests start a test Drogon app with test database
 
-# find_package(GTest REQUIRED)
-
-# API test sources will be added as implementation progresses
-set(API_TEST_SOURCES
-    # api_smoke_test.cpp
+add_executable(pfh_api_tests
+    api_auth_test.cpp
+    http_boundary_test.cpp
 )
 
-# add_executable(pfh_api_tests ${API_TEST_SOURCES})
+target_link_libraries(pfh_api_tests PRIVATE
+    pfh_presentation
+    pfh_infrastructure
+    pfh_test_support
+    GTest::gtest
+    GTest::gtest_main
+    nlohmann_json::nlohmann_json
+)
 
-# target_link_libraries(pfh_api_tests PRIVATE
-#     pfh_presentation
-#     pfh_application
-#     pfh_infrastructure
-#     pfh_domain
-#     GTest::gtest
-#     GTest::gtest_main
-#     Drogon::Drogon
-# )
+target_include_directories(pfh_api_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/tests/support
+)
 
-# target_include_directories(pfh_api_tests PRIVATE
-#     ${CMAKE_SOURCE_DIR}/include
-#     ${CMAKE_SOURCE_DIR}/tests/support
-# )
-
-# include(GoogleTest)
-# gtest_discover_tests(pfh_api_tests)
+include(GoogleTest)
+gtest_discover_tests(pfh_api_tests DISCOVERY_MODE PRE_TEST)

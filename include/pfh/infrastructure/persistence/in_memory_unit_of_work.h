@@ -10,18 +10,22 @@
 
 #pragma once
 
-#include "pfh/application/persistence/i_unit_of_work.h"
+#include "pfh/application/persistence/i_bootstrap_unit_of_work.h"
 #include "pfh/infrastructure/persistence/in_memory_store.h"
 #include "pfh/infrastructure/persistence/in_memory_transaction_context.h"
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
 namespace pfh::infrastructure {
 
-class InMemoryUnitOfWork final : public application::IUnitOfWork {
+class InMemoryUnitOfWork final : public application::IBootstrapUnitOfWork {
 public:
-    explicit InMemoryUnitOfWork(InMemoryStore& store) : store_(store) {}
+    explicit InMemoryUnitOfWork(
+        InMemoryStore& store,
+        std::optional<domain::UserId> tenant_user_id = std::nullopt)
+        : store_(store), tenant_user_id_(tenant_user_id) {}
 
     void register_event(std::shared_ptr<domain::IDomainEvent> event) override {
         pending_events_.push_back(std::move(event));
@@ -29,6 +33,26 @@ public:
 
     [[nodiscard]] domain::RepositoryVoidResult execute_in_transaction(
         std::function<domain::RepositoryVoidResult(domain::ITransactionContext& tx)> action) override {
+        return run_transaction([&](InMemoryTransactionContext& tx) {
+            return action(tx);
+        });
+    }
+
+    [[nodiscard]] domain::RepositoryVoidResult execute_bootstrap_transaction(
+        std::function<domain::RepositoryVoidResult(
+            application::ITenantBootstrapTransaction& tx)> action) override {
+        if (tenant_user_id_.has_value()) {
+            return std::unexpected(domain::RepositoryError::validation(
+                "Bootstrap transaction must start without a tenant"));
+        }
+        return run_transaction([&](InMemoryTransactionContext& tx) {
+            return action(tx);
+        });
+    }
+
+private:
+    template <typename Action>
+    [[nodiscard]] domain::RepositoryVoidResult run_transaction(Action&& action) {
         if (store_.in_transaction) {
             return std::unexpected(domain::RepositoryError::database(
                 "Nested transactions are not supported"));
@@ -46,14 +70,19 @@ public:
         store_.staged_balance_cache.clear();
         store_.staged_exchange_rates.clear();
         store_.staged_outbox.clear();
+        store_.staged_refresh_tokens.clear();
+        store_.staged_revoked_access_tokens.clear();
+        store_.staged_revoked_sessions.clear();
+        store_.staged_audit_logs.clear();
         store_.staged_deleted_accounts.clear();
         store_.staged_deleted_transactions.clear();
         store_.staged_deleted_balance_cache.clear();
         store_.staged_deleted_transfer_groups.clear();
         store_.staged_deleted_categories.clear();
 
-        InMemoryTransactionContext tx(store_.next_tx_context_id++);
-        auto result = action(tx);
+        InMemoryTransactionContext tx(
+            store_.next_tx_context_id++, tenant_user_id_);
+        auto result = std::forward<Action>(action)(tx);
 
         if (!result.has_value()) {
             // Rollback: discard staging, keep committed store intact.
@@ -67,6 +96,10 @@ public:
             store_.staged_balance_cache.clear();
             store_.staged_exchange_rates.clear();
             store_.staged_outbox.clear();
+            store_.staged_refresh_tokens.clear();
+            store_.staged_revoked_access_tokens.clear();
+            store_.staged_revoked_sessions.clear();
+            store_.staged_audit_logs.clear();
             store_.staged_deleted_accounts.clear();
             store_.staged_deleted_transactions.clear();
             store_.staged_deleted_balance_cache.clear();
@@ -118,6 +151,18 @@ public:
         for (auto& outbox : store_.staged_outbox) {
             store_.outbox.push_back(std::move(outbox));
         }
+        for (auto& [hash, token] : store_.staged_refresh_tokens) {
+            store_.refresh_tokens.insert_or_assign(hash, std::move(token));
+        }
+        for (auto& [key, token] : store_.staged_revoked_access_tokens) {
+            store_.revoked_access_tokens.insert_or_assign(key, std::move(token));
+        }
+        for (auto& [session_id, session] : store_.staged_revoked_sessions) {
+            store_.revoked_sessions.insert_or_assign(session_id, std::move(session));
+        }
+        for (auto& audit : store_.staged_audit_logs) {
+            store_.audit_logs.push_back(std::move(audit));
+        }
         for (const auto id : store_.staged_deleted_accounts) {
             store_.accounts.erase(id);
         }
@@ -144,6 +189,10 @@ public:
         store_.staged_balance_cache.clear();
         store_.staged_exchange_rates.clear();
         store_.staged_outbox.clear();
+        store_.staged_refresh_tokens.clear();
+        store_.staged_revoked_access_tokens.clear();
+        store_.staged_revoked_sessions.clear();
+        store_.staged_audit_logs.clear();
         store_.staged_deleted_accounts.clear();
         store_.staged_deleted_transactions.clear();
         store_.staged_deleted_balance_cache.clear();
@@ -153,8 +202,8 @@ public:
         return {};
     }
 
-private:
     InMemoryStore& store_;
+    std::optional<domain::UserId> tenant_user_id_;
     std::vector<std::shared_ptr<domain::IDomainEvent>> pending_events_;
 };
 

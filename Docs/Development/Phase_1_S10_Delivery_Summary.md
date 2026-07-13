@@ -2,7 +2,7 @@
 
 **更新日期**: 2026-07-14
 **阶段**: P1-S10 REST API 与认证基础
-**当前状态**: IN PROGRESS - P1-S10-01、S10-02、S10-03 已完成；S10-04 至 S10-11 待开发
+**当前状态**: IN PROGRESS - P1-S10-01 至 S10-06 已完成实现与本地复核；S10-07 至 S10-11 待开发
 
 ---
 
@@ -15,8 +15,11 @@
 - 转账手续费从 `CreateTransferCommand` 到 `TransferAggregate`、Repository 和报表语义的完整接线。
 - P1-S10-02 Drogon/PostgreSQL 依赖接入与分层 CMake 目标。
 - P1-S10-03 PostgreSQL Repository 与 `DrogonUnitOfWork` 适配器实现（本地静态门禁通过，外部连库验证留到 S10-04/S10-11 一并执行）。
+- P1-S10-04 production composition root、双角色 DbClient、注册 bootstrap tenant 绑定和启动安全校验。
+- P1-S10-05 framework-neutral HTTP parser/mapper、RFC 3339、统一错误响应、TraceId 与 Drogon 全局异常边界。
+- P1-S10-06 register/login/refresh/logout、Argon2id、HS256 JWT、refresh rotation/reuse detection、同步审计和 V4 session-family 撤销。
 
-以下内容尚未交付：composition root 接线、HTTP Controller、认证、API 回归、Outbox Publisher 和 Scheduler。因此本文不能作为 P1-S10 整体验收或真实持久化验收结论。
+以下内容尚未交付：S10-07 至 S10-10 资源/流水/转账/报表 Controller、S10-11 完整 API 回归、Outbox Publisher 和 Scheduler。因此本文不能作为 P1-S10 整体验收或真实持久化验收结论。真实 Drogon、Argon2/OpenSSL、V4 迁移和 PostgreSQL 双角色连接仍须在目标机器签署。
 
 ---
 
@@ -138,7 +141,7 @@ S10-03 review 后本地基线增加 `postgresql_adapter_contracts`，并让 Post
 
 - 新增 `PFH_BUILD_POSTGRESQL` 选项（默认 OFF）。OFF 时运行 In-Memory 服务/测试，同时通过 `pfh_postgresql_adapter_compile_gate` 编译全部 PostgreSQL 翻译单元；ON 时把这些源文件加入真实 `pfh_infrastructure`。
 - 当 `PFH_BUILD_POSTGRESQL=ON` 时，CMake 通过 `find_package` 强制要求 Drogon 和 PostgreSQL 库。
-- 新增分层目标：`pfh_domain`、header-only `pfh_application`、`pfh_infrastructure`、header-only `pfh_presentation` 和 `pfh_server`。
+- 新增分层目标：`pfh_domain`、`pfh_application`、`pfh_infrastructure`、`pfh_presentation` 和 `pfh_server`；Application/Presentation 在 S10-05 出现稳定 `.cpp` 后已转为静态库。
 - Domain 层保持零外部依赖，不链接 Drogon、PostgreSQL 或 spdlog。
 - Application 层仅依赖 Domain；Infrastructure 实现 Application/Domain 端口；Presentation 依赖 Application，并只在 PostgreSQL/Drogon 生产模式链接 Drogon。
 - 新增 `pfh_test_support` 库，供 unit/integration 测试共享 fixture 与 test helpers。
@@ -241,28 +244,83 @@ failed: 0
 
 ---
 
-## 7. 任务状态
+## 7. P1-S10-04 至 S10-06 交付与专项 Review
+
+### 7.1 S10-04：Composition Root、DbClient 与 RLS
+
+- `ProductionCompositionRoot` 是生产依赖的唯一装配入口；`pfh_server` 在 `PFH_BUILD_POSTGRESQL=OFF` 时明确拒绝作为生产服务启动，不回退到 In-Memory Repository。
+- request DbClient 与 background DbClient 使用两份配置和两个对象。启动时拒绝相同角色或相同 client；request 角色必须为非 superuser 且无 `BYPASSRLS`，后台角色必须为非 superuser、具备 `BYPASSRLS` 且默认事务只读。
+- 后台 client 只注入 `PostgresActiveCurrencyQuery`，不注入 `AuthService`、`JwtFilter`、Controller 或 request-scoped Repository。
+- `DrogonUnitOfWorkFactory` 为认证用户创建预绑定 tenant 的 request UoW；注册使用无 tenant 的 bootstrap UoW。
+- `DrogonTransactionContext::bind_tenant_once` 在创建 User 后执行一次事务级 `SET LOCAL app.current_user_id`；重复绑定、非法 ID 和未绑定租户访问均 fail closed。
+- request/后台数据库密码、JWT secret、password pepper 在 composition root 生命周期结束时清零；启动错误不输出连接串或密钥。
+
+### 7.2 S10-05：HTTP 边界
+
+- Application 和 Presentation 从 `INTERFACE` 目标转为真实静态库；HTTP 核心不依赖 Drogon，可由生产 adapter 和本地 API test 共用。
+- `JsonRequestParser` 强制 JSON object、字段白名单、精确 string/integer/null 类型和正数 TypedId；金额 JSON number 在进入 Use Case 前即返回 400。
+- `TimeCodec` 严格解析带 `Z`/offset 的 RFC 3339，拒绝非法日历日期、缺失时区和超长小数秒；响应统一输出 UTC `Z`。
+- `HttpResponseMapper` 固定 400/401/403/404/409/422/500/502 映射；500/502 和 401 响应不返回底层 `details`、SQL、路径或 token 解析原因。
+- `ApiApplication` 为每个成功/失败响应写 `X-Trace-Id`；错误 body 保持 `error_code/message/trace_id`。
+- Drogon adapter 只做请求/响应转换和路由注册；全局 exception handler 记录服务端上下文并返回脱敏 500。
+
+### 7.3 S10-06：认证生命周期
+
+- `AuthService` 实现 register/login/refresh/logout；用户名先 trim + ASCII 小写规范化，密码注册长度限制为 12-128。
+- 注册先在无 tenant 事务创建 User，再一次性绑定新 `UserId`，随后初始化 Preference、分类模板、`categories_initialized`、refresh hash、同步审计和 `UserRegistered` outbox；中途失败全部回滚。
+- 生产密码实现使用带随机 salt 的 Argon2id PHC 字符串；不存在用户名也执行一次等成本哈希，降低用户名时序枚举。
+- Access Token 使用 OpenSSL HS256，验证 `alg/typ/iss/aud/sub/sid/jti/roles/iat/nbf/exp`、签名常量时间比较和时钟偏差；HMAC secret 至少 32 字节。
+- Refresh Token 使用 32 字节 CSPRNG 不透明值，数据库只保存 SHA-256 hash。刷新在锁定旧 token 后原子撤销并 rotation；已撤销 token 复用会提交整 `sid` 撤销、安全审计和 outbox，再返回 401。
+- logout 在同一 tenant UoW 撤销 refresh token、写入当前 `iss+jti` 黑名单、同步审计和 `UserLoggedOut` outbox。
+- V4 新增 `revoked_sessions`、认证审计动作和 active-session 索引；V4 尚未在外部 PostgreSQL 执行，保留到 S12。
+
+### 7.4 专项 Review 与门禁
+
+专项 review 修复了未知用户名廉价返回、密钥对象未清零、refresh 事务内 session 检查使用池化连接、空分类模板仍标记初始化、成功响应缺 TraceId header 等问题。
+
+```text
+build (PostgreSQL OFF): PASS
+unit/use-case: 265
+In-Memory integration: 16
+framework-neutral API: 11
+migration enum-cast gate: 1
+PostgreSQL adapter contract gate: 1
+CTest: 294/294 PASS
+PostgreSQL/production bootstrap/security compile gates: PASS
+```
+
+窄 API stub 只验证源码语法和 API 形状，不证明真实 Drogon/OpenSSL/Argon2 ABI、PostgreSQL SQL、角色权限、连接池复用或事务提交行为。上述项目继续由 #46/#57 和 P1-S12 阻断。
+
+---
+
+## 8. 任务状态
 
 | 任务 | 状态 | 说明 |
 | ---- | ---- | ---- |
 | P1-S10-01 | 完成 | 契约、手续费、符号、并发与删除边界已固定 |
 | P1-S10-02 | 完成 | Drogon/PostgreSQL 依赖接入与分层 CMake 目标 |
 | P1-S10-03 | 完成 | PostgreSQL Repository 与 `DrogonUnitOfWork` 实现；本地静态门禁通过 |
+| P1-S10-04 | 实现完成、外部待验 | production composition root、双 DbClient 与 bootstrap tenant 绑定已完成；真实角色/连接池待 S12 |
+| P1-S10-05 | 通用边界完成 | HTTP parser/mapper、TraceId、异常脱敏完成；资源 DTO 随 S10-07 至 S10-10 接入 |
+| P1-S10-06 | 实现完成、外部待验 | 认证生命周期与本地 API 回归完成；真实安全库/数据库待 S12 |
 | #48 | 完成 | 手续费 Application/Domain/Repository 路径已接通 |
 | #50 | 完成 | 流水并发策略已固定 |
 | #52 | 完成 | Phase 1 转账删除边界已固定 |
 | #55 | 完成 | DTO 金额符号说明已固定 |
 | #58 | 完成 | V3 PostgreSQL 16.14 空库复测通过 |
-| #28 | 部分完成 | Flyway 已验证，运行期 DbClient 未接线 |
-| #46 | 部分完成 | 核心 Repository/UoW 已实现并静态复核；composition root、真实 fixture 和目标环境签署待 S10-04/S12 |
+| #28 | 部分完成 | 双 DbClient 与启动角色校验已接线；真实连接待 S12 |
+| #40 | 部分完成 | 认证实现及本地 API 回归完成；真实 Drogon/安全库/PostgreSQL 待 S12 |
+| #44/#45 | 部分完成 | 通用 HTTP 边界和 Drogon exception adapter 已实现；完整资源 API 与真实 Drogon runtime 待后续/S12 |
+| #46 | 部分完成 | 核心 Repository/UoW 与 composition root 已实现并静态复核；真实 fixture 和目标环境签署待 S12 |
+| #49 | 部分完成 | `IAuditLogRepository` 与认证同步审计已完成；Tag/资源审计和 S11 异步处理待后续 |
 | #51 | 部分完成 | `MAX(version)` + 最新流水 ID 与全写路径缓存失效已实现；真实 DB 复核待 S12 |
 | #53 | 完成 | Application/Infrastructure/Presentation 分层 CMake 目标已落地 |
 | #57 | 未完成 | P1-S12 完整外部环境门禁仍保留 |
 
 ---
 
-## 8. 后续顺序
+## 9. 后续顺序
 
-1. P1-S10-04：完成 composition root、DbClient 与 RLS 上下文接线。
-2. P1-S10-05 至 S10-10：依次实现 HTTP 边界、认证、资源、流水、转账和报表 API；S10-06 注册 bootstrap UoW 必须支持创建 User 后在同一事务一次性绑定新 tenant，不能拆分默认数据初始化事务。
-3. P1-S10-11：完成 API 回归与开发环境 PostgreSQL fixture 复跑并更新本文；P1-S12 在目标 Linux/Docker 环境作最终签署。
+1. P1-S10-07：补齐 Account/Category/Tag/UserPreference Application 用例与基础资源 API。
+2. P1-S10-08 至 S10-10：接入流水、转账和报表 API，并复用 S10-05 的统一边界。
+3. P1-S10-11：完成全 API 回归并更新本文；P1-S12 在目标 Linux/Docker/PostgreSQL 环境作最终签署。

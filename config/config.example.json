@@ -14,10 +14,22 @@
     "pool_size": 10,
     "connection_timeout": 30
   },
+  "background_database": {
+    "host": "localhost",
+    "port": 5432,
+    "name": "pfh_dev",
+    "user": "pfh_background",
+    "password": "REPLACE_WITH_ACTUAL_BACKGROUND_PASSWORD",
+    "pool_size": 2,
+    "connection_timeout": 30
+  },
   "jwt": {
     "secret": "REPLACE_WITH_ACTUAL_SECRET",
+    "issuer": "pfh-api",
+    "audience": "pfh-client",
     "access_token_expiry_seconds": 900,
-    "refresh_token_expiry_seconds": 2592000
+    "refresh_token_expiry_seconds": 2592000,
+    "clock_skew_seconds": 30
   },
   "logging": {
     "level": "debug",

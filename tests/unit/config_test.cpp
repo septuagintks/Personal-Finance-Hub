@@ -42,7 +42,7 @@ constexpr const char* kValidConfig = R"({
   "database": { "host": "db", "port": 6543, "name": "pfh_test",
                 "user": "tester", "password": "pw", "pool_size": 5,
                 "connection_timeout": 15 },
-  "jwt": { "secret": "a-real-secret", "access_token_expiry_seconds": 600,
+  "jwt": { "secret": "0123456789abcdef0123456789abcdef", "access_token_expiry_seconds": 600,
            "refresh_token_expiry_seconds": 120000 },
   "logging": { "level": "warn", "output": "both", "file": "x.log" },
   "scheduler": { "exchange_rate_refresh_interval_minutes": 30 },
@@ -67,7 +67,7 @@ TEST(JsonConfigLoader, WhenValidConfig_LoadsAllFields) {
     EXPECT_EQ(r->database.name, "pfh_test");
     EXPECT_EQ(r->database.pool_size, 5u);
     EXPECT_EQ(r->database.connection_timeout, std::chrono::seconds(15));
-    EXPECT_EQ(r->jwt.secret, "a-real-secret");
+    EXPECT_EQ(r->jwt.secret, "0123456789abcdef0123456789abcdef");
     EXPECT_EQ(r->jwt.access_token_expiry, std::chrono::seconds(600));
     EXPECT_EQ(r->logging.level, LogLevel::Warning);
     EXPECT_EQ(r->logging.output, LogOutput::Both);
@@ -77,7 +77,7 @@ TEST(JsonConfigLoader, WhenValidConfig_LoadsAllFields) {
 
 TEST(JsonConfigLoader, WhenOptionalSectionsMissing_UsesDefaults) {
     // Only jwt.secret provided; everything else should default.
-    TempConfig cfg(R"({ "jwt": { "secret": "s" } })");
+    TempConfig cfg(R"({ "jwt": { "secret": "0123456789abcdef0123456789abcdef" } })");
     JsonConfigLoader loader(cfg.path());
     auto r = loader.load();
     ASSERT_TRUE(r.has_value());
@@ -122,6 +122,14 @@ TEST(JsonConfigLoader, WhenJwtSecretIsPlaceholder_ReturnsConfigurationError) {
     EXPECT_EQ(r.error().code, ErrorCode::ConfigurationError);
 }
 
+TEST(JsonConfigLoader, WhenJwtSecretIsShort_ReturnsConfigurationError) {
+    TempConfig cfg(R"({ "jwt": { "secret": "too-short" } })");
+    JsonConfigLoader loader(cfg.path());
+    auto r = loader.load();
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, ErrorCode::ConfigurationError);
+}
+
 // ---- Log level / output parsing ----
 
 TEST(JsonConfigLoader, WhenLogLevelVariants_ParseCorrectly) {
@@ -134,7 +142,7 @@ TEST(JsonConfigLoader, WhenLogLevelVariants_ParseCorrectly) {
         {"nonsense", LogLevel::Info}, // unknown falls back to Info
     };
     for (const auto& c : cases) {
-        std::string json = std::string(R"({ "jwt": { "secret": "s" }, "logging": { "level": ")")
+        std::string json = std::string(R"({ "jwt": { "secret": "0123456789abcdef0123456789abcdef" }, "logging": { "level": ")")
                          + c.level + R"(" } })";
         TempConfig cfg(json);
         JsonConfigLoader loader(cfg.path());
@@ -150,17 +158,17 @@ TEST(JsonConfigLoader, WhenPfhPrefixedEnvSet_OverridesJsonValue) {
     TempConfig cfg(kValidConfig);
 
 #ifdef _WIN32
-    _putenv_s("PFH_JWT_SECRET", "pfh-prefixed-secret");
+    _putenv_s("PFH_JWT_SECRET", "pfh-prefixed-secret-0123456789abcd");
     _putenv_s("JWT_SECRET", "");
 #else
-    setenv("PFH_JWT_SECRET", "pfh-prefixed-secret", 1);
+    setenv("PFH_JWT_SECRET", "pfh-prefixed-secret-0123456789abcd", 1);
     unsetenv("JWT_SECRET");
 #endif
 
     JsonConfigLoader loader(cfg.path());
     auto r = loader.load();
     ASSERT_TRUE(r.has_value());
-    EXPECT_EQ(r->jwt.secret, "pfh-prefixed-secret");
+    EXPECT_EQ(r->jwt.secret, "pfh-prefixed-secret-0123456789abcd");
 
 #ifdef _WIN32
     _putenv_s("PFH_JWT_SECRET", "");
@@ -174,17 +182,17 @@ TEST(JsonConfigLoader, WhenJwtSecretEnvSet_OverridesJsonValue) {
 
     // Set environment variable
     #ifdef _WIN32
-    _putenv_s("JWT_SECRET", "env-secret-123");
+    _putenv_s("JWT_SECRET", "env-secret-123-0123456789abcdef01");
     _putenv_s("PFH_JWT_SECRET", "");
     #else
-    setenv("JWT_SECRET", "env-secret-123", 1);
+    setenv("JWT_SECRET", "env-secret-123-0123456789abcdef01", 1);
     unsetenv("PFH_JWT_SECRET");
     #endif
 
     JsonConfigLoader loader(cfg.path());
     auto r = loader.load();
     ASSERT_TRUE(r.has_value());
-    EXPECT_EQ(r->jwt.secret, "env-secret-123");
+    EXPECT_EQ(r->jwt.secret, "env-secret-123-0123456789abcdef01");
 
     // Clean up
     #ifdef _WIN32
@@ -252,7 +260,7 @@ TEST(JsonConfigLoader, WhenEnvVarNotSet_UsesJsonValue) {
     JsonConfigLoader loader(cfg.path());
     auto r = loader.load();
     ASSERT_TRUE(r.has_value());
-    EXPECT_EQ(r->jwt.secret, "a-real-secret");  // From JSON
+    EXPECT_EQ(r->jwt.secret, "0123456789abcdef0123456789abcdef");  // From JSON
     EXPECT_EQ(r->database.host, "db");          // From JSON
 }
 

@@ -7,7 +7,7 @@
 
 #pragma once
 
-#include "pfh/domain/repositories/i_transaction_context.h"
+#include "pfh/application/persistence/i_bootstrap_unit_of_work.h"
 #include "pfh/domain/user.h"
 
 #ifdef PFH_HAS_POSTGRESQL
@@ -23,7 +23,8 @@ namespace pfh::infrastructure {
 /// Lifetime: created by DrogonUnitOfWork::execute_in_transaction, destroyed
 /// when the transaction closure returns. Repositories receive a reference and
 /// must not hold it beyond the closure boundary.
-class DrogonTransactionContext final : public domain::ITransactionContext {
+class DrogonTransactionContext final
+    : public application::ITenantBootstrapTransaction {
 public:
     explicit DrogonTransactionContext(
         const std::shared_ptr<drogon::orm::Transaction>& tx,
@@ -34,9 +35,12 @@ public:
     /// Non-const: execCommand/execSqlAsync mutate the transaction state.
     [[nodiscard]] drogon::orm::Transaction& transaction() const { return *tx_; }
     [[nodiscard]] bool is_valid() const noexcept { return tx_ != nullptr; }
-    [[nodiscard]] std::optional<domain::UserId> tenant_user_id() const noexcept {
+    [[nodiscard]] std::optional<domain::UserId> tenant_user_id() const noexcept override {
         return tenant_user_id_;
     }
+
+    [[nodiscard]] domain::RepositoryVoidResult bind_tenant_once(
+        domain::UserId user_id) override;
 
 private:
     std::shared_ptr<drogon::orm::Transaction> tx_;

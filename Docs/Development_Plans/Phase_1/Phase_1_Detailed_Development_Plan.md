@@ -11,7 +11,7 @@ Status: Active
 
 本文档是 `Phase_1_Development_Plan.md` 的细化子计划，用于描述 Phase 1 从创建工程目录结构开始，到第一阶段测试收尾为止的具体开发顺序、交付物和验收口径。
 
-当前进度（2026-07-14）：P1-S01 至 P1-S09 与 P1-S10-01 至 S10-03 已完成实现，下一步进入 S10-04 production composition root。Windows GCC 16 基线为 255 个 unit/use-case、16 个 In-Memory integration、1 个 migration gate 与 1 个 PostgreSQL adapter contract gate，共 273/273；全部 PostgreSQL 适配器还会在 PostgreSQL OFF 构建中通过 API stub 执行语法编译。V3 已在外部 PostgreSQL 16.14 空库复测通过；真实 Drogon/PostgreSQL fixture、API、后台任务及完整 P1-S12 门禁尚未完成。
+当前进度（2026-07-14）：P1-S01 至 P1-S09 与 P1-S10-01 至 S10-06 已完成实现和本地离线复核，下一步进入 S10-07 基础资源 API。S10-06 检查点的 Windows GCC 16 基线为 265 个 unit/use-case、16 个 In-Memory integration、11 个 framework-neutral API、1 个 migration gate 与 1 个 PostgreSQL adapter contract gate，共 294/294；PostgreSQL、production bootstrap 与 Argon2/OpenSSL 安全源均在 OFF 构建中通过窄 API stub 执行语法编译。V3 已在外部 PostgreSQL 16.14 空库复测通过；V4、真实 Drogon/PostgreSQL/Argon2/OpenSSL ABI、连接池隔离及完整 P1-S12 门禁尚未在目标机器签署。
 
 ### 1.1 执行原则
 
@@ -403,6 +403,8 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S10-04 Composition Root、DbClient 与 RLS 上下文
 
+状态：**已完成实现与本地离线复核（2026-07-14）；真实双角色连接及连接池复用验证保留到 S12**。
+
 - 在 bootstrap 层创建 DbClient、Repository、UnitOfWork、Use Case、QueryService、Controller 和 Filter 的唯一装配入口。
 - request-serving DbClient 使用受 FORCE RLS 约束的普通应用角色；`PostgresActiveCurrencyQuery` 使用独立后台只读角色/连接。两个连接不得混用，后台特权 client 不得注入 Controller 或用户 Use Case。
 - 鉴权后在每请求/每事务执行 `SET LOCAL app.current_user_id` 或等价安全方案；连接归还连接池前不得残留用户上下文。
@@ -413,6 +415,8 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S10-05 HTTP DTO、解析与统一响应
 
+状态：**通用 HTTP 边界与认证 DTO 已完成（2026-07-14）；资源 DTO 随 S10-07 至 S10-10 接入同一 mapper**。
+
 - 实现 JSON 到 Application Command 的防御性映射，ID、枚举、可选时间和字符串金额逐字段校验。
 - 实现 Application DTO 到响应 JSON 的映射，统一金额、RFC 3339 时间、空值和分页口径。
 - 建立统一成功响应、错误响应和 TraceId；将应用错误单向映射为 400/401/403/404/409/422/500。
@@ -421,6 +425,8 @@ P1-S12 Phase 1 测试收尾与文档回写
 产物：可复用的 request parser、response mapper、error mapper 和 exception boundary。
 
 #### P1-S10-06 注册、登录与 Token 生命周期
+
+状态：**已完成实现、专项 review 与 framework-neutral API 回归（2026-07-14）；真实安全库/数据库运行验证保留到 S12**。
 
 - 实现 register、login、refresh、logout 四条认证路径。
 - 注册使用单一 bootstrap UoW：先在无租户状态插入 User，取得 `UserId` 后在同一 Transaction 上一次性绑定 RLS tenant，再初始化 UserPreference、默认分类、`categories_initialized`、同步审计与 outbox；任一步失败全部回滚。
@@ -468,7 +474,7 @@ P1-S12 Phase 1 测试收尾与文档回写
 #### P1-S10-11 API 回归与交付总结
 
 - 启动测试版 Drogon App，覆盖认证、主要成功路径、错误映射、TraceId 和异常脱敏。
-- 运行 Windows Debug 构建、当前 273 个既有测试和新增 API 测试。
+- 运行 Windows Debug 构建、S10-06 检查点的 294 个既有测试和新增 API 测试。
 - 回写 `Docs/Development/tasks.md`，更新 `Phase_1_S10_Delivery_Summary.md`，记录尚待外部机器验证的项目。
 
 产物：可重复执行的 API 测试集与 S10 交付总结。

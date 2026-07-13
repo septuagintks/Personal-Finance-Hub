@@ -11,7 +11,9 @@
 
 #pragma once
 
+#include "pfh/application/security/auth_models.h"
 #include "pfh/domain/account.h"
+#include "pfh/domain/audit_log.h"
 #include "pfh/domain/category.h"
 #include "pfh/domain/exchange_rate.h"
 #include "pfh/domain/transaction.h"
@@ -91,6 +93,22 @@ struct InMemoryTransferGroup {
           rate(std::move(rate_in)) {}
 };
 
+struct InMemoryRevokedAccessToken {
+    std::string issuer;
+    std::string token_id;
+    std::string session_id;
+    std::chrono::system_clock::time_point expires_at{};
+    std::chrono::system_clock::time_point revoked_at{};
+};
+
+struct InMemoryRevokedSession {
+    domain::UserId user_id;
+    std::string session_id;
+    std::chrono::system_clock::time_point expires_at{};
+    std::chrono::system_clock::time_point revoked_at{};
+    std::string reason;
+};
+
 /// @brief Process-local store. Not thread-safe; one store per test fixture.
 struct InMemoryStore {
     std::int64_t next_user_id = 1;
@@ -100,6 +118,7 @@ struct InMemoryStore {
     std::int64_t next_exchange_rate_id = 1;
     std::uint64_t next_tx_context_id = 1;
     std::int64_t next_outbox_id = 1;
+    std::int64_t next_refresh_token_id = 1;
 
     std::int64_t next_category_id = 1;
 
@@ -113,6 +132,10 @@ struct InMemoryStore {
     // Append-only: key is exchange_rate id, order of insertion preserved by map id.
     std::map<std::int64_t, domain::ExchangeRate> exchange_rates;
     std::vector<OutboxRecord> outbox;
+    std::map<std::string, application::RefreshTokenRecord> refresh_tokens;
+    std::map<std::string, InMemoryRevokedAccessToken> revoked_access_tokens;
+    std::map<std::string, InMemoryRevokedSession> revoked_sessions;
+    std::vector<domain::AuditLogEntry> audit_logs;
 
     // Pending staging for the active unit-of-work transaction.
     // On commit these become permanent; on rollback they are discarded.
@@ -126,6 +149,10 @@ struct InMemoryStore {
     std::map<std::int64_t, InMemoryBalanceCache> staged_balance_cache;
     std::map<std::int64_t, domain::ExchangeRate> staged_exchange_rates;
     std::vector<OutboxRecord> staged_outbox;
+    std::map<std::string, application::RefreshTokenRecord> staged_refresh_tokens;
+    std::map<std::string, InMemoryRevokedAccessToken> staged_revoked_access_tokens;
+    std::map<std::string, InMemoryRevokedSession> staged_revoked_sessions;
+    std::vector<domain::AuditLogEntry> staged_audit_logs;
     std::vector<std::int64_t> staged_deleted_accounts;
     std::vector<std::int64_t> staged_deleted_transactions;
     std::vector<std::int64_t> staged_deleted_balance_cache;

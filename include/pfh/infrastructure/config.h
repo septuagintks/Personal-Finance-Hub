@@ -33,8 +33,17 @@ struct DatabaseConfig {
 /// @brief JWT configuration
 struct JwtConfig {
     std::string secret;
+    std::string issuer = "pfh-api";
+    std::string audience = "pfh-client";
     std::chrono::seconds access_token_expiry{900};   // 15 minutes
     std::chrono::seconds refresh_token_expiry{2592000}; // 30 days
+    std::chrono::seconds clock_skew{30};
+};
+
+struct SecurityConfig {
+    // Optional Argon2id pepper. Loaded from PFH_PASSWORD_PEPPER only; never
+    // parsed from a checked-in JSON file.
+    std::string password_pepper;
 };
 
 /// @brief Logging configuration
@@ -75,7 +84,14 @@ struct AppConfig {
     std::string environment = "development";
     ServerConfig server;
     DatabaseConfig database;
+    DatabaseConfig background_database = [] {
+        DatabaseConfig value;
+        value.user = "pfh_background";
+        value.pool_size = 2;
+        return value;
+    }();
     JwtConfig jwt;
+    SecurityConfig security;
     LoggingConfig logging;
     SchedulerConfig scheduler;
     ExchangeRateConfig exchange_rate;

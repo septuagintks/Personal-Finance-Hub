@@ -23,6 +23,7 @@ Architecture: Clean Architecture + Lightweight DDD
 9. **RLS 必须绑定固定事务**：租户 Repository 是 request-scoped，并持有认证后的 `UserId`。每次读取 RLS 表也必须创建并固定一个 Drogon `Transaction`，先执行事务级 `SET LOCAL app.current_user_id`，再在同一 Transaction 上执行全部查询。禁止先对池化 `DbClient` 设置 GUC、再假设下一条语句仍使用同一物理连接。
 10. **以提交回调确认成功**：Drogon `Transaction` 没有供业务代码直接调用的 `commit()`。成功路径应释放最后一个 Transaction owner 触发提交，并以 `newTransaction` / `setCommitCallback` 的布尔结果作为提交是否成功的依据；禁止通过 `execSqlSync("COMMIT")` 绕过 Drogon 生命周期。
 11. **事务内读取必须显式传递上下文**：需要 read-your-writes 的 User/UserPreference 等流程必须调用接收 `ITransactionContext&` 的 Repository 重载；无上下文读取会创建独立短事务，不能用于观察当前 UoW 尚未提交的写入。
+12. **注册 tenant 只能绑定一次**：注册使用未绑定 tenant 的 bootstrap UoW，只允许先访问 `users` 和系统模板。User INSERT 返回新 ID 后，必须在同一 Transaction 上调用 `bind_tenant_once(newUserId)`，由它执行 `SET LOCAL`；重复绑定、切换 ID 或在绑定前访问租户表均失败。不得拆成“创建用户一次提交 + 默认数据另一次提交”。
 
 ---
 
@@ -381,6 +382,8 @@ public:
 事务闭包必须接收一个事务上下文（例如 `ITransactionContext& tx`），并把它传给参与写入的 Repository。这样业务表写入、缓存更新和 outbox 写入才能共享同一个底层数据库事务；不得在 UoW 中创建 `trans` 后，让 Repository 继续使用普通 `DbClient` 在事务外写库。
 
 Drogon 的提交由 `Transaction` 生命周期驱动。实现必须在释放最后一个 owner 前完成业务写入与 outbox 写入，并等待 commit callback 返回 `true` 后才向 Application 报告成功。回滚或提交失败时清空本次 `pendingEvents_`；`SET LOCAL` 会随事务结束自动清除，不允许在已提交/已回滚的 Transaction 上再执行 RESET。
+
+注册是唯一允许 UoW 从未绑定状态开始的用户写流程。`IBootstrapUnitOfWork::execute_bootstrap_transaction` 提供 `ITenantBootstrapTransaction`；User 创建成功后只允许绑定一次 tenant，再写 Preference、Category、refresh token、同步 AuditLog 和 outbox。普通 request UoW 仍必须在进入闭包前由 JWT `sub` 预绑定 tenant；后台 UoW 不得调用任何租户 Repository。
 
 ```cpp
 auto committed = std::make_shared<std::promise<bool>>();

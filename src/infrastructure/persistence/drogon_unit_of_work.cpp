@@ -55,6 +55,39 @@ domain::RepositoryVoidResult DrogonUnitOfWork::execute_in_transaction(
     return result;
 }
 
+domain::RepositoryVoidResult DrogonUnitOfWork::execute_bootstrap_transaction(
+    std::function<domain::RepositoryVoidResult(
+        application::ITenantBootstrapTransaction&)> action) {
+    if (user_id_.has_value()) {
+        return std::unexpected(domain::RepositoryError::validation(
+            "Bootstrap transaction must start without a tenant"));
+    }
+    if (in_transaction_) {
+        return std::unexpected(domain::RepositoryError::database(
+            "Nested transactions are not supported"));
+    }
+
+    in_transaction_ = true;
+    pending_events_.clear();
+    auto result = postgres::execute_transaction<void>(
+        db_,
+        std::nullopt,
+        "bootstrap unit of work",
+        [&](const std::shared_ptr<drogon::orm::Transaction>& transaction)
+            -> domain::RepositoryVoidResult {
+            DrogonTransactionContext context(transaction, std::nullopt);
+            auto action_result = action(context);
+            if (!action_result.has_value()) {
+                return action_result;
+            }
+            return write_outbox(context);
+        });
+
+    pending_events_.clear();
+    in_transaction_ = false;
+    return result;
+}
+
 domain::RepositoryVoidResult DrogonUnitOfWork::write_outbox(
     domain::ITransactionContext& tx_iface) {
     auto context = postgres::require_transaction(tx_iface, user_id_);

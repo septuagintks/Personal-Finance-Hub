@@ -8,7 +8,7 @@
 
 #pragma once
 
-#include "pfh/application/persistence/i_unit_of_work.h"
+#include "pfh/application/persistence/i_bootstrap_unit_of_work.h"
 #include "pfh/domain/user.h"
 
 #ifdef PFH_HAS_POSTGRESQL
@@ -28,7 +28,7 @@ namespace pfh::infrastructure {
 ///   3. Wraps the tx in DrogonTransactionContext and calls action closure.
 ///   4. On success: writes pending outbox events and waits for Drogon's commit callback.
 ///   5. On failure: rollback (discards business + outbox) and propagates an error.
-class DrogonUnitOfWork final : public application::IUnitOfWork {
+class DrogonUnitOfWork final : public application::IBootstrapUnitOfWork {
 public:
     /// @param db Drogon database client (pooled connection manager).
     /// @param user_id Authenticated tenant. nullopt is reserved for global jobs
@@ -42,6 +42,10 @@ public:
     [[nodiscard]] domain::RepositoryVoidResult execute_in_transaction(
         std::function<domain::RepositoryVoidResult(domain::ITransactionContext& tx)>
             action) override;
+
+    [[nodiscard]] domain::RepositoryVoidResult execute_bootstrap_transaction(
+        std::function<domain::RepositoryVoidResult(
+            application::ITenantBootstrapTransaction& tx)> action) override;
 
 private:
     /// @brief Write all pending events to domain_events_outbox in the active tx.

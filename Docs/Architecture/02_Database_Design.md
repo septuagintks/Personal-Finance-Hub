@@ -783,7 +783,12 @@ CREATE TYPE audit_action AS ENUM (
     'delete',
     'dangerous_delete',
     'sync_import',
-    'refresh'
+    'refresh',
+    'register',
+    'login',
+    'logout',
+    'token_refresh',
+    'security_event'
 );
 
 CREATE TABLE audit_logs (
@@ -1348,6 +1353,21 @@ CREATE TABLE refresh_tokens (
 
 CREATE INDEX idx_refresh_tokens_user_session ON refresh_tokens(user_id, session_id);
 CREATE INDEX idx_refresh_tokens_expires ON refresh_tokens(expires_at);
+```
+
+### 23.9.1 V4\_\_authentication_session_security.sql
+
+V4 增加 `register/login/logout/token_refresh/security_event` 审计动作与 `revoked_sessions`。Refresh Token rotation 后保留旧 hash；旧 token 复用时按 `session_id` 撤销整个 family，并让 JwtFilter 对该 `sid` 的全部 Access Token fail closed。后台清理只能删除已经超过 `expires_at` 的 token/session 撤销事实。
+
+```sql
+CREATE TABLE revoked_sessions (
+    session_id VARCHAR(64) PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id),
+    expires_at TIMESTAMPTZ NOT NULL,
+    revoked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    reason VARCHAR(64) NOT NULL,
+    CHECK (expires_at > revoked_at)
+);
 ```
 
 ### 23.10 迁移执行流程

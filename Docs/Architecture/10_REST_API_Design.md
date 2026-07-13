@@ -712,11 +712,19 @@ CREATE INDEX idx_revoked_access_tokens_expires ON revoked_access_tokens(expires_
 
 撤销整个 `sid` 时：
 
-```text
-revoked_sessions(session_id)
+```sql
+CREATE TABLE revoked_sessions (
+    session_id VARCHAR(64) PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id),
+    expires_at TIMESTAMPTZ NOT NULL,
+    revoked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    reason VARCHAR(64) NOT NULL
+);
 ```
 
 所有包含该 `sid` 的 access token 均视为无效，即使未单独加入黑名单。
+
+已撤销 refresh token 不物理删除，必须保留到过期以检测旧 token 复用。检测到复用后，同一事务更新该 `sid` 的全部 refresh token、写 `revoked_sessions`、同步安全审计和 outbox；安全处置提交后再向调用方返回统一 401。
 
 ---
 

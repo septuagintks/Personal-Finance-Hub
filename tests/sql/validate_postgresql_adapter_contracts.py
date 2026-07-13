@@ -36,9 +36,24 @@ def main() -> int:
     active_currency = read(
         "src/infrastructure/persistence/postgres_active_currency_query.cpp"
     )
+    auth_sessions = read(
+        "src/infrastructure/persistence/auth_session_repository_impl.cpp"
+    )
+    registration_defaults = read(
+        "src/infrastructure/persistence/registration_defaults_repository_impl.cpp"
+    )
+    composition = read("src/bootstrap/production_composition_root.cpp")
+    token_service = read(
+        "src/infrastructure/security/openssl_token_service.cpp"
+    )
+    password_hasher = read(
+        "src/infrastructure/security/argon2_password_hasher.cpp"
+    )
+    auth_migration = read("migrations/V4__authentication_session_security.sql")
 
     required_sources = [
         "drogon_unit_of_work.cpp",
+        "drogon_unit_of_work_factory.cpp",
         "postgres_repository_support.cpp",
         "postgres_active_currency_query.cpp",
         "account_repository_impl.cpp",
@@ -49,6 +64,9 @@ def main() -> int:
         "exchange_rate_repository_impl.cpp",
         "postgres_result_set.cpp",
         "rls_session.cpp",
+        "auth_session_repository_impl.cpp",
+        "audit_log_repository_impl.cpp",
+        "registration_defaults_repository_impl.cpp",
     ]
     require(
         "if(PFH_HAS_POSTGRESQL)" not in cmake,
@@ -60,6 +78,12 @@ def main() -> int:
     require(
         "pfh_postgresql_adapter_compile_gate" in cmake,
         "PostgreSQL adapter compile gate is missing",
+        failures,
+    )
+    require(
+        "pfh_production_bootstrap_compile_gate" in cmake
+        and "pfh_production_security_compile_gate" in cmake,
+        "Production bootstrap/security compile gates are missing",
         failures,
     )
 
@@ -134,6 +158,52 @@ def main() -> int:
         and "FROM users" in active_currency
         and "UNION" in active_currency,
         "Active-currency query must include account and reporting-base currencies",
+        failures,
+    )
+    require(
+        "FOR UPDATE" in auth_sessions
+        and "revoked_sessions" in auth_sessions
+        and "token_hash" in auth_sessions
+        and "INSERT INTO refresh_tokens" in auth_sessions,
+        "Auth session adapter must lock/rotate token hashes and support session revocation",
+        failures,
+    )
+    require(
+        "bind_tenant_once" in read(
+            "src/infrastructure/persistence/drogon_transaction_context.cpp"
+        )
+        and "require_transaction(tx_iface, user_id)" in registration_defaults
+        and "initialize registration defaults" in registration_defaults
+        and "categories_initialized = TRUE" in registration_defaults,
+        "Registration bootstrap must bind once and initialize defaults atomically",
+        failures,
+    )
+    require(
+        "request_db_ == background_db_" in composition
+        and "PostgresActiveCurrencyQuery" in composition
+        and "*users_,\n        *users_" in composition,
+        "Composition root must separate request/background clients and inject request adapters",
+        failures,
+    )
+    require(
+        "argon2id_hash_encoded" in password_hasher
+        and "argon2id_verify" in password_hasher
+        and "RAND_bytes" in password_hasher,
+        "Password hashing must use salted Argon2id",
+        failures,
+    )
+    require(
+        '"HS256"' in token_service
+        and "CRYPTO_memcmp" in token_service
+        and "EVP_DigestSign" in token_service
+        and "RAND_bytes" in token_service,
+        "JWT and opaque tokens must use OpenSSL-backed HS256 and secure randomness",
+        failures,
+    )
+    require(
+        "CREATE TABLE revoked_sessions" in auth_migration
+        and "security_event" in auth_migration,
+        "V4 must persist session-family revocation and authentication audit actions",
         failures,
     )
 

@@ -99,6 +99,14 @@ option(PFH_BUILD_POSTGRESQL "Build PostgreSQL persistence adapters" OFF)
 if(PFH_BUILD_POSTGRESQL)
     find_package(Drogon REQUIRED)
     find_package(PostgreSQL REQUIRED)
+    find_package(OpenSSL REQUIRED)
+    find_path(PFH_ARGON2_INCLUDE_DIR NAMES argon2.h REQUIRED)
+    find_library(PFH_ARGON2_LIBRARY NAMES argon2 libargon2 REQUIRED)
+    add_library(pfh_argon2 UNKNOWN IMPORTED)
+    set_target_properties(pfh_argon2 PROPERTIES
+        IMPORTED_LOCATION "${PFH_ARGON2_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${PFH_ARGON2_INCLUDE_DIR}"
+    )
     message(STATUS "PostgreSQL persistence: ENABLED")
 else()
     message(STATUS "PostgreSQL persistence: DISABLED (In-Memory only)")
@@ -133,8 +141,7 @@ set(PFH_DOMAIN_SOURCES
 
 # Application Layer - Use cases and application services
 set(PFH_APPLICATION_SOURCES
-    # Core types (header-only for now)
-    # src/application/error.cpp  # Header-only
+    src/application/auth_service.cpp
 )
 
 # Infrastructure Layer - External services, persistence, etc.
@@ -143,6 +150,7 @@ set(PFH_APPLICATION_SOURCES
 set(PFH_POSTGRESQL_SOURCES
     src/infrastructure/persistence/drogon_transaction_context.cpp
     src/infrastructure/persistence/drogon_unit_of_work.cpp
+    src/infrastructure/persistence/drogon_unit_of_work_factory.cpp
     src/infrastructure/persistence/postgres_repository_support.cpp
     src/infrastructure/persistence/postgres_active_currency_query.cpp
     src/infrastructure/persistence/account_repository_impl.cpp
@@ -153,6 +161,14 @@ set(PFH_POSTGRESQL_SOURCES
     src/infrastructure/persistence/exchange_rate_repository_impl.cpp
     src/infrastructure/persistence/postgres_result_set.cpp
     src/infrastructure/persistence/rls_session.cpp
+    src/infrastructure/persistence/auth_session_repository_impl.cpp
+    src/infrastructure/persistence/audit_log_repository_impl.cpp
+    src/infrastructure/persistence/registration_defaults_repository_impl.cpp
+)
+
+set(PFH_PRODUCTION_SECURITY_SOURCES
+    src/infrastructure/security/argon2_password_hasher.cpp
+    src/infrastructure/security/openssl_token_service.cpp
 )
 
 set(PFH_INFRASTRUCTURE_SOURCES
@@ -161,12 +177,24 @@ set(PFH_INFRASTRUCTURE_SOURCES
 
 if(PFH_BUILD_POSTGRESQL)
     list(APPEND PFH_INFRASTRUCTURE_SOURCES ${PFH_POSTGRESQL_SOURCES})
+    list(APPEND PFH_INFRASTRUCTURE_SOURCES ${PFH_PRODUCTION_SECURITY_SOURCES})
 endif()
 
 # Presentation Layer - REST API controllers
 set(PFH_PRESENTATION_SOURCES
-    # Will be added as implementation progresses
+    src/presentation/time_codec.cpp
+    src/presentation/json_request_parser.cpp
+    src/presentation/http_response_mapper.cpp
+    src/presentation/jwt_filter.cpp
+    src/presentation/auth_controller.cpp
+    src/presentation/api_application.cpp
 )
+
+if(PFH_BUILD_POSTGRESQL)
+    list(APPEND PFH_PRESENTATION_SOURCES
+        src/presentation/drogon_http_adapter.cpp
+    )
+endif()
 
 # =============================================================================
 # Library Targets
@@ -176,10 +204,10 @@ set(PFH_PRESENTATION_SOURCES
 add_library(pfh_domain STATIC ${PFH_DOMAIN_SOURCES})
 target_include_directories(pfh_domain PUBLIC ${PFH_INCLUDE_DIR})
 
-# Application Layer - currently header-only use cases
-add_library(pfh_application INTERFACE)
-target_include_directories(pfh_application INTERFACE ${PFH_INCLUDE_DIR})
-target_link_libraries(pfh_application INTERFACE pfh_domain)
+# Application Layer - use-case orchestration, depending only on Domain ports.
+add_library(pfh_application STATIC ${PFH_APPLICATION_SOURCES})
+target_include_directories(pfh_application PUBLIC ${PFH_INCLUDE_DIR})
+target_link_libraries(pfh_application PUBLIC pfh_domain)
 
 # Infrastructure Library - In-Memory (always) + PostgreSQL (when PFH_BUILD_POSTGRESQL=ON)
 add_library(pfh_infrastructure STATIC ${PFH_INFRASTRUCTURE_SOURCES})
@@ -195,15 +223,21 @@ if(PFH_BUILD_POSTGRESQL)
     target_link_libraries(pfh_infrastructure PUBLIC
         Drogon::Drogon
         PostgreSQL::PostgreSQL
+        OpenSSL::Crypto
+        pfh_argon2
     )
 endif()
 
-# Presentation Library - Drogon controllers (future)
-add_library(pfh_presentation INTERFACE)
-target_include_directories(pfh_presentation INTERFACE ${PFH_INCLUDE_DIR})
-target_link_libraries(pfh_presentation INTERFACE pfh_application)
+# Presentation Library - framework-neutral HTTP boundary and Drogon adapter.
+add_library(pfh_presentation STATIC ${PFH_PRESENTATION_SOURCES})
+target_include_directories(pfh_presentation PUBLIC ${PFH_INCLUDE_DIR})
+target_link_libraries(pfh_presentation PUBLIC
+    pfh_application
+    nlohmann_json::nlohmann_json
+)
 if(PFH_BUILD_POSTGRESQL)
-    target_link_libraries(pfh_presentation INTERFACE Drogon::Drogon)
+    target_compile_definitions(pfh_presentation PUBLIC PFH_HAS_POSTGRESQL=1)
+    target_link_libraries(pfh_presentation PUBLIC Drogon::Drogon)
 endif()
 
 # Header-only fixtures/helpers shared by all test layers.
@@ -233,15 +267,56 @@ if(NOT PFH_BUILD_POSTGRESQL)
         spdlog::spdlog
         nlohmann_json::nlohmann_json
     )
+
+    add_library(pfh_production_bootstrap_compile_gate OBJECT
+        src/bootstrap/database_client_factory.cpp
+        src/bootstrap/production_composition_root.cpp
+        src/presentation/drogon_http_adapter.cpp
+    )
+    target_compile_definitions(pfh_production_bootstrap_compile_gate PRIVATE
+        PFH_HAS_POSTGRESQL=1
+    )
+    target_include_directories(pfh_production_bootstrap_compile_gate BEFORE PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/support/drogon_stub
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/support/security_stub
+        ${PFH_INCLUDE_DIR}
+    )
+    target_link_libraries(pfh_production_bootstrap_compile_gate PRIVATE
+        pfh_presentation
+        pfh_infrastructure
+        spdlog::spdlog
+        nlohmann_json::nlohmann_json
+    )
+
+    add_library(pfh_production_security_compile_gate OBJECT
+        ${PFH_PRODUCTION_SECURITY_SOURCES}
+    )
+    target_compile_definitions(pfh_production_security_compile_gate PRIVATE
+        PFH_HAS_POSTGRESQL=1
+    )
+    target_include_directories(pfh_production_security_compile_gate BEFORE PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/support/security_stub
+        ${PFH_INCLUDE_DIR}
+    )
+    target_link_libraries(pfh_production_security_compile_gate PRIVATE
+        pfh_application
+        nlohmann_json::nlohmann_json
+    )
 endif()
 
 # =============================================================================
 # Executable Target
 # =============================================================================
 
-add_executable(pfh_server
-    src/bootstrap/main.cpp
-)
+set(PFH_BOOTSTRAP_SOURCES src/bootstrap/main.cpp)
+if(PFH_BUILD_POSTGRESQL)
+    list(APPEND PFH_BOOTSTRAP_SOURCES
+        src/bootstrap/database_client_factory.cpp
+        src/bootstrap/production_composition_root.cpp
+    )
+endif()
+
+add_executable(pfh_server ${PFH_BOOTSTRAP_SOURCES})
 
 target_link_libraries(pfh_server PRIVATE
     pfh_presentation
@@ -287,8 +362,9 @@ set_tests_properties(postgresql_adapter_contracts PROPERTIES
 # Integration Tests
 add_subdirectory(tests/integration)
 
-# API Tests
-# add_subdirectory(tests/api)
+# Framework-neutral API tests run without Drogon/PostgreSQL and exercise the
+# same parser/filter/controller graph used by the production adapter.
+add_subdirectory(tests/api)
 
 # =============================================================================
 # Installation (optional)

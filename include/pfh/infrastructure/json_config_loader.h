@@ -77,16 +77,42 @@ public:
                 );
             }
 
+            if (json.contains("background_database")) {
+                const auto& db = json["background_database"];
+                config.background_database.host = db.value(
+                    "host", config.database.host);
+                config.background_database.port = db.value<std::uint16_t>(
+                    "port", config.database.port);
+                config.background_database.name = db.value(
+                    "name", config.database.name);
+                config.background_database.user = db.value(
+                    "user", std::string("pfh_background"));
+                config.background_database.password = db.value(
+                    "password", std::string(""));
+                config.background_database.pool_size = db.value<std::uint32_t>(
+                    "pool_size", 2);
+                config.background_database.connection_timeout = std::chrono::seconds(
+                    db.value<std::int64_t>("connection_timeout", 30));
+            } else {
+                config.background_database.host = config.database.host;
+                config.background_database.port = config.database.port;
+                config.background_database.name = config.database.name;
+            }
+
             // JWT config
             if (json.contains("jwt")) {
                 const auto& jwt = json["jwt"];
                 config.jwt.secret = jwt.value("secret", std::string(""));
+                config.jwt.issuer = jwt.value("issuer", std::string("pfh-api"));
+                config.jwt.audience = jwt.value("audience", std::string("pfh-client"));
                 config.jwt.access_token_expiry = std::chrono::seconds(
                     jwt.value<std::int64_t>("access_token_expiry_seconds", 900)
                 );
                 config.jwt.refresh_token_expiry = std::chrono::seconds(
                     jwt.value<std::int64_t>("refresh_token_expiry_seconds", 2592000)
                 );
+                config.jwt.clock_skew = std::chrono::seconds(
+                    jwt.value<std::int64_t>("clock_skew_seconds", 30));
             }
 
             // Logging config
@@ -129,6 +155,34 @@ public:
                 return std::unexpected(Error(application::ErrorCode::ConfigurationError,
                     "JWT secret still holds a placeholder value; set a real secret",
                     "secret starts with REPLACE_WITH_"));
+            }
+            if (config.jwt.secret.size() < 32) {
+                return std::unexpected(Error(application::ErrorCode::ConfigurationError,
+                    "JWT secret must contain at least 32 bytes"));
+            }
+            if (config.jwt.issuer.empty() || config.jwt.issuer.size() > 128 ||
+                config.jwt.audience.empty() || config.jwt.audience.size() > 128) {
+                return std::unexpected(Error(application::ErrorCode::ConfigurationError,
+                    "JWT issuer and audience must contain 1 to 128 bytes"));
+            }
+            if (config.jwt.access_token_expiry <= std::chrono::seconds::zero() ||
+                config.jwt.refresh_token_expiry <= config.jwt.access_token_expiry) {
+                return std::unexpected(Error(application::ErrorCode::ConfigurationError,
+                    "JWT token lifetimes are invalid"));
+            }
+            if (config.jwt.clock_skew < std::chrono::seconds::zero() ||
+                config.jwt.clock_skew > std::chrono::minutes(5)) {
+                return std::unexpected(Error(application::ErrorCode::ConfigurationError,
+                    "JWT clock skew must be between 0 and 300 seconds"));
+            }
+            if (config.security.password_pepper.size() > 1024) {
+                return std::unexpected(Error(application::ErrorCode::ConfigurationError,
+                    "Password pepper exceeds 1024 bytes"));
+            }
+            if (config.server.threads == 0 || config.database.pool_size == 0 ||
+                config.background_database.pool_size == 0) {
+                return std::unexpected(Error(application::ErrorCode::ConfigurationError,
+                    "Server threads and database pool sizes must be positive"));
             }
 
             return config;
@@ -199,6 +253,10 @@ private:
         if (const char* v = env_or("PFH_JWT_SECRET", "JWT_SECRET")) {
             config.jwt.secret = v;
         }
+        if (const char* v = std::getenv("PFH_PASSWORD_PEPPER");
+            v != nullptr && v[0] != '\0') {
+            config.security.password_pepper = v;
+        }
         if (const char* v = env_or("PFH_DB_HOST", "DB_HOST")) {
             config.database.host = v;
         }
@@ -228,6 +286,39 @@ private:
         }
         if (const char* v = env_or("PFH_DB_PASSWORD", "DB_PASSWORD")) {
             config.database.password = v;
+        }
+        if (const char* v = std::getenv("PFH_BACKGROUND_DB_HOST");
+            v != nullptr && v[0] != '\0') {
+            config.background_database.host = v;
+        }
+        if (const char* v = std::getenv("PFH_BACKGROUND_DB_PORT");
+            v != nullptr && v[0] != '\0') {
+            const std::string port_str = v;
+            std::size_t consumed = 0;
+            long parsed = 0;
+            try {
+                parsed = std::stol(port_str, &consumed);
+            } catch (const std::exception&) {
+                return std::unexpected(Error(application::ErrorCode::ConfigurationError,
+                    "PFH_BACKGROUND_DB_PORT is not a valid integer", port_str));
+            }
+            if (consumed != port_str.size() || parsed < 1 || parsed > 65535) {
+                return std::unexpected(Error(application::ErrorCode::ConfigurationError,
+                    "PFH_BACKGROUND_DB_PORT out of range (1-65535)", port_str));
+            }
+            config.background_database.port = static_cast<std::uint16_t>(parsed);
+        }
+        if (const char* v = std::getenv("PFH_BACKGROUND_DB_NAME");
+            v != nullptr && v[0] != '\0') {
+            config.background_database.name = v;
+        }
+        if (const char* v = std::getenv("PFH_BACKGROUND_DB_USER");
+            v != nullptr && v[0] != '\0') {
+            config.background_database.user = v;
+        }
+        if (const char* v = std::getenv("PFH_BACKGROUND_DB_PASSWORD");
+            v != nullptr && v[0] != '\0') {
+            config.background_database.password = v;
         }
         if (const char* v = env_or("PFH_EXCHANGE_RATE_API_KEY", "EXCHANGE_RATE_API_KEY")) {
             config.exchange_rate.api_key = v;

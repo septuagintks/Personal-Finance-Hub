@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "pfh/application/ports/i_user_credential_reader.h"
+#include "pfh/application/persistence/i_bootstrap_unit_of_work.h"
 #include "pfh/domain/repositories/i_user_preference_repository.h"
 #include "pfh/domain/repositories/i_user_repository.h"
 #include "pfh/infrastructure/persistence/in_memory_store.h"
@@ -11,7 +13,9 @@
 
 namespace pfh::infrastructure {
 
-class InMemoryUserRepository final : public domain::IUserRepository {
+class InMemoryUserRepository final
+    : public domain::IUserRepository,
+      public application::IUserCredentialReader {
 public:
     explicit InMemoryUserRepository(InMemoryStore& store) : store_(store) {}
 
@@ -56,6 +60,35 @@ public:
             "User not found by username: " + username));
     }
 
+    [[nodiscard]] domain::RepositoryResult<application::UserCredentialRecord>
+    find_credentials_by_username(const std::string& username) override {
+        if (store_.in_transaction) {
+            for (const auto& [_, rec] : store_.staged_users) {
+                if (rec.user.username() == username) {
+                    return application::UserCredentialRecord{
+                        rec.user,
+                        rec.password_hash,
+                        rec.base_currency,
+                        rec.categories_initialized};
+                }
+            }
+        }
+        for (const auto& [id, rec] : store_.users) {
+            if (store_.in_transaction && store_.staged_users.contains(id)) {
+                continue;
+            }
+            if (rec.user.username() == username) {
+                return application::UserCredentialRecord{
+                    rec.user,
+                    rec.password_hash,
+                    rec.base_currency,
+                    rec.categories_initialized};
+            }
+        }
+        return std::unexpected(domain::RepositoryError::not_found(
+            "User credentials not found"));
+    }
+
     [[nodiscard]] domain::RepositoryResult<domain::User> find_by_id(
         domain::ITransactionContext& /*tx*/,
         domain::UserId id) override {
@@ -77,13 +110,19 @@ public:
     }
 
     [[nodiscard]] domain::RepositoryResult<domain::UserId> create(
-        domain::ITransactionContext& /*tx*/,
+        domain::ITransactionContext& tx,
         const std::string& username,
         const std::string& password_hash,
         const domain::Currency& base_currency) override {
         if (!store_.in_transaction) {
             return std::unexpected(domain::RepositoryError::database(
                 "create requires an active transaction"));
+        }
+        if (const auto* tenant_tx =
+                dynamic_cast<const application::ITenantBootstrapTransaction*>(&tx);
+            tenant_tx != nullptr && tenant_tx->tenant_user_id().has_value()) {
+            return std::unexpected(domain::RepositoryError::validation(
+                "User creation requires an unscoped registration transaction"));
         }
 
         // Uniqueness check against committed + staged users.

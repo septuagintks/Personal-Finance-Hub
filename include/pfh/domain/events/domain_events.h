@@ -194,6 +194,114 @@ private:
     AccountId account_id_;
 };
 
+class UserRegisteredEvent final : public UserScopedEvent {
+public:
+    UserRegisteredEvent(
+        UserId user_id,
+        std::string locale,
+        std::chrono::system_clock::time_point occurred_at)
+        : UserScopedEvent(user_id, occurred_at), locale_(std::move(locale)) {}
+
+    [[nodiscard]] std::string event_name() const override { return "UserRegistered"; }
+    [[nodiscard]] std::string aggregate_type() const override { return "User"; }
+    [[nodiscard]] std::string aggregate_id() const override {
+        return user_id_.to_string();
+    }
+    [[nodiscard]] std::string payload_json() const override {
+        return "{" + base_payload() +
+               ",\"locale\":" + event_detail::json_string(locale_) + "}";
+    }
+
+private:
+    std::string locale_;
+};
+
+class UserLoggedInEvent final : public UserScopedEvent {
+public:
+    UserLoggedInEvent(
+        UserId user_id,
+        std::string session_id,
+        std::chrono::system_clock::time_point occurred_at)
+        : UserScopedEvent(user_id, occurred_at),
+          session_id_(std::move(session_id)) {}
+
+    [[nodiscard]] std::string event_name() const override { return "UserLoggedIn"; }
+    [[nodiscard]] std::string aggregate_type() const override { return "AuthSession"; }
+    [[nodiscard]] std::string aggregate_id() const override { return session_id_; }
+    [[nodiscard]] std::string payload_json() const override {
+        return "{" + base_payload() +
+               ",\"sessionId\":" + event_detail::json_string(session_id_) + "}";
+    }
+
+private:
+    std::string session_id_;
+};
+
+class TokenRefreshedEvent final : public UserScopedEvent {
+public:
+    TokenRefreshedEvent(
+        UserId user_id,
+        std::string session_id,
+        std::chrono::system_clock::time_point occurred_at)
+        : UserScopedEvent(user_id, occurred_at),
+          session_id_(std::move(session_id)) {}
+
+    [[nodiscard]] std::string event_name() const override { return "TokenRefreshed"; }
+    [[nodiscard]] std::string aggregate_type() const override { return "AuthSession"; }
+    [[nodiscard]] std::string aggregate_id() const override { return session_id_; }
+    [[nodiscard]] std::string payload_json() const override {
+        return "{" + base_payload() +
+               ",\"sessionId\":" + event_detail::json_string(session_id_) + "}";
+    }
+
+private:
+    std::string session_id_;
+};
+
+class UserLoggedOutEvent final : public UserScopedEvent {
+public:
+    UserLoggedOutEvent(
+        UserId user_id,
+        std::string session_id,
+        std::chrono::system_clock::time_point occurred_at)
+        : UserScopedEvent(user_id, occurred_at),
+          session_id_(std::move(session_id)) {}
+
+    [[nodiscard]] std::string event_name() const override { return "UserLoggedOut"; }
+    [[nodiscard]] std::string aggregate_type() const override { return "AuthSession"; }
+    [[nodiscard]] std::string aggregate_id() const override { return session_id_; }
+    [[nodiscard]] std::string payload_json() const override {
+        return "{" + base_payload() +
+               ",\"sessionId\":" + event_detail::json_string(session_id_) + "}";
+    }
+
+private:
+    std::string session_id_;
+};
+
+class RefreshTokenReuseDetectedEvent final : public UserScopedEvent {
+public:
+    RefreshTokenReuseDetectedEvent(
+        UserId user_id,
+        std::string session_id,
+        std::chrono::system_clock::time_point occurred_at)
+        : UserScopedEvent(user_id, occurred_at),
+          session_id_(std::move(session_id)) {}
+
+    [[nodiscard]] std::string event_name() const override {
+        return "RefreshTokenReuseDetected";
+    }
+    [[nodiscard]] std::string aggregate_type() const override { return "AuthSession"; }
+    [[nodiscard]] std::string aggregate_id() const override { return session_id_; }
+    [[nodiscard]] std::string payload_json() const override {
+        return "{" + base_payload() +
+               ",\"sessionId\":" + event_detail::json_string(session_id_) + "}";
+    }
+
+private:
+    std::string session_id_;
+};
+
 /// @brief ExchangeRateRefreshed: provider, baseCurrency, targetCurrency,
 /// fetchedAt. Not user-scoped (system event), so it renders its own payload.
 class ExchangeRateRefreshedEvent final : public IDomainEvent {

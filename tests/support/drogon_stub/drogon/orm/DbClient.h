@@ -42,6 +42,12 @@ public:
 
     [[nodiscard]] std::shared_ptr<Transaction> newTransaction(
         const std::function<void(bool)>& commit_callback = {});
+
+    [[nodiscard]] static std::shared_ptr<DbClient> newPgClient(
+        const std::string&,
+        std::size_t) {
+        return std::make_shared<DbClient>();
+    }
 };
 
 class Transaction : public DbClient {

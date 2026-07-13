@@ -75,6 +75,46 @@ domain::RepositoryResult<domain::User> UserRepositoryImpl::find_by_username(
     }
 }
 
+domain::RepositoryResult<application::UserCredentialRecord>
+UserRepositoryImpl::find_credentials_by_username(
+    const std::string& normalized_username) {
+    if (!db_) {
+        return std::unexpected(domain::RepositoryError::database(
+            "User database client is unavailable"));
+    }
+    try {
+        constexpr const char* kSql = R"SQL(
+            SELECT id, username, password_hash, base_currency_code,
+                   categories_initialized
+            FROM users
+            WHERE username = $1
+        )SQL";
+        const auto result = db_->execSqlSync(kSql, normalized_username);
+        if (result.empty()) {
+            return std::unexpected(domain::RepositoryError::not_found(
+                "User credentials not found"));
+        }
+        auto currency = domain::Currency::create(pg::getString(result[0], 3));
+        if (!currency) {
+            return std::unexpected(domain::RepositoryError::database(
+                "Stored user currency is invalid"));
+        }
+        return application::UserCredentialRecord{
+            domain::User(
+                domain::UserId(pg::getBigInt(result[0], 0)),
+                pg::getString(result[0], 1)),
+            pg::getString(result[0], 2),
+            *currency,
+            pg::getBool(result[0], 4)};
+    } catch (const drogon::orm::DrogonDbException& error) {
+        return std::unexpected(postgres::database_error(
+            "find user credentials", error));
+    } catch (const std::exception& error) {
+        return std::unexpected(postgres::unexpected_error(
+            "find user credentials", error));
+    }
+}
+
 domain::RepositoryResult<domain::User> UserRepositoryImpl::find_by_id(
     domain::ITransactionContext& tx_iface,
     domain::UserId id) {

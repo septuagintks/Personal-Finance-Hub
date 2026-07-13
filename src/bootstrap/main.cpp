@@ -1,61 +1,51 @@
 // Personal Finance Hub - Bootstrap Entry Point
-// Version: 1.0
-// C++23
 
-#include "pfh/infrastructure/config.h"
 #include "pfh/infrastructure/json_config_loader.h"
 #include "pfh/infrastructure/logger.h"
-#include <iostream>
+
+#ifdef PFH_HAS_POSTGRESQL
+#include "pfh/bootstrap/production_composition_root.h"
+#endif
+
 #include <filesystem>
+#include <iostream>
 
 int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
-    std::cout << "Personal Finance Hub - Backend Service" << std::endl;
-    std::cout << "Version: 0.1.0-alpha" << std::endl;
-    std::cout << "Initializing..." << std::endl;
-
-    // Determine config file path
+#ifndef PFH_HAS_POSTGRESQL
+    std::cerr
+        << "pfh_server was built without production PostgreSQL/Drogon support. "
+        << "Configure with -DPFH_BUILD_POSTGRESQL=ON to run the service.\n";
+    return 2;
+#else
     std::filesystem::path config_path = "config/config.local.json";
     if (!std::filesystem::exists(config_path)) {
-        std::cerr << "Warning: config.local.json not found, using example config" << std::endl;
         config_path = "config/config.example.json";
     }
 
-    // Load configuration
     pfh::infrastructure::JsonConfigLoader config_loader(config_path);
-    auto config_result = config_loader.load();
-
-    if (!config_result) {
-        const auto& err = config_result.error();
-        std::cerr << "Failed to load configuration: " << err.message;
-        if (!err.details.empty()) {
-            std::cerr << " (" << err.details << ")";
-        }
-        std::cerr << std::endl;
+    auto config = config_loader.load();
+    if (!config) {
+        std::cerr << "Service configuration failed: "
+                  << config.error().message << '\n';
         return 1;
     }
 
-    const auto& config = config_result.value();
-    std::cout << "Configuration loaded successfully" << std::endl;
-    std::cout << "Environment: " << config.environment << std::endl;
+    pfh::infrastructure::Logger::initialize(config->logging);
+    spdlog::info(
+        "Starting Personal Finance Hub environment={} listener={}:{}",
+        config->environment,
+        config->server.host,
+        config->server.port);
 
-    // Initialize logger
-    pfh::infrastructure::Logger::initialize(config.logging);
-
-    // Log startup information
-    spdlog::info("=================================================");
-    spdlog::info("Personal Finance Hub - Backend Service");
-    spdlog::info("Version: 0.1.0-alpha");
-    spdlog::info("Environment: {}", config.environment);
-    spdlog::info("Server: {}:{}", config.server.host, config.server.port);
-    spdlog::info("=================================================");
-
-    // TODO: Initialize Drogon application
-    // TODO: Setup database connection pool
-    // TODO: Register controllers and middleware
-    // TODO: Start server
-
-    spdlog::info("Initialization complete (application logic pending)");
-    std::cout << "Press Ctrl+C to exit" << std::endl;
-
+    pfh::bootstrap::ProductionCompositionRoot composition(std::move(*config));
+    auto initialized = composition.initialize();
+    if (!initialized) {
+        spdlog::critical(
+            "Production bootstrap failed: {}",
+            initialized.error().message);
+        return 1;
+    }
+    composition.run();
     return 0;
+#endif
 }

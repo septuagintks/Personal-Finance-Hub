@@ -18,6 +18,7 @@ set(UNIT_TEST_SOURCES
     config_test.cpp
     logger_test.cpp
     use_case_test.cpp
+    auth_service_test.cpp
 )
 
 add_executable(pfh_unit_tests ${UNIT_TEST_SOURCES})

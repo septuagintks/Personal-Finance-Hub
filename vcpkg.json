@@ -10,6 +10,8 @@
         "postgres"
       ]
     },
+    "argon2",
+    "openssl",
     "spdlog",
     "nlohmann-json",
     "gtest"
