@@ -10,6 +10,7 @@
 #include <expected>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <nlohmann/json.hpp>
 
@@ -126,9 +127,34 @@ public:
             // Scheduler config
             if (json.contains("scheduler")) {
                 const auto& scheduler = json["scheduler"];
+                config.scheduler.enabled = scheduler.value("enabled", true);
+                config.scheduler.worker_threads = scheduler.value<std::uint32_t>(
+                    "worker_threads", 2);
+                config.scheduler.queue_capacity = scheduler.value<std::uint32_t>(
+                    "queue_capacity", 64);
+                config.scheduler.outbox_publish_interval = std::chrono::seconds(
+                    scheduler.value<std::int64_t>(
+                        "outbox_publish_interval_seconds", 5));
+                config.scheduler.outbox_batch_size = scheduler.value<std::uint32_t>(
+                    "outbox_batch_size", 100);
+                config.scheduler.outbox_processing_timeout = std::chrono::seconds(
+                    scheduler.value<std::int64_t>(
+                        "outbox_processing_timeout_seconds", 300));
                 config.scheduler.exchange_rate_refresh_interval = std::chrono::minutes(
                     scheduler.value<std::int64_t>("exchange_rate_refresh_interval_minutes", 60)
                 );
+                config.scheduler.session_cleanup_interval = std::chrono::minutes(
+                    scheduler.value<std::int64_t>(
+                        "session_cleanup_interval_minutes", 1440));
+                config.scheduler.session_cleanup_batch_size =
+                    scheduler.value<std::uint32_t>(
+                        "session_cleanup_batch_size", 1000);
+                config.scheduler.job_execution_timeout = std::chrono::seconds(
+                    scheduler.value<std::int64_t>(
+                        "job_execution_timeout_seconds", 30));
+                config.scheduler.job_lease_duration = std::chrono::seconds(
+                    scheduler.value<std::int64_t>(
+                        "job_lease_duration_seconds", 120));
             }
 
             // Exchange rate config
@@ -136,6 +162,9 @@ public:
                 const auto& exchange_rate = json["exchange_rate"];
                 config.exchange_rate.provider = exchange_rate.value("provider", std::string("mock"));
                 config.exchange_rate.api_key = exchange_rate.value("api_key", std::string(""));
+                config.exchange_rate.request_timeout = std::chrono::seconds(
+                    exchange_rate.value<std::int64_t>(
+                        "request_timeout_seconds", 10));
             }
 
             // Apply environment variable overrides (higher priority than JSON).
@@ -187,6 +216,45 @@ public:
                 config.background_database.pool_size == 0) {
                 return std::unexpected(Error(application::ErrorCode::ConfigurationError,
                     "Server threads and database pool sizes must be positive"));
+            }
+            if (config.scheduler.worker_threads == 0 ||
+                config.scheduler.worker_threads > 64 ||
+                config.scheduler.queue_capacity == 0 ||
+                config.scheduler.queue_capacity > 10000 ||
+                config.scheduler.outbox_batch_size == 0 ||
+                config.scheduler.outbox_batch_size >
+                    static_cast<std::uint32_t>(
+                        std::numeric_limits<std::int32_t>::max()) ||
+                config.scheduler.session_cleanup_batch_size == 0 ||
+                config.scheduler.session_cleanup_batch_size >
+                    static_cast<std::uint32_t>(
+                        std::numeric_limits<std::int32_t>::max()) ||
+                config.scheduler.outbox_publish_interval <=
+                    std::chrono::seconds::zero() ||
+                config.scheduler.outbox_processing_timeout <=
+                    config.scheduler.job_execution_timeout ||
+                config.scheduler.exchange_rate_refresh_interval <=
+                    std::chrono::minutes::zero() ||
+                config.scheduler.session_cleanup_interval <=
+                    std::chrono::minutes::zero() ||
+                config.scheduler.job_execution_timeout <=
+                    std::chrono::seconds::zero() ||
+                config.scheduler.job_lease_duration <=
+                    config.scheduler.job_execution_timeout) {
+                return std::unexpected(Error(application::ErrorCode::ConfigurationError,
+                    "Scheduler configuration is invalid"));
+            }
+            if (config.exchange_rate.provider.empty() ||
+                config.exchange_rate.provider.size() > 64 ||
+                config.exchange_rate.api_key.size() > 512 ||
+                config.exchange_rate.request_timeout <=
+                    std::chrono::seconds::zero() ||
+                config.exchange_rate.request_timeout > std::chrono::minutes(5) ||
+                (config.scheduler.enabled &&
+                 config.exchange_rate.request_timeout >
+                     config.scheduler.job_execution_timeout)) {
+                return std::unexpected(Error(application::ErrorCode::ConfigurationError,
+                    "Exchange-rate provider configuration is invalid"));
             }
 
             return config;

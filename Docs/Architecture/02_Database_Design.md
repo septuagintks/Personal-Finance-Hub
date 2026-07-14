@@ -1,6 +1,6 @@
 # Personal Finance Hub - Database Design
 
-Version: 1.0
+Version: 1.1
 Backend: C++23
 Presentation: Drogon
 Database: PostgreSQL 16+
@@ -793,16 +793,26 @@ CREATE TYPE audit_action AS ENUM (
     'security_event'
 );
 
+CREATE TYPE audit_actor_type AS ENUM (
+    'user',
+    'system'
+);
+
 CREATE TABLE audit_logs (
 id BIGSERIAL PRIMARY KEY,
-operator_user_id BIGINT NOT NULL REFERENCES users(id),
+operator_user_id BIGINT REFERENCES users(id),
+actor_type audit_actor_type NOT NULL DEFAULT 'user',
 action audit_action NOT NULL,
 resource_type VARCHAR(64) NOT NULL,
 resource_id VARCHAR(128) NOT NULL,
 before_value JSONB,
 after_value JSONB,
 metadata JSONB,
-occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+CHECK (
+    (actor_type = 'user' AND operator_user_id IS NOT NULL) OR
+    (actor_type = 'system' AND operator_user_id IS NULL)
+)
 );
 ```
 
@@ -810,6 +820,7 @@ Indexes:
 
 ```sql
 (operator_user_id, occurred_at DESC)
+(actor_type, occurred_at DESC)
 (resource_type, resource_id)
 (action, occurred_at DESC)
 ```
@@ -825,13 +836,51 @@ Indexes:
 
 字段语义：
 
-- `operator_user_id`: 执行人
+- `actor_type`: `user` 表示用户发起的同步业务审计，`system` 表示后台系统事实
+- `operator_user_id`: 用户 actor 必填；系统 actor 必须为 `NULL`
 - `action`: 操作类型
 - `resource_type`: 资源类型，例如 `Account`、`Transaction`、`Category`、`ExchangeRate`
 - `resource_id`: 资源 ID，使用字符串以兼容 BIGINT、UUID、外部 ID 和复合 ID
 - `before_value`: 修改前快照
 - `after_value`: 修改后快照
 - `metadata`: 请求来源、Provider 名称、IP、User-Agent、失败原因等附加信息
+
+### 12.1 Outbox 与 Scheduler 运行状态
+
+V6 在初始 `domain_events_outbox` 基础上增加可靠处理租约：
+
+```sql
+ALTER TABLE domain_events_outbox
+    ADD COLUMN locked_at TIMESTAMPTZ,
+    ADD COLUMN locked_by VARCHAR(128),
+    ADD COLUMN claim_token UUID,
+    ADD COLUMN last_failed_handler VARCHAR(128),
+    ADD COLUMN last_failed_at TIMESTAMPTZ;
+
+CREATE TABLE outbox_handler_receipts (
+    outbox_id UUID NOT NULL REFERENCES domain_events_outbox(id) ON DELETE CASCADE,
+    handler_name VARCHAR(128) NOT NULL,
+    handled_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (outbox_id, handler_name)
+);
+
+CREATE TABLE scheduled_job_leases (
+    job_name VARCHAR(128) PRIMARY KEY,
+    owner_id VARCHAR(128) NOT NULL,
+    lease_token UUID NOT NULL,
+    lease_until TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+约束：
+
+1. `processing` outbox 行必须同时持有 `locked_at`、`locked_by` 和 `claim_token`；其他状态三者必须为空。
+2. publish/fail 更新必须匹配当前 claim token，防止过期 worker 覆盖新 owner 的结果。
+3. `last_error`、`last_failed_handler` 与 `last_failed_at` 只保存必要运维摘要，不保存敏感 payload。
+4. handler 副作用与 `(outbox_id, handler_name)` receipt 必须在同一事务提交。
+5. scheduled lease 由 `lease_token` 防止旧 owner 释放新租约；进程崩溃后通过 `lease_until` 恢复。
+6. V6 应先把升级前无法证明 owner 的 legacy `processing` 行转为 failed/dead-letter，再启用 processing lease 约束。
 
 ---
 

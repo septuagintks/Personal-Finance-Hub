@@ -57,6 +57,25 @@ def main() -> int:
     transfer_rate_migration = read(
         "migrations/V5__align_transfer_rate_precision.sql"
     )
+    scheduler_migration = read("migrations/V6__outbox_scheduler_foundation.sql")
+    outbox = read(
+        "src/infrastructure/persistence/postgres_outbox_repository.cpp"
+    )
+    supplemental_audit = read(
+        "src/infrastructure/persistence/postgres_supplemental_audit_store.cpp"
+    )
+    session_cleanup = read(
+        "src/infrastructure/persistence/postgres_session_cleanup_repository.cpp"
+    )
+    job_leases = read(
+        "src/infrastructure/persistence/postgres_job_lease_repository.cpp"
+    )
+    rate_provider = read(
+        "src/infrastructure/external/open_exchange_rates_provider.cpp"
+    )
+    recurring_job = read(
+        "src/infrastructure/scheduler/recurring_job.cpp"
+    )
 
     required_sources = [
         "drogon_unit_of_work.cpp",
@@ -75,6 +94,12 @@ def main() -> int:
         "auth_session_repository_impl.cpp",
         "audit_log_repository_impl.cpp",
         "registration_defaults_repository_impl.cpp",
+        "postgres_outbox_repository.cpp",
+        "postgres_supplemental_audit_store.cpp",
+        "postgres_session_cleanup_repository.cpp",
+        "postgres_job_lease_repository.cpp",
+        "drogon_http_transport.cpp",
+        "drogon_timer_scheduler.cpp",
     ]
     require(
         "if(PFH_HAS_POSTGRESQL)" not in cmake,
@@ -207,6 +232,27 @@ def main() -> int:
         "Composition root must separate request/background clients and inject request adapters",
         failures,
     )
+    for adapter in (
+        "PostgresOutboxRepository",
+        "PostgresSupplementalAuditStore",
+        "ExchangeRateRepositoryImpl",
+        "DrogonUnitOfWork",
+        "PostgresSessionCleanupRepository",
+        "PostgresJobLeaseRepository",
+    ):
+        require(
+            re.search(rf"{adapter}>\(\s*request_db_", composition) is not None,
+            f"{adapter} must use the ordinary request-role client",
+            failures,
+        )
+    require(
+        re.search(
+            r"PostgresActiveCurrencyQuery>\(\s*background_db_", composition
+        )
+        is not None,
+        "The privileged background client must remain confined to active-currency reads",
+        failures,
+    )
     require(
         "argon2id_hash_encoded" in password_hasher
         and "argon2id_verify" in password_hasher
@@ -233,6 +279,75 @@ def main() -> int:
         and "chk_transfer_groups_exchange_rate" in transfer_rate_migration
         and "$4::numeric(20,10)" in transaction,
         "Transfer snapshot rates must match the Domain NUMERIC(20,10) boundary",
+        failures,
+    )
+    for token in (
+        "FOR UPDATE SKIP LOCKED",
+        "claim_token",
+        "last_failed_handler",
+        "last_failed_at",
+        "processing lease expired",
+        "execute_transaction<application::OutboxClaimBatch>",
+        "NOW() - ($1::bigint * INTERVAL '1 second')",
+        "next_retry_at <= NOW()",
+        "NOW() + ($5::bigint * INTERVAL '1 second')",
+        "published_at = NOW()",
+    ):
+        require(token in outbox, f"Outbox claim contract is missing: {token}", failures)
+    require(
+        "INSERT INTO outbox_handler_receipts" in supplemental_audit
+        and "audit_logs.append(context, entry)" in supplemental_audit
+        and "execute_transaction<bool>" in supplemental_audit,
+        "Supplemental audit and handler receipt must commit atomically",
+        failures,
+    )
+    for token in (
+        "DELETE FROM refresh_tokens",
+        "DELETE FROM revoked_access_tokens",
+        "DELETE FROM revoked_sessions",
+        "FOR UPDATE SKIP LOCKED",
+        "execute_transaction<application::SessionCleanupSummary>",
+    ):
+        require(
+            token in session_cleanup,
+            f"Session cleanup contract is missing: {token}",
+            failures,
+        )
+    require(
+        session_cleanup.count("WHERE expires_at <= NOW()") == 3,
+        "All authentication cleanup tables must use the database clock",
+        failures,
+    )
+    require(
+        "gen_random_uuid()" in job_leases
+        and "lease_token = $3::uuid" in job_leases
+        and "lease.lease_until <= NOW()" in job_leases
+        and "$3::bigint * INTERVAL '1 second'" in job_leases,
+        "Scheduled job leases must use expiring token-guarded ownership",
+        failures,
+    )
+    require(
+        "WHERE status = 'processing'::outbox_status" in scheduler_migration
+        and "processing lease invalidated by V6 migration" in scheduler_migration
+        and "chk_outbox_processing_lease" in scheduler_migration
+        and "PRIMARY KEY (outbox_id, handler_name)" in scheduler_migration
+        and "lease_token UUID NOT NULL" in scheduler_migration,
+        "V6 must safely normalize legacy processing rows and enforce lease/idempotency state",
+        failures,
+    )
+    require(
+        "nlohmann::json::sax_parse" in rate_provider
+        and "parse_numeric_20_10" in rate_provider
+        and "duplicate object key" in rate_provider,
+        "Exchange-rate parsing must preserve numeric tokens and reject duplicate keys",
+        failures,
+    )
+    require(
+        "executor_.submit" in recurring_job
+        and "running_" in recurring_job
+        and "try_acquire" in recurring_job
+        and "exceeded soft timeout" in recurring_job,
+        "Recurring timers must enqueue bounded work with reentry, lease, and timeout handling",
         failures,
     )
 

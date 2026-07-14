@@ -5,6 +5,7 @@
 #include "pfh/domain/user.h"
 
 #include <chrono>
+#include <optional>
 #include <string>
 
 namespace pfh::domain {
@@ -24,8 +25,14 @@ enum class AuditAction {
     SecurityEvent
 };
 
+enum class AuditActorType {
+    User,
+    System
+};
+
 struct AuditLogEntry {
-    UserId operator_user_id;
+    std::optional<UserId> operator_user_id;
+    AuditActorType actor_type = AuditActorType::User;
     AuditAction action = AuditAction::Create;
     std::string resource_type;
     std::string resource_id;

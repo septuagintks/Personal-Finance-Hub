@@ -7,6 +7,8 @@
 #include "pfh/infrastructure/persistence/postgres_repository_support.h"
 #include "pfh/infrastructure/persistence/postgres_result_set.h"
 
+#include <cstdint>
+#include <optional>
 #include <string>
 
 namespace pfh::infrastructure {
@@ -37,10 +39,26 @@ namespace {
 domain::RepositoryVoidResult AuditLogRepositoryImpl::append(
     domain::ITransactionContext& tx_iface,
     const domain::AuditLogEntry& entry) {
+    if (entry.actor_type == domain::AuditActorType::User &&
+        (!entry.operator_user_id.has_value() ||
+         !entry.operator_user_id->is_valid())) {
+        return std::unexpected(domain::RepositoryError::validation(
+            "User audit actor is required"));
+    }
+    if (entry.actor_type == domain::AuditActorType::System &&
+        entry.operator_user_id.has_value()) {
+        return std::unexpected(domain::RepositoryError::validation(
+            "System audit must not carry a user actor"));
+    }
     auto context = postgres::require_transaction(
         tx_iface, entry.operator_user_id);
     if (!context) {
         return std::unexpected(context.error());
+    }
+    if (entry.actor_type == domain::AuditActorType::System &&
+        (*context)->tenant_user_id().has_value()) {
+        return std::unexpected(domain::RepositoryError::validation(
+            "System audit requires an unscoped transaction"));
     }
     if (entry.resource_type.empty() || entry.resource_id.empty()) {
         return std::unexpected(domain::RepositoryError::validation(
@@ -49,18 +67,25 @@ domain::RepositoryVoidResult AuditLogRepositoryImpl::append(
     try {
         constexpr const char* kSql = R"SQL(
             INSERT INTO audit_logs (
-                operator_user_id, action, resource_type, resource_id,
+                operator_user_id, actor_type, action, resource_type, resource_id,
                 before_value, after_value, metadata, occurred_at)
             VALUES (
-                $1, $2::audit_action, $3, $4,
-                NULLIF($5, '')::jsonb,
+                $1, $2::audit_actor_type, $3::audit_action, $4, $5,
                 NULLIF($6, '')::jsonb,
-                COALESCE(NULLIF($7, '')::jsonb, '{}'::jsonb),
-                $8)
+                NULLIF($7, '')::jsonb,
+                COALESCE(NULLIF($8, '')::jsonb, '{}'::jsonb),
+                $9)
         )SQL";
+        const std::optional<std::int64_t> operator_id =
+            entry.operator_user_id.has_value()
+                ? std::optional<std::int64_t>(entry.operator_user_id->value())
+                : std::nullopt;
         (*context)->transaction().execSqlSync(
             kSql,
-            entry.operator_user_id.value(),
+            operator_id,
+            entry.actor_type == domain::AuditActorType::User
+                ? "user"
+                : "system",
             action_text(entry.action),
             entry.resource_type,
             entry.resource_id,

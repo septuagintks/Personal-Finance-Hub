@@ -1,6 +1,6 @@
 # Personal Finance Hub - Scheduler & Background Task Design
 
-Version: 1.0
+Version: 1.1
 
 Backend: C++23
 
@@ -113,20 +113,36 @@ public:
 class IBackgroundExecutor {
 public:
     virtual ~IBackgroundExecutor() = default;
-    virtual void submit(std::function<void()> task) = 0;
+    virtual bool submit(std::function<void()> task) = 0;
+    virtual void shutdown() = 0;
 };
 ```
+
+### 2.4 Phase 1 规范实现
+
+Phase 1 以以下类作为事实实现：
+
+- `DrogonTimerScheduler`：只在 Event Loop 注册/取消 timer。
+- `BoundedThreadPool`：固定 worker 数和队列容量；队列满或停止中时 `submit` 返回 `false`，不得无界增长。
+- `RecurringJob`：统一处理本机防重入、入队失败、异常边界、任务 ID、执行耗时、软超时和可选分布式租约。
+- `JobManager`：拒绝重名 Job；启动任一失败时停止已启动项；关闭时先取消 timer、等待已接受任务，再关闭 worker pool。
+
+`job_execution_timeout` 是**软期限**。C++ 不安全地强杀工作线程会破坏事务和对象生命周期，因此超时后记录 warning，不强制终止；HTTP Provider 另有硬请求超时，Outbox processing timeout 与任务租约都必须长于软期限。Event Loop callback 只允许执行本机状态检查和一次有界 `submit`，不得直接调用 Use Case、HTTP 或 `execSqlSync`。Executor、lease adapter 或日志边界出现异常时，Job 必须收束异常并清除本机 `running` 状态，不能终止 worker 或永久阻止后续调度。
+
+Phase 1 不实现 lease heartbeat。若任务异常慢并超过 `lease_duration`，其他实例可在旧任务仍未返回时接管，因此 Job 必须可重复执行，lease 时长必须覆盖正常最坏执行时间并留出裕量。当前汇率 append 允许出现语义等价的重复快照，认证清理天然幂等；长任务重叠、进程重启和租约恢复必须在 P1-S12 真实 PostgreSQL runtime 中验证。若后续引入不可重复副作用或长任务，应先增加 token-guarded lease renew，不能只继续放大软超时。
 
 ---
 
 ## 3. 具体后台任务实现案例
 
-以下展示如何利用 Drogon 的 `trantor::EventLoop` 实现具体的业务 Job。
+以下代码用于说明 Job 作为入口调用 Use Case 的关系；生命周期、入队、租约和异常处理以 2.4 节的 `RecurringJob` 规范实现为准，不在每个 Job 内重复手写。
 
 ### 3.1 每日汇率刷新任务 (Exchange Rate Sync)
 
 承接《08_Exchange_Rate_System_Design.md》，每天执行一次汇率拉取。
 这个 Job 不携带任何用户上下文；`RefreshExchangeRatesUseCase` 通过 Application 的 `IActiveCurrencyQuery` 系统查询端口合并所有未归档账户币种与用户报表基准币种，再把币种集合传给汇率 Provider。PostgreSQL 实现使用独立后台只读连接，不复用 request-scoped `AccountRepository` 或普通请求数据库角色。
+
+权限边界只对跨租户读取例外：`PostgresActiveCurrencyQuery` 使用 BYPASSRLS + default-read-only client；汇率 append、Outbox、AuditLog、token 清理和 scheduled lease 都使用普通 request-role client 在无租户事务中访问非 RLS 表。后台特权 client 不得注入这些写 adapter。
 
 ```cpp
 // scheduler/jobs/ExchangeRateSyncJob.cpp
@@ -184,7 +200,7 @@ public:
 
 ### 3.2 僵尸数据清理任务 (Data Cleanup)
 
-自动清理归档超过 30 天的无效会话、过期的 JWT Token，或软删除超过 1 年的废弃流水。
+Phase 1 自动清理 `refresh_tokens`、`revoked_access_tokens` 和 `revoked_sessions` 中 `expires_at <= NOW()` 的记录。PostgreSQL 以数据库时钟判断过期，避免应用主机时钟超前而提前删除仍应生效的撤销记录；三张表在同一无租户事务中各按配置的 batch limit 使用 `FOR UPDATE SKIP LOCKED` 删除。软删除流水清理不属于 Phase 1。
 
 ```cpp
 // scheduler/jobs/DataCleanupJob.cpp
@@ -196,6 +212,8 @@ public:
 ### 3.3 Outbox 投递任务 (OutboxPublisherJob)
 
 负责从 `domain_events_outbox` 读取已提交但尚未投递的事件，并通过 `IEventBus` 分发给本地处理器。
+
+Phase 1 的 Job 不直接拼 SQL 或操作 EventBus，而是调用 `OutboxPublisher::run_once(worker_id)`；Publisher 负责 claim、逐条同步等待 handler、按 claim token 完成状态转换以及重试未完成的 dead-letter 审计。下方早期骨架只说明定时入口，不是当前状态机实现。
 
 ```cpp
 // scheduler/jobs/OutboxPublisherJob.cpp
@@ -279,7 +297,7 @@ void triggerNow() override {
 **解决方案：基于 PostgreSQL 的轻量级悲观锁**
 由于我们没有 Redis，我们需要利用 PostgreSQL 强大的原生功能来防止并发冲突。
 
-### 5.1 方案 A：PG 原生咨询锁 (Advisory Locks)
+### 5.1 未采用：PG 原生咨询锁 (Advisory Locks)
 
 不需要建表，非常轻量。
 
@@ -294,32 +312,35 @@ SELECT pg_advisory_unlock(1001);
 
 ```
 
-### 5.2 方案 B：实体锁表 (sys_locks)
+### 5.2 Phase 1 采用：带 token 的过期租约表
 
 适用于需要记录“上次是谁执行的、执行了多久”的场景。
 
 ```sql
-CREATE TABLE sys_locks (
-    job_name VARCHAR(64) PRIMARY KEY,
-    locked_at TIMESTAMPTZ,
-    locked_by VARCHAR(64) -- 实例的 IP 或 Hostname
+CREATE TABLE scheduled_job_leases (
+    job_name VARCHAR(128) PRIMARY KEY,
+    owner_id VARCHAR(128) NOT NULL,
+    lease_token UUID NOT NULL,
+    lease_until TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 ```
 
-在 C++ Job 中：
-
-```cpp
-// 使用带有 NOWAIT 的排他锁
-auto res = dbClient_->execSqlSync("SELECT * FROM sys_locks WHERE job_name = $1 FOR UPDATE NOWAIT", jobName);
-
-```
+汇率刷新和认证清理在执行前原子取得未过期租约；release 必须匹配
+`job_name + owner_id + lease_token`，旧 owner 不能释放后来实例的新租约。Outbox
+Publisher 不使用全局 Job lease，因为 `FOR UPDATE SKIP LOCKED` + 每行 claim token
+允许多个实例安全并行消费。PostgreSQL adapter 必须以数据库 `NOW()` 作为 lease 获取、过期和释放的共享时钟，不能依赖各应用主机可能偏移的系统时钟。所有租约写入使用普通 request-role client 访问非 RLS 表。
 
 ---
 
 ## 6. 系统生命周期集成 (main.cpp)
 
-在系统的入口，必须按正确的顺序初始化。
+在系统的入口，必须按正确的顺序初始化。Phase 1 的实际装配位于
+`ProductionCompositionRoot`：先构造 request/background DbClient 和全部 Job 依赖，
+再通过 Drogon beginning advice 调用 `JobManager::start_all()`，通过 ending advice
+依次 `stop_all()` 和 `BoundedThreadPool::shutdown()`。启动任一 Job 失败时记录 critical
+并退出服务。下面代码只保留生命周期顺序示意，类名和构造参数以实际实现为准。
 
 ```cpp
 // main.cpp

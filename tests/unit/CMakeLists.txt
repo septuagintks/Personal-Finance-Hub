@@ -19,12 +19,16 @@ set(UNIT_TEST_SOURCES
     logger_test.cpp
     use_case_test.cpp
     auth_service_test.cpp
+    outbox_test.cpp
+    exchange_rate_provider_test.cpp
+    scheduler_test.cpp
 )
 
 add_executable(pfh_unit_tests ${UNIT_TEST_SOURCES})
 
 target_link_libraries(pfh_unit_tests PRIVATE
     pfh_test_support
+    pfh_infrastructure
     GTest::gtest
     GTest::gtest_main
     spdlog::spdlog

@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include "pfh/application/events/outbox_message.h"
 #include "pfh/application/security/auth_models.h"
 #include "pfh/domain/account.h"
 #include "pfh/domain/audit_log.h"
@@ -23,6 +24,7 @@
 #include <chrono>
 #include <cstdint>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <string>
@@ -31,18 +33,7 @@
 
 namespace pfh::infrastructure {
 
-struct OutboxRecord {
-    std::string id;
-    std::string event_name;
-    std::string aggregate_type;
-    std::string aggregate_id;
-    std::string payload_json;
-    std::string status; // pending | published | failed | dead_letter
-    int retry_count = 0;
-    // When the event fact occurred. Consumers (audit, cache invalidation) rely
-    // on this; the domain_events_outbox table has an occurred_at column.
-    std::chrono::system_clock::time_point occurred_at{};
-};
+using OutboxRecord = application::OutboxMessage;
 
 struct InMemoryUserRecord {
     domain::User user;
@@ -111,7 +102,15 @@ struct InMemoryRevokedSession {
     std::string reason;
 };
 
-/// @brief Process-local store. Not thread-safe; one store per test fixture.
+struct InMemoryJobLeaseRecord {
+    std::string owner_id;
+    std::string lease_token;
+    std::chrono::system_clock::time_point lease_until{};
+    std::chrono::system_clock::time_point updated_at{};
+};
+
+/// @brief Process-local store. UoW and outbox operations serialize on mutex;
+/// test setup and direct inspection must not race with repository calls.
 struct InMemoryStore {
     std::int64_t next_user_id = 1;
     std::int64_t next_account_id = 1;
@@ -120,6 +119,8 @@ struct InMemoryStore {
     std::int64_t next_exchange_rate_id = 1;
     std::uint64_t next_tx_context_id = 1;
     std::int64_t next_outbox_id = 1;
+    std::uint64_t next_outbox_claim_token = 1;
+    std::uint64_t next_job_lease_token = 1;
     std::int64_t next_refresh_token_id = 1;
 
     std::int64_t next_category_id = 1;
@@ -142,6 +143,13 @@ struct InMemoryStore {
     std::map<std::string, InMemoryRevokedAccessToken> revoked_access_tokens;
     std::map<std::string, InMemoryRevokedSession> revoked_sessions;
     std::vector<domain::AuditLogEntry> audit_logs;
+    std::set<std::pair<std::string, std::string>> outbox_handler_receipts;
+    std::map<std::string, InMemoryJobLeaseRecord> scheduled_job_leases;
+
+    // Repository helpers can re-enter while a UoW owns the store lock. A
+    // recursive mutex lets the UoW report nested transactions explicitly
+    // instead of deadlocking, while still serializing independent workers.
+    mutable std::recursive_mutex mutex;
 
     // Pending staging for the active unit-of-work transaction.
     // On commit these become permanent; on rollback they are discarded.

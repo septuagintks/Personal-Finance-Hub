@@ -92,6 +92,8 @@ endif()
 # Dependencies
 # =============================================================================
 
+find_package(Threads REQUIRED)
+
 # PostgreSQL persistence: optional for local development without a database,
 # required for production builds. When OFF, only In-Memory repositories compile.
 option(PFH_BUILD_POSTGRESQL "Build PostgreSQL persistence adapters" OFF)
@@ -144,6 +146,9 @@ set(PFH_APPLICATION_SOURCES
     src/application/auth_service.cpp
     src/application/resource_use_cases.cpp
     src/application/finance_application_service.cpp
+    src/application/local_event_bus.cpp
+    src/application/outbox_publisher.cpp
+    src/application/supplemental_audit_handler.cpp
 )
 
 # Infrastructure Layer - External services, persistence, etc.
@@ -167,6 +172,12 @@ set(PFH_POSTGRESQL_SOURCES
     src/infrastructure/persistence/auth_session_repository_impl.cpp
     src/infrastructure/persistence/audit_log_repository_impl.cpp
     src/infrastructure/persistence/registration_defaults_repository_impl.cpp
+    src/infrastructure/persistence/postgres_outbox_repository.cpp
+    src/infrastructure/persistence/postgres_supplemental_audit_store.cpp
+    src/infrastructure/persistence/postgres_session_cleanup_repository.cpp
+    src/infrastructure/persistence/postgres_job_lease_repository.cpp
+    src/infrastructure/external/drogon_http_transport.cpp
+    src/infrastructure/scheduler/drogon_timer_scheduler.cpp
 )
 
 set(PFH_PRODUCTION_SECURITY_SOURCES
@@ -176,6 +187,11 @@ set(PFH_PRODUCTION_SECURITY_SOURCES
 
 set(PFH_INFRASTRUCTURE_SOURCES
     src/infrastructure/placeholder.cpp
+    src/infrastructure/external/open_exchange_rates_provider.cpp
+    src/infrastructure/scheduler/bounded_thread_pool.cpp
+    src/infrastructure/scheduler/recurring_job.cpp
+    src/infrastructure/scheduler/job_manager.cpp
+    src/infrastructure/scheduler/scheduled_jobs.cpp
 )
 
 if(PFH_BUILD_POSTGRESQL)
@@ -223,6 +239,7 @@ target_link_libraries(pfh_infrastructure PUBLIC
     pfh_application
     spdlog::spdlog
     nlohmann_json::nlohmann_json
+    Threads::Threads
 )
 
 if(PFH_BUILD_POSTGRESQL)

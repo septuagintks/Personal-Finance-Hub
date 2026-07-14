@@ -1,8 +1,8 @@
 # Phase 1 S10 REST API 与认证基础 - 交付记录
 
-**更新日期**: 2026-07-14
+**更新日期**: 2026-07-15
 **阶段**: P1-S10 REST API 与认证基础
-**当前状态**: LOCAL COMPLETE - P1-S10-01 至 S10-11 已完成实现、全量 review 与本地门禁；目标环境验证保留到 P1-S12
+**当前状态**: FOUNDATION PREFLIGHT PASS - 本地实现、全量 review、真实依赖构建、V1-V5、双角色启动与核心 API smoke 已通过；完整 Repository fixture 与最终环境签署保留到 P1-S12
 
 ---
 
@@ -20,8 +20,9 @@
 - P1-S10-06 register/login/refresh/logout、Argon2id、HS256 JWT、refresh rotation/reuse detection、同步审计和 V4 session-family 撤销。
 - P1-S10-07 至 S10-10 基础资源、流水、转账和报表 Application/Controller/API，以及 Tag PostgreSQL adapter、request scope 和 V5 汇率精度迁移。
 - P1-S10-11 framework-neutral 全 API 回归、OpenAPI 3.1/路由契约门禁、币种目录一致性门禁和项目全量 review。
+- 提交 `db07d64` 在 macOS/Colima Ubuntu ARM64 上完成真实 Drogon/PostgreSQL/OpenSSL/Argon2 构建、V1-V5 迁移、双角色启动和 S10 最小 API 闭环。
 
-本文可以作为 P1-S10 的本地实现与离线验收记录，但不能作为真实持久化或生产运行验收结论。Outbox Publisher 与 Scheduler 属于 P1-S11；真实 Drogon、Argon2/OpenSSL、V4/V5 迁移、PostgreSQL Repository/UoW/RLS、双角色连接池、Linux/Docker 与 API smoke 仍须在 P1-S12 目标机器签署。
+本文可以作为 P1-S10 实现、离线门禁与基础 production smoke 的验收记录，但不能替代完整 P1-S12。Outbox Publisher 与 Scheduler 属于 P1-S11；PostgreSQL 同批 Repository fixture、连接池复用、并发/失败注入、NUMERIC 边界矩阵、应用镜像和最终 Linux/Docker 门禁仍须在 P1-S12 签署。
 
 ---
 
@@ -332,14 +333,40 @@ PostgreSQL/production bootstrap/security compile gates: PASS
 ```text
 configure/build (Windows GCC 16, PostgreSQL OFF): PASS
 unit/use-case: 272
-In-Memory integration: 16
-framework-neutral API: 29
+In-Memory integration: 17
+framework-neutral API: 28
 static gates: 4
 CTest: 321/321 PASS
 PostgreSQL/production bootstrap/security compile gates: PASS
 ```
 
-本地 stub/静态门禁不证明真实 Drogon/OpenSSL/Argon2 ABI、V4/V5 SQL、PostgreSQL 行锁/RLS/事务提交、角色权限或连接池复用。上述范围继续由 #46/#57/P1-S12 阻断。
+本地 stub/静态门禁本身不证明真实 ABI 或数据库行为；下节记录了独立目标环境基础预检。未在该预检中执行的完整 fixture、连接池复用、并发与数值边界继续由 #46/#57/P1-S12 阻断。
+
+### 8.5 macOS / Colima S10 基础预检
+
+原始测试基线为 `c4fe603`；真实环境发现并修复 4 个兼容性缺陷后，最终验证提交为 `db07d64dbc0d70e9cc50709c4bfb8247fc4b52da`。
+
+| 项目 | 结果 |
+| ---- | ---- |
+| 环境 | macOS 26.5.2 ARM64 + Colima 0.10.3 / Ubuntu 24.04.4 ARM64 |
+| 工具链 | GCC 13.3、CMake 3.28.3、Ninja 1.11.1、tzdata 2026a |
+| 真实依赖 | Drogon 1.8.7、PostgreSQL client/server 16.14、OpenSSL 3.0.13、Argon2 20190702 |
+| Debug production ON build / CTest | PASS，321/321 |
+| Release production ON build / CTest | PASS，321/321 |
+| V1-V5 空库 migrate/info/validate/第二次 no-op | PASS |
+| 双角色 production startup | PASS；request 非 superuser/BYPASSRLS，background BYPASSRLS + 默认只读 |
+| 认证生命周期 | PASS；register/login/refresh reuse/logout 及 hash-only 存储均通过 |
+| 两用户 RLS smoke | PASS；跨用户列表隔离和按 ID 查询 404 |
+| 财务与报表闭环 | PASS；账户、流水、转账、net worth、dashboard、cash flow |
+
+真实依赖依次暴露并由 `db07d64` 修复：
+
+1. `quoted` helper 与 libstdc++ 13 `std::quoted` 发生未限定名重载冲突，重命名为 `json_quoted`。
+2. 真实 Drogon 需要显式包含 `drogon/orm/Row.h` 与 `Field.h`；compile stub 同步补 wrapper，避免再次掩盖 include surface。
+3. Drogon 1.8.7 不支持 `Field::as<trantor::Date>()`；改为严格解析 PostgreSQL `TIMESTAMPTZ` 文本及数值 UTC offset，实测 `+08` 和六位微秒正确归一化。
+4. `transfer_mode SMALLINT` 不能绑定 4 字节 `int`；改为 `std::int16_t` 后真实转账写入和回滚通过。
+
+返回 Windows 后，GCC 16 PostgreSQL OFF build 与 321/321 CTest 再次通过。此次预检没有执行完整 PostgreSQL Repository fixture、连接池复用压力、并发/故障注入、NUMERIC 边界矩阵、S11 后台 runtime 或应用 Docker 镜像，因此这些项目仍为 `NOT RUN`，不得由本节结果替代。
 
 ---
 
@@ -350,28 +377,28 @@ PostgreSQL/production bootstrap/security compile gates: PASS
 | P1-S10-01 | 完成 | 契约、手续费、符号、并发与删除边界已固定 |
 | P1-S10-02 | 完成 | Drogon/PostgreSQL 依赖接入与分层 CMake 目标 |
 | P1-S10-03 | 完成 | PostgreSQL Repository 与 `DrogonUnitOfWork` 实现；本地静态门禁通过 |
-| P1-S10-04 | 实现完成、外部待验 | production composition root、双 DbClient 与 bootstrap tenant 绑定已完成；真实角色/连接池待 S12 |
+| P1-S10-04 | 基础预检通过 | production composition root、双 DbClient、真实双角色启动与 bootstrap tenant 绑定通过；连接池复用矩阵待 S12 |
 | P1-S10-05 | 完成 | HTTP parser/mapper、TraceId、异常脱敏与全部资源 DTO 已接入 |
-| P1-S10-06 | 实现完成、外部待验 | 认证生命周期与本地 API 回归完成；真实安全库/数据库待 S12 |
+| P1-S10-06 | 完成 | 认证生命周期、本地 API 回归及真实 Drogon/OpenSSL/Argon2/PostgreSQL smoke 通过 |
 | P1-S10-07 | 完成 | 基础资源 Use Case、request scope、Controller、Tag adapter 与同步审计 |
 | P1-S10-08 | 完成 | Transaction 创建/软删除、严格金额与分类边界 |
 | P1-S10-09 | 完成 | Transfer 创建/查询、三模式与手续费 API |
 | P1-S10-10 | 完成 | Net worth、cash flow 与当前月 dashboard API |
-| P1-S10-11 | 本地完成、外部待验 | 321/321、OpenAPI/route 和 compile gates 通过；真实 runtime 待 S12 |
+| P1-S10-11 | 基础预检通过 | Windows 321/321、Linux Debug/Release 321/321、真实 runtime 核心 smoke 通过；最终 S12 仍保留 |
 | #48 | 完成 | 手续费 Application/Domain/Repository 路径已接通 |
 | #50 | 完成 | 流水并发策略已固定 |
 | #52 | 完成 | Phase 1 转账删除边界已固定 |
 | #55 | 完成 | DTO 金额符号说明已固定 |
 | #58 | 完成 | V3 PostgreSQL 16.14 空库复测通过 |
-| #28 | 部分完成 | 双 DbClient 与启动角色校验已接线；真实连接待 S12 |
-| #40 | 部分完成 | 认证实现及本地 API 回归完成；真实 Drogon/安全库/PostgreSQL 待 S12 |
+| #28 | 完成 | V1-V5、双 DbClient、真实双角色连接和启动权限校验通过 |
+| #40 | 完成 | 认证实现、本地回归和真实 Drogon/安全库/PostgreSQL lifecycle smoke 通过 |
 | #14/#44 | 完成 | framework-neutral API 回归、完整 DTO/parser/mapper 与 OpenAPI 契约已交付 |
-| #45 | 部分完成 | Drogon exception adapter 已实现并静态复核；真实 Drogon runtime 待 S12 |
-| #46 | 部分完成 | 核心 Repository/UoW 与 composition root 已实现并静态复核；真实 fixture 和目标环境签署待 S12 |
-| #49 | 部分完成 | Tag adapter/关系 API 与资源同步审计已完成；S11 异步处理器待实现 |
+| #45 | 完成 | Drogon exception adapter、TraceId 与真实 runtime 脱敏行为通过 |
+| #46 | 部分完成 | 核心生产写读 smoke 已通过；同批 Repository/UoW fixture、并发与故障注入待 S12 |
+| #49 | 后续已完成 | S10 完成 Tag/同步审计；S11 已补系统事件与 dead-letter 幂等审计处理器 |
 | #51 | 部分完成 | `MAX(version)` + 最新流水 ID 与全写路径缓存失效已实现；真实 DB 复核待 S12 |
 | #53 | 完成 | Application/Infrastructure/Presentation 分层 CMake 目标已落地 |
-| #57 | 未完成 | P1-S12 完整外部环境门禁仍保留 |
+| #57 | 部分完成 | S10 基础 production preflight 已通过；S11 runtime、完整 fixture、应用镜像与最终 P1-S12 门禁仍保留 |
 
 ---
 

@@ -104,7 +104,8 @@ public:
 
                 // Strongly-typed event matching the S11 contract (14_Event_Design
                 // section 2.3). Business audit is already committed above;
-                // post-commit handlers use this for cache/security side effects.
+                // post-commit handlers may use this for future cache/security
+                // side effects; Phase 1 has no external notification handler.
                 uow_.register_event(std::make_shared<domain::AccountDangerouslyDeletedEvent>(
                     cmd.user_id,
                     cmd.account_id,

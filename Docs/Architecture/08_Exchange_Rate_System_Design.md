@@ -1,6 +1,6 @@
 # Personal Finance Hub - Exchange Rate System Design
 
-Version: 1.0
+Version: 1.1
 
 Backend: C++23
 
@@ -374,6 +374,8 @@ public:
 
 #### 3.2.2 熔断与告警机制
 
+本节描述后续稳定性增强目标。Phase 1 只交付固定周期调度、单请求硬超时、完整历史 fallback 判断和 `ExchangeRateRefreshFailed` 告警事件；持久化/多实例共享的 Closed/Open/Half-Open 熔断状态机不属于 P1-S11 验收，后续实现前不得把下面的示意当作当前能力。
+
 - **断路器 (Circuit Breaker)**：如果外部 API 连续请求失败超过 3 次，断路器打开（进入 `Open` 状态）。在接下来的 1 小时内，调度任务不再请求外部 API，直接使用本地历史汇率，避免阻塞系统线程。
 - **断路器状态机设计**：
   - **Closed（闭合）**：正常状态，所有请求直接发送给外部 API。如果连续失败 3 次，状态转移到 `Open`。
@@ -511,6 +513,18 @@ public:
 ### 4.1 外部提供方实现 (Drogon HTTP Client)
 
 这里以抓取 OpenExchangeRates (JSON 格式) 为例，展示防腐层的落地：隔离 JSON 结构，将其转换为纯净的 `ExchangeRate` 对象。
+
+**Phase 1 规范实现（2026-07-15）：**
+
+1. Application 端口 `IExchangeRateProvider` 暴露稳定 `provider_name()` 和 `fetch_latest(base, targets)`；失败事件必须记录真实 provider identity。
+2. `IHttpTransport` 隔离 framework-neutral HTTP response，`DrogonHttpTransport` 只负责 HTTPS GET、状态和 body；它由 Scheduler 的专用 worker 调用，不在 Drogon HTTP Event Loop callback 中同步等待。
+3. `OpenExchangeRatesProvider` 仅接受 USD base，先去重并排序请求 target，再使用 `symbols` 限定响应。
+4. JSON 使用 nlohmann SAX 读取原始 numeric token，禁止先转 `double` 再生成 Decimal；字符串汇率同样拒绝。
+5. 响应必须包含唯一的 `base`、整数 Unix `timestamp` 和 object `rates`；base 必须为 USD，timestamp 必须为正且不得超过当前 `IClock` 五分钟。
+6. rates key 不得重复，返回集合必须与请求集合完全相等；缺失、额外、非正数或不满足 `NUMERIC(20,10)` 的任一项都会拒绝整批。
+7. HTTP/network/timeout 与非法响应进入 `RefreshExchangeRatesUseCase` 的既定历史降级路径；响应 body、API key 和底层异常不写入应用错误或审计。
+
+下方代码保留为 Provider/Repository 职责关系的早期示意，不是 Phase 1 的精度、错误或并发实现依据；规范行为以上述条目和仓库当前实现为准。
 
 **汇率拉取策略**
 
@@ -737,7 +751,7 @@ public:
 
 ## 5. 调度器接入 (Scheduler)
 
-后台作业直接挂载在 Drogon 的 Event Loop（事件循环）上，避免引入额外沉重的任务队列中间件。模块放在 `scheduler/` 目录下。
+后台作业的**定时触发**挂载在 Drogon Event Loop；实际 Provider HTTP、活跃币种查询、Repository append 和 outbox 写入全部进入有界专用 worker。模块位于 Application Scheduler 端口与 Infrastructure Scheduler adapter 中。
 
 ```cpp
 // scheduler/ExchangeRateJob.cpp
@@ -760,7 +774,7 @@ public:
     void startScheduling() {
         // 使用 Drogon 的主事件循环创建一个定时器，每 12 小时执行一次 (12 * 3600 秒)
         timerId_ = drogon::app().getLoop()->runEvery(12.0 * 3600.0, [this]() {
-            // Event Loop 只负责触发，实际网络 I/O 与数据库 I/O 进入后台执行器。
+            // Event Loop 只负责触发，实际网络 I/O 与数据库 I/O 进入有界后台执行器。
             backgroundExecutor_->submit([useCase = useCase_]() {
                 LOG_INFO << "Starting scheduled exchange rate refresh...";
                 auto result = useCase->execute();

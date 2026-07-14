@@ -21,10 +21,21 @@ public:
         }
         const auto* tenant_tx =
             dynamic_cast<const application::ITenantBootstrapTransaction*>(&tx);
-        if (tenant_tx == nullptr ||
-            tenant_tx->tenant_user_id() != entry.operator_user_id) {
+        if (tenant_tx == nullptr) {
             return std::unexpected(domain::RepositoryError::validation(
                 "Audit transaction tenant mismatch"));
+        }
+        if (entry.actor_type == domain::AuditActorType::User) {
+            if (!entry.operator_user_id.has_value() ||
+                !entry.operator_user_id->is_valid() ||
+                tenant_tx->tenant_user_id() != entry.operator_user_id) {
+                return std::unexpected(domain::RepositoryError::validation(
+                    "Audit transaction tenant mismatch"));
+            }
+        } else if (entry.operator_user_id.has_value() ||
+                   tenant_tx->tenant_user_id().has_value()) {
+            return std::unexpected(domain::RepositoryError::validation(
+                "System audit requires an unscoped transaction"));
         }
         if (entry.resource_type.empty() || entry.resource_id.empty()) {
             return std::unexpected(domain::RepositoryError::validation(

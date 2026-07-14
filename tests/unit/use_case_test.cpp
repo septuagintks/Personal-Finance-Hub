@@ -23,6 +23,7 @@
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <set>
+#include <stdexcept>
 
 using namespace pfh::domain;
 using namespace pfh::application;
@@ -32,6 +33,10 @@ namespace pfh::test {
 
 class MockExchangeRateProvider final : public IExchangeRateProvider {
 public:
+    [[nodiscard]] std::string_view provider_name() const noexcept override {
+        return "Mock";
+    }
+
     domain::RepositoryResult<std::vector<domain::ExchangeRate>> fetch_latest(
         const Currency& base,
         const std::vector<Currency>& targets) override {
@@ -63,6 +68,13 @@ private:
     bool fail_ = false;
     bool omit_last_ = false;
     bool duplicate_first_ = false;
+};
+
+class UseCaseClock final : public IClock {
+public:
+    [[nodiscard]] std::chrono::system_clock::time_point now() const override {
+        return sample_time();
+    }
 };
 
 class UseCaseTest : public ::testing::Test {
@@ -131,6 +143,7 @@ protected:
     std::unique_ptr<ICategoryRepository> category_repo_;
     std::unique_ptr<IAuditLogRepository> audit_repo_;
     std::unique_ptr<MockExchangeRateProvider> provider_;
+    UseCaseClock clock_;
 };
 
 TEST_F(UseCaseTest, ApplicationBoundariesRejectInvalidIdsAndEnums) {
@@ -841,7 +854,7 @@ TEST_F(UseCaseTest, RefreshExchangeRates_WhenProviderFails_DegradesWithoutWrite)
     (void)s;
     provider_->set_fail(true);
     RefreshExchangeRatesUseCase uc(
-        *active_currency_query_, *rate_repo_, *provider_, *uow_);
+        *active_currency_query_, *rate_repo_, *provider_, *uow_, clock_);
     auto result = uc.execute(RefreshExchangeRatesCommand{});
     ASSERT_TRUE(result.has_value());
     EXPECT_TRUE(result->degraded);
@@ -853,6 +866,8 @@ TEST_F(UseCaseTest, RefreshExchangeRates_WhenProviderFails_DegradesWithoutWrite)
     ASSERT_EQ(store_->outbox.size(), 1u);
     const auto& rec = store_->outbox.front();
     EXPECT_EQ(rec.event_name, "ExchangeRateRefreshFailed");
+    EXPECT_EQ(rec.occurred_at, sample_time());
+    EXPECT_NE(rec.payload_json.find("\"provider\":\"Mock\""), std::string::npos);
     EXPECT_NE(rec.payload_json.find("\"historicalAvailable\":false"), std::string::npos);
 }
 
@@ -870,7 +885,7 @@ TEST_F(UseCaseTest, RefreshExchangeRates_WhenProviderFailsButHistoryExists_Flags
 
     provider_->set_fail(true);
     RefreshExchangeRatesUseCase uc(
-        *active_currency_query_, *rate_repo_, *provider_, *uow_);
+        *active_currency_query_, *rate_repo_, *provider_, *uow_, clock_);
     auto result = uc.execute(RefreshExchangeRatesCommand{});
     ASSERT_TRUE(result.has_value());
     EXPECT_TRUE(result->degraded);
@@ -892,7 +907,7 @@ TEST_F(UseCaseTest, RefreshExchangeRates_WhenOnlySomeHistoryExists_FlagsNoFallba
 
     provider_->set_fail(true);
     RefreshExchangeRatesUseCase uc(
-        *active_currency_query_, *rate_repo_, *provider_, *uow_);
+        *active_currency_query_, *rate_repo_, *provider_, *uow_, clock_);
     RefreshExchangeRatesCommand cmd;
     cmd.target_currency_codes = {"CNY", "EUR"};
     auto result = uc.execute(cmd);
@@ -909,7 +924,7 @@ TEST_F(UseCaseTest, RefreshExchangeRates_WhenProviderOk_AppendsRatesAndOutbox) {
     auto s = seed();
     (void)s;
     RefreshExchangeRatesUseCase uc(
-        *active_currency_query_, *rate_repo_, *provider_, *uow_);
+        *active_currency_query_, *rate_repo_, *provider_, *uow_, clock_);
     RefreshExchangeRatesCommand cmd;
     cmd.target_currency_codes = {"CNY", "EUR"};
     auto result = uc.execute(cmd);
@@ -932,7 +947,7 @@ TEST_F(UseCaseTest, RefreshExchangeRates_IncludesBaseCurrencyWithoutMatchingAcco
     ASSERT_TRUE(preference_write.has_value()) << preference_write.error().message;
 
     RefreshExchangeRatesUseCase uc(
-        *active_currency_query_, *rate_repo_, *provider_, *uow_);
+        *active_currency_query_, *rate_repo_, *provider_, *uow_, clock_);
     auto result = uc.execute();
 
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -949,7 +964,7 @@ TEST_F(UseCaseTest, RefreshExchangeRates_WhenProviderOmitsPair_RejectsWholeRespo
     (void)s;
     provider_->set_omit_last(true);
     RefreshExchangeRatesUseCase uc(
-        *active_currency_query_, *rate_repo_, *provider_, *uow_);
+        *active_currency_query_, *rate_repo_, *provider_, *uow_, clock_);
     RefreshExchangeRatesCommand cmd;
     cmd.target_currency_codes = {"CNY", "EUR"};
 
@@ -966,7 +981,7 @@ TEST_F(UseCaseTest, RefreshExchangeRates_WhenProviderDuplicatesPair_RejectsWhole
     (void)s;
     provider_->set_duplicate_first(true);
     RefreshExchangeRatesUseCase uc(
-        *active_currency_query_, *rate_repo_, *provider_, *uow_);
+        *active_currency_query_, *rate_repo_, *provider_, *uow_, clock_);
     RefreshExchangeRatesCommand cmd;
     cmd.target_currency_codes = {"CNY", "EUR"};
 
@@ -1016,6 +1031,17 @@ TEST_F(UseCaseTest, ErrorMapping_WhenDatabaseError_DoesNotLeakDetails) {
     EXPECT_EQ(mapped.code, ErrorCode::InfrastructureFailure);
     EXPECT_EQ(mapped.message, "Database operation failed");
     EXPECT_TRUE(mapped.details.empty());
+
+    auto thrown = uow_->execute_in_transaction(
+        [](ITransactionContext&) -> RepositoryVoidResult {
+            throw std::runtime_error("sensitive action detail");
+        });
+    ASSERT_FALSE(thrown.has_value());
+    EXPECT_EQ(thrown.error().status, RepositoryStatus::DatabaseError);
+
+    auto recovered = uow_->execute_in_transaction(
+        [](ITransactionContext&) -> RepositoryVoidResult { return {}; });
+    EXPECT_TRUE(recovered.has_value());
 }
 
 // ---- Fix 1: account archive round-trips through optimistic-locked save ----

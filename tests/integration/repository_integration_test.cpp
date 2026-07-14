@@ -135,7 +135,7 @@ TEST_F(RepositoryIntegrationTest, UnitOfWork_WhenActionSucceeds_CommitsBusinessA
     ASSERT_EQ(store_->users.size(), 1u);
     ASSERT_EQ(store_->outbox.size(), 1u);
     EXPECT_EQ(store_->outbox[0].event_name, "UserCreated");
-    EXPECT_EQ(store_->outbox[0].status, "pending");
+    EXPECT_EQ(store_->outbox[0].status, application::OutboxStatus::Pending);
 }
 
 TEST_F(RepositoryIntegrationTest, UnitOfWork_WhenActionFails_RollsBackBusinessAndOutbox) {

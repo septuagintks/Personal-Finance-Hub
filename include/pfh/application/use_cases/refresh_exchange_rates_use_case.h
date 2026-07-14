@@ -12,6 +12,7 @@
 #include "pfh/application/error_mapping.h"
 #include "pfh/application/persistence/i_unit_of_work.h"
 #include "pfh/application/ports/i_active_currency_query.h"
+#include "pfh/application/ports/i_clock.h"
 #include "pfh/application/ports/i_exchange_rate_provider.h"
 #include "pfh/domain/events/domain_events.h"
 #include "pfh/domain/repositories/i_exchange_rate_repository.h"
@@ -28,11 +29,13 @@ public:
         IActiveCurrencyQuery& active_currencies,
         domain::IExchangeRateRepository& rates,
         IExchangeRateProvider& provider,
-        IUnitOfWork& uow)
+        IUnitOfWork& uow,
+        const IClock& clock)
         : active_currencies_(active_currencies),
           rates_(rates),
           provider_(provider),
-          uow_(uow) {}
+          uow_(uow),
+          clock_(clock) {}
 
     [[nodiscard]] Result<RefreshExchangeRatesResultDto> execute(
         const RefreshExchangeRatesCommand& cmd = {}) {
@@ -101,11 +104,11 @@ public:
                 [&](domain::ITransactionContext& /*tx*/) -> domain::RepositoryVoidResult {
                     uow_.register_event(
                         std::make_shared<domain::ExchangeRateRefreshFailedEvent>(
-                            "exchange-rate-provider",
+                            std::string(provider_.provider_name()),
                             pivot->code(),
                             historical_fallback_available,
                             reason,
-                            std::chrono::system_clock::now()));
+                            clock_.now()));
                     return {};
                 });
             if (!alert) {
@@ -175,6 +178,7 @@ private:
     domain::IExchangeRateRepository& rates_;
     IExchangeRateProvider& provider_;
     IUnitOfWork& uow_;
+    const IClock& clock_;
 };
 
 } // namespace pfh::application

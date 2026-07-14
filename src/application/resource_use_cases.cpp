@@ -77,15 +77,16 @@ using TimePoint = std::chrono::system_clock::time_point;
     std::string before,
     std::string after,
     TimePoint occurred_at) {
-    return domain::AuditLogEntry{
-        user_id,
-        action,
-        std::move(resource_type),
-        std::move(resource_id),
-        std::move(before),
-        std::move(after),
-        "{}",
-        occurred_at};
+    domain::AuditLogEntry entry;
+    entry.operator_user_id = user_id;
+    entry.action = action;
+    entry.resource_type = std::move(resource_type);
+    entry.resource_id = std::move(resource_id);
+    entry.before_value_json = std::move(before);
+    entry.after_value_json = std::move(after);
+    entry.metadata_json = "{}";
+    entry.occurred_at = occurred_at;
+    return entry;
 }
 
 [[nodiscard]] bool valid_text(

@@ -41,11 +41,26 @@
 - `file`: Log file path
 
 #### Scheduler Settings
-- `exchange_rate_refresh_interval_minutes`: How often to refresh exchange rates
+- `enabled`: Enables all Phase 1 recurring jobs
+- `worker_threads`: Dedicated background worker count (1-64)
+- `queue_capacity`: Maximum accepted tasks waiting for a worker (1-10000)
+- `outbox_publish_interval_seconds`: Outbox poll interval
+- `outbox_batch_size`: Maximum events claimed per publisher run
+- `outbox_processing_timeout_seconds`: Time before an abandoned processing claim is recovered; must exceed the soft job deadline
+- `exchange_rate_refresh_interval_minutes`: Exchange-rate refresh interval
+- `session_cleanup_interval_minutes`: Expired authentication data cleanup interval
+- `session_cleanup_batch_size`: Per-table deletion limit for one cleanup run
+- `job_execution_timeout_seconds`: Soft execution deadline used for warning logs
+- `job_lease_duration_seconds`: Distributed lease duration; must exceed the soft deadline
 
 #### Exchange Rate Provider
-- `provider`: Exchange rate data provider (`mock` for testing, other providers TBD)
-- `api_key`: Provider API key (if required)
+- `provider`: Production currently requires `openexchangerates`; tests may inject a mock port directly
+- `api_key`: OpenExchangeRates API key; prefer `PFH_EXCHANGE_RATE_API_KEY`
+- `request_timeout_seconds`: HTTPS request timeout, no greater than the job execution timeout
+
+The scheduler's Drogon timer callbacks only enqueue work. HTTP, PostgreSQL and event-handler waits execute on the bounded background pool. `job_execution_timeout_seconds` is a soft deadline because C++ worker threads are not terminated unsafely; external HTTP has its own hard timeout. Both `outbox_processing_timeout_seconds` and `job_lease_duration_seconds` must be longer than the soft deadline, and `request_timeout_seconds` must not exceed it.
+
+The request-role database client performs Outbox transitions, exchange-rate appends, supplemental audit writes, token cleanup and job lease updates against non-RLS tables. The background BYPASSRLS/default-read-only client is reserved exclusively for the cross-tenant active-currency query.
 
 ## Environment Variable Overlay
 

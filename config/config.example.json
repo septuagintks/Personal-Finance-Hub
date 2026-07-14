@@ -37,10 +37,21 @@
     "file": "logs/pfh.log"
   },
   "scheduler": {
-    "exchange_rate_refresh_interval_minutes": 60
+    "enabled": true,
+    "worker_threads": 2,
+    "queue_capacity": 64,
+    "outbox_publish_interval_seconds": 5,
+    "outbox_batch_size": 100,
+    "outbox_processing_timeout_seconds": 300,
+    "exchange_rate_refresh_interval_minutes": 60,
+    "session_cleanup_interval_minutes": 1440,
+    "session_cleanup_batch_size": 1000,
+    "job_execution_timeout_seconds": 30,
+    "job_lease_duration_seconds": 120
   },
   "exchange_rate": {
-    "provider": "mock",
-    "api_key": "REPLACE_WITH_ACTUAL_API_KEY"
+    "provider": "openexchangerates",
+    "api_key": "REPLACE_WITH_ACTUAL_API_KEY",
+    "request_timeout_seconds": 10
   }
 }

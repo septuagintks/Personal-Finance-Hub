@@ -1,6 +1,6 @@
 # Personal Finance Hub (PFH) - Phase 1 待办任务跟踪
 
-Version: 1.9
+Version: 2.0
 Backend: C++23
 Architecture: Clean Architecture + Lightweight DDD
 Status: Active
@@ -30,19 +30,21 @@ Status: Active
 
 ### 2.1 近期顺序
 
-1. 执行 P1-S11-01 至 S11-03，完成 Outbox claim/发布/重试/死信和审计事件处理器。
-2. 执行 P1-S11-04 至 S11-06，接入真实汇率 HTTP Provider、Scheduler 和后台任务运行边界。
-3. 完成 P1-S11 review 后进入 P1-S12 全量回归与分支交付。
-4. P1-S12 在另一台机器完成 V4/V5、Linux、Docker、PostgreSQL 16+、Debug/Release 和真实运行时阻断门禁。
+1. 执行 P1-S12-01 Windows 本地最终回归与 Release 构建复核。
+2. 将当前 S10+S11 提交交接到外部机器，执行 V1-V6、真实 PostgreSQL fixture、Outbox/Scheduler runtime 和 API smoke。
+3. 完成 Linux Debug/Release、应用 Docker 镜像、健康检查及关键业务闭环。
+4. 汇总可追溯结果、关闭阻断项并完成 Phase 1 分支交付；全部门禁通过前不合并 `main`。
 
 ### 2.2 当前前置条件
 
 - P1-S01 至 P1-S09 的 Domain、Application 与 In-Memory 验证基线已完成。
 - P1-S10 以 `Docs/Development_Plans/Phase_1/Phase_1_Detailed_Development_Plan.md` 的 3.10 节为执行边界。
-- P1-S10-01 至 S10-11 已完成本地实现与全量 review；Windows GCC 16 / PostgreSQL OFF 基线为 272 个 unit/use-case、16 个 In-Memory integration、29 个 framework-neutral API 和 4 个静态门禁，共 321/321。
+- P1-S10-01 至 S10-11 已完成本地实现与全量 review；Windows GCC 16 / PostgreSQL OFF 基线为 272 个 unit/use-case、17 个 In-Memory integration、28 个 framework-neutral API 和 4 个静态门禁，共 321/321。
 - CMake configure 必须通过 `std::chrono` IANA tzdb 能力探测；Linux 运行环境必须安装 `tzdata`。
-- PostgreSQL/Drogon/Argon2/OpenSSL 核心适配器与 production composition root 已实现并纳入离线编译门禁，但尚未在真实依赖和 PostgreSQL 上执行 fixture；生产写路径不得以静态门禁或 In-Memory 结果代替 #46/S12 验收。
-- request RLS DbClient 与后台 BYPASSRLS/default-read-only DbClient 已分离装配；目标环境仍需证明角色权限与连接池复用不会泄漏 tenant context。
+- PostgreSQL/Drogon/Argon2/OpenSSL 核心适配器与 production composition root 已在 macOS/Colima Ubuntu ARM64 完成真实依赖 Debug/Release 构建、V1-V5、双角色启动及核心 API smoke；完整 Repository fixture 仍不得由 smoke 或 In-Memory 结果代替。
+- request RLS DbClient 与后台 BYPASSRLS/default-read-only DbClient 已分离装配并通过真实角色启动校验；P1-S12 仍需覆盖连接池复用、并发、故障注入与数值边界。
+- P1-S11-01 至 S11-07 已完成本地实现与全量 review；Windows GCC 16 / PostgreSQL OFF 当前为 292 个 unit/use-case、17 个 In-Memory integration、28 个 framework-neutral API 和 4 个静态门禁，共 341/341。
+- S11 后台写任务只使用普通 request-role client 访问非 RLS 表；BYPASSRLS `background_db` 仅用于 `PostgresActiveCurrencyQuery`。该权限边界仍须在 P1-S12 真实运行验证。
 
 ---
 
@@ -103,8 +105,8 @@ Status: Active
 
 ### 3.6 持久化与事务 (Repository & Persistence)
 
-- [~] 配置 PostgreSQL 16+ 数据库连接与 Flyway 迁移脚本 <!-- id: 28 -->
-  - S10 进展：V1-V5、request/background 双配置、env overlay、运行期双 Drogon DbClient、角色分离和启动权限校验已接线；V4/V5 与真实双角色连接尚未在目标 PostgreSQL 执行，随 #46/#57 验收。
+- [x] 配置 PostgreSQL 16+ 数据库连接与 Flyway 迁移脚本 <!-- id: 28 -->
+  - S10 基础预检：PostgreSQL 16.14 空库 V1-V5、第二次 no-op、request/background 真实双角色连接和 production 启动权限校验均通过；完整 Repository fixture 继续由 #46/#57 跟踪。
 - [x] 编写 Phase 1 初始迁移，覆盖用户、偏好、账户、分类、流水、汇率、余额缓存和 outbox 表 <!-- id: 29 -->
 - [~] 实现 `DrogonUnitOfWork`，确保业务写入和 outbox 写入使用同一数据库事务上下文 <!-- id: 30 -->
   - S10-03 进展：`DrogonUnitOfWork` 已实现同一 Drogon Transaction 内业务写入 + outbox、异常回滚、事务级 RLS 和 commit callback 确认；离线 adapter compile gate 通过。真实提交失败、回滚和 outbox 原子性仍随 #46/S12 连库验证。
@@ -116,14 +118,15 @@ Status: Active
   - S10-03 进展：PostgreSQL append 与 latest/historical/pair 查询已实现并通过离线编译门禁；真实 DB append-only trigger 与时间 round-trip 仍归 #46/S12。
 - [~] 实现 `ICategoryRepository`，供创建流水校验真实分类并支持报表按一级分类聚合 <!-- id: 33a -->
   - S10-03 进展：PostgreSQL 实现已覆盖租户读取、锁定读、父子 board 校验与 root 回溯；真实 RLS/并发场景复核仍随 #46/#47/S12 落地。
-- [ ] 实现 `OutboxPublisherJob`，支持 pending、failed、重试次数和 dead letter 记录 <!-- id: 34 -->
+- [x] 实现 `OutboxPublisherJob`，支持 pending/failed claim、processing lease、有限退避、dead letter、失败 handler/时间/摘要与旧 claim token 拒绝 <!-- id: 34 -->
+  - P1-S11 已完成 In-Memory 并发/恢复测试、PostgreSQL adapter、V6 约束、幂等补充审计和 production composition root 接线；真实多连接 `SKIP LOCKED` 与进程重启恢复由 #57/S12-05 验证。
 
 ### 3.7 应用层用例 (Application Use Cases)
 
 - [x] 实现 `CreateTransactionUseCase` 与 `DeleteTransactionUseCase`，包含权限校验、事务边界和领域错误映射 <!-- id: 35 -->
 - [x] 实现 `CreateTransferUseCase`，串联账户读取、转账聚合构造、余额更新和 outbox 写入 <!-- id: 36 -->
-- [~] 实现 `RefreshExchangeRatesUseCase`，负责外部汇率拉取、降级、告警事件和非阻塞调度入口 <!-- id: 37 -->
-  - 更正（S09 review item 15/16）：Provider 端口 + 降级路径 + 降级告警事件（`ExchangeRateRefreshFailedEvent`，含历史汇率可用性标记）已实现；**真实 HTTP Provider 与后台非阻塞调度入口（Drogon event loop）尚未接线**，在 P1-S11 完成后方可标记 `[x]`。
+- [x] 实现 `RefreshExchangeRatesUseCase`，负责外部汇率拉取、降级、告警事件和非阻塞调度入口 <!-- id: 37 -->
+  - P1-S11 已接入真实 OpenExchangeRates adapter、Provider identity、`IClock`、SAX 数值 token 解析、精确响应集合校验和有界 worker 调度；真实 HTTPS/TLS/API 与历史降级 runtime 由 #57/S12-05 验证。
 - [x] 实现账户查询与余额查询用例，提供 API 所需 DTO，不暴露持久化模型 <!-- id: 38 -->
 - [x] 实现报表 QueryService，支持 net worth、cash flow 和 dashboard summary 的最小查询 <!-- id: 39 -->
   - 备注：cash flow 显式排除 Transfer；跨币种折算走汇率仓储（直接/反向/USD 三角），缺失汇率报错、DB 故障映射为 InfrastructureFailure（不吞错）。
@@ -131,15 +134,15 @@ Status: Active
 
 ### 3.8 表现层与 API (Presentation & APIs)
 
-- [~] 实现注册、登录、刷新、登出、JWT Filter、Refresh Token rotation/revocation 与黑名单撤销（P1-S10-06）<!-- id: 40 -->
-  - S10-06 进展：bootstrap tenant 单次绑定、Argon2id、OpenSSL HS256、refresh hash/rotation/reuse detection、`iss+jti` 黑名单、session-family 撤销、同步审计/outbox 与 framework-neutral API 回归已完成；真实 Drogon/OpenSSL/Argon2/PostgreSQL 行为待 #57/S12。
+- [x] 实现注册、登录、刷新、登出、JWT Filter、Refresh Token rotation/revocation 与黑名单撤销（P1-S10-06）<!-- id: 40 -->
+  - S10 基础预检：bootstrap tenant、真实 Argon2/OpenSSL/Drogon/PostgreSQL、refresh rotation/reuse session revocation、logout 黑名单、hash-only 存储及审计/outbox 后置断言通过。
 - [x] 补齐账户创建/归档、分类、标签、用户偏好 Application Use Case，并实现基础资源、`AccountController` 与 `TransactionController`；Presentation 不直接编排 Repository，金额字段以字符串接收和返回（P1-S10-07/S10-08）<!-- id: 41 -->
 - [x] 实现 `TransferController`，覆盖三种转账输入模式、手续费来源和 422 业务错误响应（P1-S10-09；#48 已完成）<!-- id: 42 -->
 - [x] 实现 `ReportController`，支持 net worth、cash flow 与 dashboard summary（P1-S10-10）<!-- id: 43 -->
 - [x] 实现 HTTP DTO/parser/mapper 与统一错误响应，将 `std::expected` 映射到 HTTP 状态码并附带 TraceId（P1-S10-05/S10-11）<!-- id: 44 -->
   - S10 完成态：认证、基础资源、流水、转账和报表 DTO 已全部接入统一 parser/mapper；OpenAPI 3.1 与实际 Drogon 路由由静态门禁保持一致。
-- [~] 注册 Drogon 全局异常处理器，确保生产响应不泄露堆栈、SQL、路径、密钥或底层异常文本（P1-S10-05）<!-- id: 45 -->
-  - S10-05 进展：framework-neutral exception boundary 与 Drogon 全局 handler 已实现并通过 compile gate/脱敏测试；真实 Drogon runtime 待 S12。
+- [x] 注册 Drogon 全局异常处理器，确保生产响应不泄露堆栈、SQL、路径、密钥或底层异常文本（P1-S10-05）<!-- id: 45 -->
+  - S10 基础预检：framework-neutral 与真实 Drogon runtime 的稳定错误映射、TraceId 和异常脱敏均通过。
 
 ---
 
@@ -174,7 +177,7 @@ Status: Active
 ### 5.1 高优先级（进入生产写路径前必须解决）
 
 - [~] 接入真实持久化：实现 `DrogonUnitOfWork` 与 PostgreSQL 版 `*RepositoryImpl`，替换现有 In-Memory 实现；用同一批 integration scenarios 对真实测试库复跑 <!-- id: 46 -->
-  - S10-06 进展：核心 PostgreSQL Repository/UoW、production composition root、request/background 双 DbClient 和启动角色校验已实现，并由 OFF 模式下的全源编译门禁和结构契约门禁覆盖；真实测试库 scenarios 尚未执行，因此不得标记完成。
+  - S10 基础预检：真实依赖构建、核心认证/账户/流水/转账/报表 smoke、双角色与基础 RLS 隔离通过，并修复 Drogon include/timestamp 与 SMALLINT bind 缺陷；同批 Repository scenarios、连接池复用、并发与失败注入尚未执行，因此不得标记完成。
   - 执行归属：适配器、composition root 与测试场景在 P1-S10-03/S10-04 落地；真实 PostgreSQL 复跑与签署在另一台机器的 P1-S12-03 完成。
   - RLS 依赖：租户仓储必须在固定 Drogon Transaction 上先执行 `SET LOCAL app.current_user_id`，并在同一 Transaction 上完成后续 SQL；事务结束自动清除 GUC。禁止对普通池化 `DbClient` 先 SET 再查询，也禁止依赖手工 RESET 修复连接亲和性。
   - In-Memory 模型仍缺 `transaction_tag_relations.user_id`、`account_balance_cache.user_id` 等新增列的对应；接 SQL 时以迁移 schema 为准。
@@ -186,8 +189,8 @@ Status: Active
 
 ### 5.2 中优先级
 
-- [~] 实现 `ITagRepository` 与 `IAuditLogRepository` 及对应用例，打通标签与审计闭环（事件消费与补充审计处理器随 P1-S11-03）<!-- id: 49 -->
-  - S10 完成态：Tag Domain/Repository、In-Memory/PostgreSQL adapter、标签关系 API，以及认证、账户、流水删除、分类、标签和偏好同步审计均已完成；S11 只实现系统事件/投递失败等补充审计，禁止重复记录已有同步业务审计。
+- [x] 实现 `ITagRepository` 与 `IAuditLogRepository` 及对应用例，打通标签、同步业务审计与幂等补充系统审计闭环 <!-- id: 49 -->
+  - S11 已完成 `AuditActorType::User/System`、handler receipt、普通/死信 identity 隔离和 receipt+AuditLog 同事务 adapter；真实 PostgreSQL 原子性由 #57/S12-05 复核。
 - [x] 明确 `transactions` 并发更新策略：Phase 1 采用追加 + 软删除，不提供普通更新，不增加行级 `version`；账户聚合并发继续使用 `Account.version` <!-- id: 50 -->
 - [~] PostgreSQL `AccountRepositoryImpl` 的余额缓存 `source_version` 必须严格对齐 schema 的 `version` 语义（`MAX(version)` 或等价），不得照搬 In-Memory 的「未删除流水条数」简化实现（P1-S10-03/S12-03）<!-- id: 51 -->
   - S10-03 已实现 `MAX(version)` + 最新流水 ID 双校验、同事务 rebuild/UPSERT，以及全部流水写路径缓存失效；真实 PostgreSQL 命中、失效和并发复核保留到 S12-03。
@@ -202,8 +205,8 @@ Status: Active
 
 ### 5.4 Phase 1 外部环境阻断门禁
 
-- [ ] 在另一台机器执行 P1-S12：Linux Debug/Release 构建、Docker 服务启动、PostgreSQL 16+ 空库迁移、真实 Repository/UoW/RLS/并发/数值边界、API smoke、Outbox/Scheduler 测试，并记录 commit hash、环境版本、命令和结果 <!-- id: 57 -->
-  - 说明：当前开发机无可用 WSL/Docker；该任务必须保留到取得可追溯测试结果，不能用 Windows 或 In-Memory 基线代替。
+- [~] 在另一台机器执行 P1-S12：Linux Debug/Release 构建、Docker 服务启动、PostgreSQL 16+ 空库迁移、真实 Repository/UoW/RLS/并发/数值边界、API smoke、Outbox/Scheduler 测试，并记录 commit hash、环境版本、命令和结果 <!-- id: 57 -->
+  - S10 基础预检已在 Colima Ubuntu ARM64 完成 Debug/Release production ON 321/321、V1-V5、双角色启动、认证/RLS/财务 smoke。S11 本地 341/341 与离线 compile gate 已通过；V6、真实 HTTP、Outbox/Scheduler 多连接/重启、完整 Repository fixture、应用镜像与最终签署仍未执行，任务保持部分完成。
 
 - [x] V3 修复后在 PostgreSQL 16.14 + Flyway OSS 10.22.0 环境对 V1-V3 执行真实空库 `migrate` / `info` / `validate`、第二次 no-op、种子数据断言和完整 CTest，确认 28 处 enum cast 修复有效 <!-- id: 58 -->
   - 外部复测提交 `4621f69`：33 条币种、55 条分类模板、27 root + 28 child、40 expense + 15 income 全部符合预期，254/254 CTest 通过；该结论只关闭迁移缺陷，不替代 #46 的真实 Repository/UoW/RLS 验收。
@@ -302,5 +305,19 @@ S10 报告 §4.2 暴露：V3 中 7 段二级分类 `INSERT ... SELECT ... UNION 
 - 最终 review 统一 Transaction Repository create 约束、locale 规则、删除流水同步审计、同额分类稳定排序和负时间戳取整，并修复 OpenAPI closed-object 组合冲突。
 - 配置安全终审拒绝未替换的 JWT/password pepper 模板值；可选 pepper 只允许留空或使用真实密钥，loader 与 production composition root 双层 fail fast。
 - 现行架构文档中的汇率数据库边界已统一为 `NUMERIC(20,10)`；`NUMERIC(30,10)` 只保留在 V1 迁移及 S07 历史说明中，并由 V5 收紧。
-- 当前 Windows GCC 16 / PostgreSQL OFF：272 unit/use-case + 16 In-Memory integration + 29 framework-neutral API + 4 static gates，共 321/321 PASS；PostgreSQL/production bootstrap/security compile gates PASS。
-- V4/V5、真实 Drogon/OpenSSL/Argon2 ABI、PostgreSQL Repository/UoW/RLS/并发/NUMERIC、双角色连接池、Linux Debug/Release、Docker 服务、真实 API smoke 与后台任务 runtime 继续由 #46/#57/P1-S12 阻断。
+- 当前 Windows GCC 16 / PostgreSQL OFF：272 unit/use-case + 17 In-Memory integration + 28 framework-neutral API + 4 static gates，共 321/321 PASS；PostgreSQL/production bootstrap/security compile gates PASS。
+- S10 的 V1-V5、真实 Drogon/OpenSSL/Argon2 ABI、双角色启动和核心 API smoke 已完成基础预检；完整 PostgreSQL Repository/UoW/RLS/并发/NUMERIC、连接池复用、S11 V6/runtime、应用镜像和最终发布门禁继续由 #46/#57/P1-S12 阻断。
+
+---
+
+## 11. P1-S11 review 收尾记录
+
+- V6 新增 Outbox processing lease、claim token、失败 handler/时间、幂等 handler receipt、User/System Audit actor 和 token-guarded scheduled job lease；迁移会先恢复 legacy `processing` 行再启用约束。
+- `PostgresOutboxRepository` 使用 `FOR UPDATE SKIP LOCKED` 批量 claim；状态更新必须匹配当前 claim token，失败按 1m/5m/15m/1h/6h 退避并在上限后进入 dead letter；PostgreSQL due/lease/退避时间统一基于数据库 `NOW()`，Application 只传时长，不依赖应用主机时钟。
+- `SupplementalAuditHandler` 只记录汇率系统事件和 dead letter 等补充事实；普通补充审计与死信使用不同 receipt identity，避免重复或漏记。
+- OpenExchangeRates adapter 通过 SAX 保留 JSON 数值 token，不经 `double`；base、请求集合、重复 key、时间戳、正数和 `NUMERIC(20,10)` 任一不符时整批拒绝。
+- `RefreshExchangeRatesUseCase` 改为注入 `IClock`，失败事件携带真实 Provider identity；历史 fallback 仍要求全部目标币种对可用。
+- `BoundedThreadPool`、`RecurringJob`、`DrogonTimerScheduler` 与 `JobManager` 固定 Event Loop 非阻塞边界；本机重入、队列溢出、executor/lease 异常收束、软超时、启动/停止和优雅 drain 均有测试。
+- 汇率刷新和认证数据清理使用 scheduled lease；Outbox 依靠行级 claim 并行消费。过期清理覆盖 refresh token、revoked access token 和 revoked session 三张表，并以数据库 `NOW()` 判断安全记录是否真正过期。
+- Production composition root 中所有后台写 adapter 使用普通 request-role DbClient；BYPASSRLS/default-read-only client 仍只注入跨租户活跃币种查询。
+- Windows GCC 16 Debug、PostgreSQL OFF 全量 341/341 通过；PostgreSQL adapter、production bootstrap 和 security compile gates 通过。V6 与真实 runtime 继续由 #57/P1-S12 阻断。

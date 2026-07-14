@@ -10,6 +10,7 @@
 #include "pfh/domain/currency.h"
 #include "pfh/domain/exchange_rate.h"
 #include "pfh/domain/repositories/repository_error.h"
+#include <string_view>
 #include <vector>
 
 namespace pfh::application {
@@ -17,6 +18,8 @@ namespace pfh::application {
 class IExchangeRateProvider {
 public:
     virtual ~IExchangeRateProvider() = default;
+
+    [[nodiscard]] virtual std::string_view provider_name() const noexcept = 0;
 
     /// @brief Fetch latest rates for base(USD) -> each target.
     [[nodiscard]] virtual domain::RepositoryResult<std::vector<domain::ExchangeRate>>

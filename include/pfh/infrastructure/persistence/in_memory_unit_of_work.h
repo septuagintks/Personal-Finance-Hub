@@ -14,6 +14,7 @@
 #include "pfh/infrastructure/persistence/in_memory_store.h"
 #include "pfh/infrastructure/persistence/in_memory_transaction_context.h"
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -53,6 +54,7 @@ public:
 private:
     template <typename Action>
     [[nodiscard]] domain::RepositoryVoidResult run_transaction(Action&& action) {
+        std::unique_lock lock(store_.mutex);
         if (store_.in_transaction) {
             return std::unexpected(domain::RepositoryError::database(
                 "Nested transactions are not supported"));
@@ -85,7 +87,13 @@ private:
 
         InMemoryTransactionContext tx(
             store_.next_tx_context_id++, tenant_user_id_);
-        auto result = std::forward<Action>(action)(tx);
+        domain::RepositoryVoidResult result;
+        try {
+            result = std::forward<Action>(action)(tx);
+        } catch (...) {
+            result = std::unexpected(domain::RepositoryError::database(
+                "In-memory transaction action failed"));
+        }
 
         if (!result.has_value()) {
             // Rollback: discard staging, keep committed store intact.
@@ -123,9 +131,12 @@ private:
             rec.aggregate_type = event->aggregate_type();
             rec.aggregate_id = event->aggregate_id();
             rec.payload_json = event->payload_json();
-            rec.status = "pending";
+            rec.status = application::OutboxStatus::Pending;
             rec.retry_count = 0;
+            rec.max_retry_count = 5;
             rec.occurred_at = event->occurred_at();
+            rec.created_at = event->occurred_at();
+            rec.next_retry_at = event->occurred_at();
             store_.staged_outbox.push_back(std::move(rec));
         }
 

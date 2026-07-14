@@ -10,20 +10,40 @@
 #include <drogon/orm/DbClient.h>
 
 #include <memory>
+#include <string>
 
 namespace pfh::application {
 class AuthService;
+class CleanupExpiredSessionsUseCase;
+class LocalEventBus;
+class OutboxPublisher;
+class RefreshExchangeRatesUseCase;
+class SupplementalAuditHandler;
 }
 
 namespace pfh::infrastructure {
 class Argon2PasswordHasher;
 class AuditLogRepositoryImpl;
 class AuthSessionRepositoryImpl;
+class BoundedThreadPool;
+class DrogonHttpTransport;
+class DrogonTimerScheduler;
+class DrogonUnitOfWork;
 class DrogonUnitOfWorkFactory;
+class ExchangeRateRefreshJob;
+class ExchangeRateRepositoryImpl;
+class JobManager;
+class OpenExchangeRatesProvider;
 class OpenSslTokenService;
 class PostgresActiveCurrencyQuery;
+class PostgresJobLeaseRepository;
+class PostgresOutboxRepository;
 class PostgresRequestScopeFactory;
+class PostgresSessionCleanupRepository;
+class PostgresSupplementalAuditStore;
 class RegistrationDefaultsRepositoryImpl;
+class OutboxPublisherJob;
+class SessionCleanupJob;
 class SystemClock;
 class UserRepositoryImpl;
 }
@@ -75,6 +95,33 @@ private:
     std::unique_ptr<infrastructure::DrogonUnitOfWorkFactory> uow_factory_;
     std::unique_ptr<infrastructure::PostgresActiveCurrencyQuery>
         background_currency_query_;
+    std::unique_ptr<infrastructure::DrogonHttpTransport> rate_http_transport_;
+    std::unique_ptr<infrastructure::OpenExchangeRatesProvider> rate_provider_;
+    std::unique_ptr<infrastructure::ExchangeRateRepositoryImpl> rate_repository_;
+    std::unique_ptr<infrastructure::DrogonUnitOfWork> rate_uow_;
+    std::unique_ptr<application::RefreshExchangeRatesUseCase>
+        refresh_rates_use_case_;
+    std::unique_ptr<infrastructure::PostgresOutboxRepository>
+        outbox_repository_;
+    std::unique_ptr<infrastructure::PostgresSupplementalAuditStore>
+        supplemental_audit_store_;
+    std::shared_ptr<application::SupplementalAuditHandler>
+        supplemental_audit_handler_;
+    std::unique_ptr<application::LocalEventBus> event_bus_;
+    std::unique_ptr<application::OutboxPublisher> outbox_publisher_;
+    std::unique_ptr<infrastructure::PostgresSessionCleanupRepository>
+        session_cleanup_repository_;
+    std::unique_ptr<application::CleanupExpiredSessionsUseCase>
+        cleanup_sessions_use_case_;
+    std::unique_ptr<infrastructure::PostgresJobLeaseRepository>
+        job_lease_repository_;
+    std::unique_ptr<infrastructure::BoundedThreadPool> background_executor_;
+    std::unique_ptr<infrastructure::DrogonTimerScheduler> timer_scheduler_;
+    std::shared_ptr<infrastructure::OutboxPublisherJob> outbox_job_;
+    std::shared_ptr<infrastructure::ExchangeRateRefreshJob> rate_refresh_job_;
+    std::shared_ptr<infrastructure::SessionCleanupJob> session_cleanup_job_;
+    std::unique_ptr<infrastructure::JobManager> job_manager_;
+    std::string scheduler_instance_id_;
     std::unique_ptr<application::AuthService> auth_service_;
     std::unique_ptr<infrastructure::PostgresRequestScopeFactory>
         request_scope_factory_;

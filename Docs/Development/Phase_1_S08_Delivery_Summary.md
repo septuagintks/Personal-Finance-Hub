@@ -157,6 +157,8 @@
 - [x] #33 ExchangeRate Repository
 - [ ] #34 OutboxPublisherJob（S11）
 
+后续状态（2026-07-15）：#34 已在 P1-S11 完成实现与本地门禁；本表保留 S08 交付当时的范围快照，真实 PostgreSQL/Drogon runtime 仍由 P1-S12 验证。
+
 ---
 
 ## 6. 本地验证

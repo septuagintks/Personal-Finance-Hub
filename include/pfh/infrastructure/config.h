@@ -70,13 +70,24 @@ struct LoggingConfig {
 
 /// @brief Scheduler configuration
 struct SchedulerConfig {
+    bool enabled = true;
+    std::uint32_t worker_threads = 2;
+    std::uint32_t queue_capacity = 64;
+    std::chrono::seconds outbox_publish_interval{5};
+    std::uint32_t outbox_batch_size = 100;
+    std::chrono::seconds outbox_processing_timeout{300};
     std::chrono::minutes exchange_rate_refresh_interval{60};
+    std::chrono::minutes session_cleanup_interval{1440};
+    std::uint32_t session_cleanup_batch_size = 1000;
+    std::chrono::seconds job_execution_timeout{30};
+    std::chrono::seconds job_lease_duration{120};
 };
 
 /// @brief Exchange rate provider configuration
 struct ExchangeRateConfig {
     std::string provider = "mock";
     std::string api_key;
+    std::chrono::seconds request_timeout{10};
 };
 
 /// @brief Application configuration root

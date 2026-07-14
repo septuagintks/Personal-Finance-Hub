@@ -1215,23 +1215,26 @@ Application Use Case 负责：
 ## 27. 领域事件
 
 领域事件使用过去时态命名，只携带最小必要 ID，不携带完整 Entity。
-事件由 Application Use Case 在事务成功后发布。
+事件由 Application Use Case 在业务事务中登记并与业务事实同事务写入 outbox，只有物理提交成功后才由后台 Publisher 分发。
 
 必备事件清单：
 
 | Event                     | 触发时机                         | 主要用途                           |
 | ------------------------- | -------------------------------- | ---------------------------------- |
 | TransactionCreated        | 单笔收入、支出、调整流水创建成功 | 失效余额缓存、刷新报表缓存         |
-| TransactionDeleted        | 流水软删除或危险删除成功         | 失效余额缓存、写审计               |
+| TransactionDeleted        | 流水软删除或危险删除成功         | 失效余额缓存、刷新报表缓存         |
 | TransferCompleted         | TransferAggregate 完整落盘成功   | 失效两个账户余额缓存、刷新报表缓存 |
 | AccountArchived           | 账户归档成功                     | 刷新 Dashboard 和账户列表          |
-| AccountDangerouslyDeleted | 账户危险删除成功                 | 写高危审计、预警                   |
+| AccountDangerouslyDeleted | 账户危险删除成功                 | 安全预警；高危审计已在业务事务同步写入 |
 | CategoryCreated           | 用户新增或启用分类               | 刷新分类树缓存                     |
 | CategoryDeleted           | 用户删除分类                     | 保持历史流水展示兼容               |
 | ExchangeRateRefreshed     | 新汇率快照插入成功               | 失效最新汇率缓存                   |
 | SyncCompleted             | 同步任务完成                     | 写同步结果、触发对账               |
 | UserPreferenceUpdated     | 用户偏好修改成功                 | 刷新前端配置和报表默认参数         |
 | AuditLogRecorded          | 审计日志写入成功                 | 可选的安全通知扩展                 |
+
+该表描述事件事实及可扩展用途，不代表所有订阅者已在 Phase 1 实现。P1-S11 当前只注册
+汇率系统补充审计和通用 dead-letter 审计；余额缓存与关键业务审计仍由事务内写路径保证。
 
 ---
 

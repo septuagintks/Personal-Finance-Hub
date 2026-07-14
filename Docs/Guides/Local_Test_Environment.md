@@ -1,8 +1,8 @@
 # Personal Finance Hub - Local Test Environment
 
-**Version**: 1.1
-**Last Updated**: 2026-07-13
-**Scope**: Historical Colima validation and pending current-head external Linux/Docker/PostgreSQL sign-off
+**Version**: 1.2
+**Last Updated**: 2026-07-15
+**Scope**: Historical validation, current S10 production preflight, and pending final S12 sign-off
 
 ---
 
@@ -12,7 +12,7 @@ This document records the local test environment used to validate the PFH backen
 
 The project targets Linux deployment, so local feature work should periodically be checked with a Linux toolchain even when the primary development machine is macOS or Windows.
 
-The GCC 13 / 142-test result below is a historical run. It predates the current timezone-aware reporting and S09 review changes and is not a sign-off for the current HEAD. P1-S12 will run the current Linux, Docker, PostgreSQL 16+, Debug/Release, API and background-job gates on another machine; that task remains open until its evidence is recorded.
+The GCC 13 / 142-test result in Sections 2-7 is historical. Section 8 records the current S10 production preflight at commit `db07d64`. That preflight validates the real dependency ABI, V1-V5 and the core API runtime, but it is not the final S12 sign-off because exhaustive PostgreSQL fixtures, S11 background jobs and the application image remain pending.
 
 ---
 
@@ -183,7 +183,28 @@ Initialization complete (application logic pending)
 
 ---
 
-## 8. Follow-Up Notes
+## 8. Current S10 Production Preflight
+
+The S10 preflight completed on 2026-07-15 using macOS 26.5.2 ARM64 with Colima 0.10.3 and Ubuntu 24.04.4 ARM64.
+
+| Item | Result |
+| ---- | ------ |
+| Commit | `db07d64dbc0d70e9cc50709c4bfb8247fc4b52da` |
+| Linux toolchain | GCC 13.3.0, CMake 3.28.3, Ninja 1.11.1, tzdata 2026a |
+| Runtime dependencies | Drogon 1.8.7, PostgreSQL 16.14, OpenSSL 3.0.13, Argon2 20190702 |
+| Debug production ON | Build PASS, CTest 321/321 |
+| Release production ON | Build PASS, CTest 321/321 |
+| Flyway | V1-V5 migrate/info/validate PASS; second migrate no-op |
+| Production startup | Distinct request/background roles PASS |
+| API smoke | Auth, two-user isolation, accounts, transactions, transfer and reports PASS |
+
+The run found and fixed four real-environment defects in signed commit `db07d64`: a libstdc++ 13 `std::quoted` overload collision, missing real Drogon Row/Field includes, unsupported `Field::as<trantor::Date>()` conversion, and a four-byte integer bound to PostgreSQL `SMALLINT`. The disposable service, database container and network were removed after validation; no credentials, tokens or database dump were retained.
+
+This was a foundation preflight, not a full PostgreSQL integration suite. S11 has since completed its Windows implementation and 341/341 local regression, but the combined binary has not been rerun here. Repository/UoW scenario parity, connection-pool reuse, concurrent locks, failure injection, NUMERIC boundary matrices, V6/background runtime and the application Docker image remain P1-S12 work.
+
+---
+
+## 9. Follow-Up Notes
 
 - The recorded GCC 13 / 142-test run predates the timezone-aware reporting
   implementation. Current HEAD requires the CMake chrono-tzdb probe to pass and
@@ -192,9 +213,9 @@ Initialization complete (application logic pending)
 - A later external PostgreSQL 16.14/Flyway 10.22.0 run validated V1-V3 and the
   then-current 254-test baseline; see
   `Docs/Development/Phase_1_S10_PostgreSQL_Persistence_Validation_Report.md`.
-  The current P1-S10 local-complete 321-test HEAD still requires the final P1-S12 Linux rerun.
+  The newer S10 preflight above supersedes that build/runtime baseline, while final P1-S12 still requires the omitted fixture and release gates.
 - Keep `build/` and `config/config.local.json` local.
 - Run Linux validation before phase delivery or before merging phase work back to `main`.
-- Re-run the completed S10 PostgreSQL/Drogon composition root and shared repository scenarios against PostgreSQL 16+ on the external P1-S12 machine.
-- Run the completed Phase 1 API surface as real Drogon smoke tests in P1-S12; the local framework-neutral API suite is not a runtime substitute.
+- Re-run the completed S10 PostgreSQL/Drogon composition root and shared repository scenarios as a full PostgreSQL fixture in P1-S12.
+- Re-run the real Drogon API smoke after S11 integration, including V6, OpenExchangeRates, Outbox claim/recovery, scheduled leases, token cleanup and graceful shutdown; the S10 preflight is not evidence for the later combined binary.
 - Record the current commit hash, environment versions, Debug/Release commands, Docker startup/health result, migration result, PostgreSQL tests, API tests and Outbox/Scheduler tests before Phase 1 sign-off.

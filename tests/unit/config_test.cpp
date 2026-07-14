@@ -45,8 +45,16 @@ constexpr const char* kValidConfig = R"({
   "jwt": { "secret": "0123456789abcdef0123456789abcdef", "access_token_expiry_seconds": 600,
            "refresh_token_expiry_seconds": 120000 },
   "logging": { "level": "warn", "output": "both", "file": "x.log" },
-  "scheduler": { "exchange_rate_refresh_interval_minutes": 30 },
-  "exchange_rate": { "provider": "ecb", "api_key": "k" }
+  "scheduler": { "enabled": true, "worker_threads": 3, "queue_capacity": 40,
+                 "outbox_publish_interval_seconds": 4, "outbox_batch_size": 25,
+                 "outbox_processing_timeout_seconds": 120,
+                 "exchange_rate_refresh_interval_minutes": 30,
+                 "session_cleanup_interval_minutes": 720,
+                 "session_cleanup_batch_size": 250,
+                 "job_execution_timeout_seconds": 20,
+                 "job_lease_duration_seconds": 90 },
+  "exchange_rate": { "provider": "ecb", "api_key": "k",
+                     "request_timeout_seconds": 8 }
 })";
 
 } // namespace
@@ -71,8 +79,19 @@ TEST(JsonConfigLoader, WhenValidConfig_LoadsAllFields) {
     EXPECT_EQ(r->jwt.access_token_expiry, std::chrono::seconds(600));
     EXPECT_EQ(r->logging.level, LogLevel::Warning);
     EXPECT_EQ(r->logging.output, LogOutput::Both);
+    EXPECT_TRUE(r->scheduler.enabled);
+    EXPECT_EQ(r->scheduler.worker_threads, 3U);
+    EXPECT_EQ(r->scheduler.queue_capacity, 40U);
+    EXPECT_EQ(r->scheduler.outbox_publish_interval, std::chrono::seconds(4));
+    EXPECT_EQ(r->scheduler.outbox_batch_size, 25U);
+    EXPECT_EQ(r->scheduler.outbox_processing_timeout, std::chrono::seconds(120));
     EXPECT_EQ(r->scheduler.exchange_rate_refresh_interval, std::chrono::minutes(30));
+    EXPECT_EQ(r->scheduler.session_cleanup_interval, std::chrono::minutes(720));
+    EXPECT_EQ(r->scheduler.session_cleanup_batch_size, 250U);
+    EXPECT_EQ(r->scheduler.job_execution_timeout, std::chrono::seconds(20));
+    EXPECT_EQ(r->scheduler.job_lease_duration, std::chrono::seconds(90));
     EXPECT_EQ(r->exchange_rate.provider, "ecb");
+    EXPECT_EQ(r->exchange_rate.request_timeout, std::chrono::seconds(8));
 }
 
 TEST(JsonConfigLoader, WhenOptionalSectionsMissing_UsesDefaults) {
@@ -150,6 +169,32 @@ TEST(JsonConfigLoader, WhenJwtSecretIsShort_ReturnsConfigurationError) {
     auto r = loader.load();
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, ErrorCode::ConfigurationError);
+}
+
+TEST(JsonConfigLoader, WhenSchedulerDurationsConflict_ReturnsError) {
+    const auto expect_invalid = [](const std::string& scheduler_fields,
+                                   const std::string& exchange_fields = "") {
+        TempConfig cfg(
+            "{\"jwt\":{\"secret\":\"0123456789abcdef0123456789abcdef\"},"
+            "\"scheduler\":{" + scheduler_fields + "}" + exchange_fields +
+            "}");
+        JsonConfigLoader loader(cfg.path());
+        auto result = loader.load();
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().code, ErrorCode::ConfigurationError);
+    };
+
+    expect_invalid(
+        "\"job_execution_timeout_seconds\":60,"
+        "\"job_lease_duration_seconds\":60");
+    expect_invalid(
+        "\"job_execution_timeout_seconds\":60,"
+        "\"outbox_processing_timeout_seconds\":60");
+    expect_invalid(
+        "\"job_execution_timeout_seconds\":10,"
+        "\"job_lease_duration_seconds\":60",
+        ",\"exchange_rate\":{\"provider\":\"mock\","
+        "\"request_timeout_seconds\":11}");
 }
 
 // ---- Log level / output parsing ----

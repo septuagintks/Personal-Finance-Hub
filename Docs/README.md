@@ -39,6 +39,7 @@ Docs/
 │   ├── Phase_1_S08_Delivery_Summary.md # Phase 1 S08 Repository 与 Unit of Work 交付记录
 │   ├── Phase_1_S09_Delivery_Summary.md # Phase 1 S09 Application Use Cases 交付记录
 │   ├── Phase_1_S10_Delivery_Summary.md # Phase 1 S10 本地交付记录
+│   ├── Phase_1_S11_Delivery_Summary.md # Phase 1 S11 Outbox 与后台任务交付记录
 │   ├── Phase_1_S10_PostgreSQL_Persistence_Validation_Report.md # V3 外部复测最终报告
 │   └── tasks.md                        # 待办任务跟踪
 │
@@ -80,8 +81,9 @@ Docs/
 4. **轻量级 CQRS**：写路径通过 Domain 实体和 Repository 保证强一致性；Phase 1 报表由 Application `ReportQueryService` 通过 request-scoped Repository 读取并在 C++ 内完成精确折算，后续可在不改变 DTO 语义的前提下引入 SQL 聚合端口。
 5. **事务后事件派发 (Post-Commit Dispatch)**：`DrogonUnitOfWork` 将事件与业务事实同事务写入 outbox；物理 Commit 成功后再由 `OutboxPublisherJob` claim 并派发，防止回滚事务产生错误事件。
 6. **全局异常拦截**：通过 Drogon 全局异常处理器捕获非预期异常，生成唯一 `TraceId`，在保障生产环境安全（不泄露敏感信息）的同时提供完整的服务端日志追溯。
+7. **受控后台运行时**：Drogon timer 只触发有界 worker 入队；Outbox 使用行级租约，汇率刷新和认证清理使用 PostgreSQL 任务租约，并统一由 `JobManager` 管理启动与优雅退出。
 
-当前进度（2026-07-14）：P1-S01 至 P1-S10 已完成本地实现与全量 review，下一步进入 P1-S11 Outbox、调度和后台任务。Windows GCC 16 / PostgreSQL OFF 当前 321/321 通过，并覆盖 framework-neutral API、OpenAPI/路由、迁移和 PostgreSQL adapter 静态门禁；V1-V3 已在外部 PostgreSQL 16.14 + Flyway 10.22.0 空库复测通过。V4/V5、真实 Drogon/OpenSSL/Argon2 ABI、PostgreSQL Repository/RLS/连接池、Linux/Docker 和运行时 API 仍由 P1-S12 阻断，不能据此视为 Phase 1 已完成。
+当前进度（2026-07-15）：P1-S01 至 P1-S11 已完成实现、全量 review 和 Windows 本地 341/341，下一步进入 P1-S12。S10 基础提交已在 macOS/Colima Ubuntu ARM64 通过真实依赖 Debug/Release、V1-V5、双角色启动与核心 API smoke；S11 的 V6、真实 OpenExchangeRates、Outbox/Scheduler 多连接与重启恢复、完整 PostgreSQL fixture、应用镜像和最终 Linux/Docker 签署仍未完成，不能据此视为 Phase 1 已交付。
 
 ---
 

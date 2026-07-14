@@ -11,7 +11,7 @@ Status: Active
 
 本文档是 `Phase_1_Development_Plan.md` 的细化子计划，用于描述 Phase 1 从创建工程目录结构开始，到第一阶段测试收尾为止的具体开发顺序、交付物和验收口径。
 
-当前进度（2026-07-14）：P1-S01 至 P1-S10 已完成本地实现与全量 review，下一步进入 P1-S11。当前 Windows GCC 16 / PostgreSQL OFF 基线为 272 个 unit/use-case、16 个 In-Memory integration、29 个 framework-neutral API 和 4 个静态门禁，共 321/321；PostgreSQL、production bootstrap 与 Argon2/OpenSSL 安全源均在 OFF 构建中通过窄 API stub 执行语法编译。V1-V3 已在外部 PostgreSQL 16.14 空库复测通过；V4/V5、真实 Drogon/PostgreSQL/Argon2/OpenSSL ABI、连接池隔离、Linux/Docker 及完整 P1-S12 门禁尚未在目标机器签署。
+当前进度（2026-07-15）：P1-S01 至 P1-S11 已完成实现、全量 review 与 Windows 本地门禁，下一步进入 P1-S12。当前 GCC 16 / PostgreSQL OFF 为 292 个 unit/use-case、17 个 In-Memory integration、28 个 framework-neutral API 和 4 个静态门禁，共 341/341；PostgreSQL adapter、production bootstrap 与 security compile gates 通过。提交 `db07d64` 的 S10 基础已在 macOS/Colima Ubuntu ARM64 通过真实依赖 Debug/Release、V1-V5、双角色启动与核心 API smoke；S11 新增 V6、Outbox/Scheduler、真实 HTTP Provider、完整 PostgreSQL fixture、应用镜像和最终 Phase 1 签署仍须在 P1-S12 外部环境验证。
 
 ### 1.1 执行原则
 
@@ -391,7 +391,7 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S10-03 PostgreSQL Repository 与 DrogonUnitOfWork
 
-状态：**核心适配器实现、S10-04 装配与离线编译/结构门禁已完成（2026-07-14）；真实连库签署保留到 P1-S12**。
+状态：**核心适配器、S10-04 装配与真实 production 基础 smoke 已完成（2026-07-15）；完整 Repository fixture 与并发/失败矩阵保留到 P1-S12**。
 
 - 实现 `DrogonUnitOfWork`，把同一 `Transaction` 上下文显式传给所有写 Repository 和 outbox。
 - 实现 PostgreSQL 版 User、UserPreference、Account、Transaction（含 Transfer + Adjustment 聚合持久化）、ExchangeRate、Category 核心适配器，以及供无用户后台任务使用的 `PostgresActiveCurrencyQuery`。
@@ -403,7 +403,7 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S10-04 Composition Root、DbClient 与 RLS 上下文
 
-状态：**已完成实现与本地离线复核（2026-07-14）；真实双角色连接及连接池复用验证保留到 S12**。
+状态：**已完成实现、真实双角色启动和基础 RLS smoke（2026-07-15）；连接池复用与并发隔离矩阵保留到 S12**。
 
 - 在 bootstrap 层创建 DbClient、Repository、UnitOfWork、Use Case、QueryService、Controller 和 Filter 的唯一装配入口。
 - request-serving DbClient 使用受 FORCE RLS 约束的普通应用角色；`PostgresActiveCurrencyQuery` 使用独立后台只读角色/连接。两个连接不得混用，后台特权 client 不得注入 Controller 或用户 Use Case。
@@ -426,7 +426,7 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S10-06 注册、登录与 Token 生命周期
 
-状态：**已完成实现、专项 review 与 framework-neutral API 回归（2026-07-14）；真实安全库/数据库运行验证保留到 S12**。
+状态：**已完成实现、专项 review、framework-neutral 回归及真实 Drogon/OpenSSL/Argon2/PostgreSQL lifecycle smoke（2026-07-15）**。
 
 - 实现 register、login、refresh、logout 四条认证路径。
 - 注册使用单一 bootstrap UoW：先在无租户状态插入 User，取得 `UserId` 后在同一 Transaction 上一次性绑定 RLS tenant，再初始化 UserPreference、默认分类、`categories_initialized`、同步审计与 outbox；任一步失败全部回滚。
@@ -439,7 +439,7 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S10-07 基础资源 API
 
-状态：**已完成实现与本地回归（2026-07-14）**。真实 PostgreSQL/Drogon runtime 验证保留到 P1-S12。
+状态：**已完成实现、本地回归与真实 PostgreSQL/Drogon 最小资源 smoke（2026-07-15）**。完整 fixture 仍保留到 P1-S12。
 
 - 在 Controller 前补齐 CreateAccount、ArchiveAccount、Category、Tag 和 UserPreference 所需的 Application Command/Use Case；Presentation 不直接编排 Repository。
 - 按 Account、Category、Tag、UserPreference、Currency metadata 的顺序接入 API。
@@ -481,10 +481,10 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S10-11 API 回归与交付总结
 
-状态：**本地门禁完成（2026-07-14）**。真实 Drogon/PostgreSQL 服务启动与 smoke test 保留到 P1-S12，不以 stub/离线结果替代。
+状态：**本地门禁与真实 production 基础预检完成（2026-07-15）**。最终 S12 仍须在 S11 合入后复跑完整 fixture、runtime 与发布门禁。
 
 - 直接驱动 framework-neutral `ApiApplication`，覆盖认证、基础资源、流水、转账、报表、主要错误映射、TraceId 和异常脱敏；以 Drogon route contract 与 compile gate 校验生产 adapter 形状。
-- 运行 Windows Debug 构建、272 个 unit/use-case、16 个 In-Memory integration、29 个 API tests 和 4 个静态门禁，共 321/321。
+- 运行 Windows Debug 构建、272 个 unit/use-case、17 个 In-Memory integration、28 个 API tests 和 4 个静态门禁，共 321/321。
 - 回写 `Docs/Development/tasks.md`，更新 `Phase_1_S10_Delivery_Summary.md`，记录尚待外部机器验证的项目。
 
 产物：可重复执行的 API 测试集与 S10 交付总结。
@@ -510,10 +510,14 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S11-01 Outbox 领取与状态机
 
+状态：**已完成实现、并发/恢复专项测试与离线 PostgreSQL 契约门禁（2026-07-15）；due、退避和租约统一使用数据库时钟，真实多连接行为保留到 S12-05**。
+
 - 使用 `FOR UPDATE SKIP LOCKED` 或等价机制批量 claim pending 事件，定义 processing、published、failed/dead-letter 状态转换。
 - claim、锁超时恢复、重试次数、下一次重试时间和最后错误摘要必须可观测。
 
 #### P1-S11-02 发布、重试与死信
+
+状态：**已完成（2026-07-15）**。固定 1m/5m/15m/1h/6h 有限退避，旧 claim token 不能提交新租约，dead letter 可重复审计。
 
 - 实现 `OutboxPublisherJob`，业务事务提交后才允许发布。
 - 使用有上限的指数退避；达到阈值后进入 dead letter，不得无限热重试。
@@ -521,26 +525,36 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S11-03 Handler 幂等与补充审计闭环
 
+状态：**已完成（2026-07-15）**。普通补充审计与 dead-letter 使用独立 handler identity，receipt 与系统 AuditLog 在同一事务提交。
+
 - 每个事件处理器以 event id 建立幂等边界，重复投递不得重复写坏缓存、审计或通知事实。
 - 认证及账户、流水删除、分类、标签、偏好等关键业务审计已在 Use Case 事务内同步写入；handler 不得为同一动作重复写 AuditLog。
 - AuditLog handler 只记录尚无同步审计的系统事件、投递失败/dead-letter 和安全告警处置，敏感 payload 只保留必要摘要。
 
 #### P1-S11-04 汇率 HTTP Provider
 
+状态：**已完成实现与离线严格解析测试（2026-07-15）；真实 HTTPS/TLS/API 响应保留到 S12-05**。
+
 - 实现真实 HTTP Provider，严格校验响应集合、币种、时间戳、正汇率和重复项。
 - 网络失败、部分响应和非法响应进入既定历史降级路径，并发出 `ExchangeRateRefreshFailedEvent`。
 
 #### P1-S11-05 Scheduler 与 JobManager
+
+状态：**已完成实现、本机/多实例租约、异常收束与清理专项测试（2026-07-15）；Phase 1 无 lease heartbeat，长任务接管及真实 Drogon timer/PostgreSQL runtime 保留到 S12-05**。
 
 - 实现汇率刷新、outbox 发布、过期 Refresh Token 和 Access Token 撤销记录清理任务。
 - 定义启动、停止、优雅退出、单实例防重入和任务超时行为。
 
 #### P1-S11-06 非阻塞约束
 
+状态：**已完成（2026-07-15）**。Event Loop timer callback 只尝试本机防重入并提交有界队列；HTTP、数据库和 handler 均在专用 worker 执行。
+
 - 网络、数据库等待和 CPU 密集工作不得阻塞 Drogon Event Loop；使用异步 client、协程或专用 worker。
 - 增加慢任务日志、job id、trace id、执行耗时和失败原因。
 
 #### P1-S11-07 后台任务测试与交付总结
+
+状态：**本地完成（2026-07-15）**。Windows Debug 341/341、三类 production compile gate 与文档回写通过；外部阻断项已转入 P1-S12。
 
 - 覆盖并发 claim、崩溃恢复、重复投递、退避、dead letter、历史汇率降级、任务防重入和优雅停止。
 - 回写 Tasks 并新增 `Phase_1_S11_Delivery_Summary.md`。
@@ -580,7 +594,7 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S12-03 空库迁移与真实持久化
 
-- 从空 PostgreSQL 16+ 数据库执行全部迁移，并验证重复启动不会破坏 schema。
+- 从空 PostgreSQL 16+ 数据库执行 V1-V6 全部迁移，并验证重复启动不会破坏 schema；另从含 legacy `processing` outbox 行的 V1-V5 库升级 V6，验证迁移恢复路径。
 - 用与 In-Memory 基线相同的 scenarios 复跑全部 PostgreSQL Repository 与 `DrogonUnitOfWork` 测试。
 - 重点验证 RLS fail-closed、连接池用户上下文复用、事务回滚、并发锁、乐观锁、outbox 同事务、余额缓存 `source_version` 和历史汇率。
 - 实测 `NUMERIC(20,8/10)` 的边界、舍入和超界拒绝，关闭 Tasks 中 item 10/14/16 的连库复核项。
@@ -594,6 +608,7 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 - 验证事件只在 commit 后被 claim，失败重试、dead letter、幂等 handler 和进程重启恢复均符合设计。
 - 验证真实汇率 HTTP Provider、历史降级、周期调度、token 清理和优雅停止。
+- 通过多连接和可控数据库/应用时钟验证 due、退避、Outbox lease、scheduled lease 与认证清理均以数据库时间为准；覆盖任务超过 lease 后的接管与重复执行语义。
 
 #### P1-S12-06 Linux Debug/Release 与 Docker 门禁
 

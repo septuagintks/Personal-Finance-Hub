@@ -96,7 +96,7 @@ Architecture: Clean Architecture + Lightweight DDD
    g. 更新 account_balance_cache (USD 扣 1010，CNY 增 7180) 或登记缓存失效事件。
 
 8. [Use Case] 事务成功提交，返回 Void 或 Success DTO。
-9. [Scheduler/OutboxPublisherJob] 后台扫描 outbox，发布 TransferCompletedEvent 给缓存、报表和审计处理器。
+9. [Scheduler/OutboxPublisherJob] 后台扫描 outbox，并把 TransferCompletedEvent 交给已注册处理器；Phase 1 尚未注册转账缓存/通知 handler，余额缓存一致性已由 Repository 写路径同步维护。业务同步审计在步骤 7 的同一事务完成，不由 handler 重复补写。
 
 ```
 
@@ -119,22 +119,25 @@ Architecture: Clean Architecture + Lightweight DDD
 
 4. [Use Case] 开启 uow->executeInTransaction():
 
-5.   [Repository - Step A] txRepo->physicalDeleteByAccount(5)
-     - 基础设施层执行: DELETE FROM transactions WHERE account_id = 5;
-     - (如果有剥离出的 Adjustment，也一并根据 account_id 删除)
+5.   [Repository - Step A] accountRepo->findByIdForUpdate(5, userId)，锁定并取得删除前快照；auditRepo->append(... dangerous_delete ...)。
+     - AuditLog 与删除事实必须同事务；审计失败时不得继续删除。
 
-6.   [Repository - Step B] cacheRepo->deleteCache(5)
+6.   [Repository - Step B] txRepo->physicalDeleteTransfersTouchingAccount(5)，再执行 txRepo->physicalDeleteByAccount(5)
+     - 基础设施层执行: DELETE FROM transactions WHERE account_id = 5;
+     - Transfer 必须先按完整聚合删除双边、Adjustment 和 group，不能只删当前账户一侧。
+
+7.   [Repository - Step C] cacheRepo->deleteCache(5)
      - 基础设施层执行: DELETE FROM account_balance_cache WHERE account_id = 5;
      - 必须清理缓存，否则后续会出现脏数据。
 
-7.   [Repository - Step C] accountRepo->physicalDelete(5)
+8.   [Repository - Step D] accountRepo->physicalDelete(5)
      - 基础设施层执行: DELETE FROM accounts WHERE id = 5;
 
-8.   [Repository - Step D] uow_->registerEvent(std::make_shared<AccountDangerouslyDeletedEvent>(accountId, userId))
-   - 将危险删除事件写入 outbox，由后台处理器生成审计日志和安全通知。
+9.   [Use Case] `uow_->registerEvent(std::make_shared<AccountDangerouslyDeletedEvent>(accountId, userId))`。
+     - outbox 事件是提交后缓存、安全通知等非关键副作用的扩展点；Phase 1 尚未注册这些 handler。
 
-9. [Use Case] 事务提交。由于没有级联删除，顺序 A -> B -> C 保证了不会触发外键约束报错。
-10. [Scheduler/OutboxPublisherJob] 后台消费危险删除事件，写入 AuditLog 并发送预警通知。
+10. [Use Case] 事务提交。由于没有级联删除，顺序 A -> B -> C -> D 保证审计可取快照且不会触发外键约束报错。
+11. [Scheduler/OutboxPublisherJob] 后台消费危险删除事件；Phase 1 未注册外部安全通知 handler，因此当前为成功 no-op 投递。后续接入通知时必须幂等，且不得重复写危险删除 AuditLog。
 
 ```
 

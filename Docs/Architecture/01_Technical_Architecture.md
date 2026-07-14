@@ -568,10 +568,17 @@ source
 Scheduler (调度器)
     │
     ├── ExchangeRateJob (汇率作业)
+    ├── OutboxPublisherJob (事务后事件投递)
     ├── CleanupJob (清理作业)
     └── SyncJob (同步作业 - 预留)
 
 ```
+
+Phase 1 中，Drogon Event Loop 只负责 timer 触发；所有 HTTP、数据库和 handler
+等待都提交到有界专用 worker pool。汇率刷新与清理使用 token-guarded PostgreSQL
+过期租约避免多实例重入，Outbox 使用 `FOR UPDATE SKIP LOCKED` 和逐行 claim token
+并行消费。跨租户活跃币种读取使用独立只读后台角色，其他后台状态写入仍使用普通
+应用角色访问非 RLS 表。
 
 ---
 

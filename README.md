@@ -4,7 +4,7 @@ Version: 0.1.0-alpha
 Backend: C++23
 Architecture: Clean Architecture + Lightweight DDD
 
-Personal Finance Hub（PFH）是一个面向个人财务管理场景的聚合平台，目标是把账户、流水、转账、预算、报表、汇率和外部账单同步整合到一个高精度、可审计、可扩展的后端系统中。项目当前处于 **Phase 1 开发阶段**，P1-S01 至 P1-S10 已完成本地实现与全量 review，下一步进入 P1-S11 Outbox、调度和后台任务。当前 Windows GCC 16 / PostgreSQL OFF 基线为 321/321；V1-V3 已通过外部 PostgreSQL 16.14 空库复测，V4/V5、真实 PostgreSQL/Drogon/安全库、Linux/Docker 与运行时 API 门禁保留到 P1-S12。详细开发规范见 [Docs/README.md](Docs/README.md)。
+Personal Finance Hub（PFH）是一个面向个人财务管理场景的聚合平台，目标是把账户、流水、转账、预算、报表、汇率和外部账单同步整合到一个高精度、可审计、可扩展的后端系统中。项目当前处于 **Phase 1 开发阶段**，P1-S01 至 P1-S11 已完成实现、全量 review 和 Windows 本地门禁，下一步进入 P1-S12 最终验收。当前 Windows GCC 16 / PostgreSQL OFF 基线为 341/341；S10 已通过外部真实依赖 Debug/Release、PostgreSQL V1-V5、双角色启动和核心 API smoke，S11 的 V6、真实 HTTP/Outbox/Scheduler、完整 PostgreSQL fixture、Linux/Docker 与合并签署保留到 P1-S12。详细开发规范见 [Docs/README.md](Docs/README.md)。
 
 ## 主要功能
 
@@ -133,7 +133,7 @@ C++/PFH/
 - [x] Repository/UoW 接口、In-Memory 语义实现与 PostgreSQL adapter
 - [x] REST API、认证、基础资源、流水、转账与报表的本地实现
 - [x] OpenAPI、framework-neutral API 回归与离线生产源码门禁
-- [ ] P1-S11 Outbox、Scheduler、汇率 Provider 与后台任务
+- [x] P1-S11 Outbox、Scheduler、汇率 Provider 与后台任务
 - [ ] P1-S12 真实 PostgreSQL/Drogon/Linux/Docker 验收与 Phase 分支交付
 
 ### Phase 2: 增强功能（计划中）
