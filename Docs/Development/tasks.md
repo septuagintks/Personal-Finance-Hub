@@ -30,10 +30,10 @@ Status: Active
 
 ### 2.1 近期顺序
 
-1. 执行 P1-S12-01 Windows 本地最终回归与 Release 构建复核。
-2. 将当前 S10+S11 提交交接到外部机器，执行 V1-V6、真实 PostgreSQL fixture、Outbox/Scheduler runtime 和 API smoke。
-3. 完成 Linux Debug/Release、应用 Docker 镜像、健康检查及关键业务闭环。
-4. 汇总可追溯结果、关闭阻断项并完成 Phase 1 分支交付；全部门禁通过前不合并 `main`。
+1. 将已通过 P1-S12-01 的签名基线交接到 macOS/Colima Linux，并确认环境、范围与返回条件。
+2. 执行 V1-V6、真实 PostgreSQL fixture、Outbox/Scheduler runtime 和 API smoke；补齐当前缺少的 PostgreSQL 测试入口。
+3. 完成 Linux Debug/Release、应用 Docker 镜像、双角色测试配置、健康检查及关键业务闭环。
+4. 结果返回 Windows 后完成 S12-07 全量 review、文档定稿与 Phase 1 分支交付；全部门禁通过前不合并 `main`。
 
 ### 2.2 当前前置条件
 
@@ -45,6 +45,7 @@ Status: Active
 - request RLS DbClient 与后台 BYPASSRLS/default-read-only DbClient 已分离装配并通过真实角色启动校验；P1-S12 仍需覆盖连接池复用、并发、故障注入与数值边界。
 - P1-S11-01 至 S11-07 已完成本地实现与全量 review；Windows GCC 16 / PostgreSQL OFF 当前为 292 个 unit/use-case、17 个 In-Memory integration、28 个 framework-neutral API 和 4 个静态门禁，共 341/341。
 - S11 后台写任务只使用普通 request-role client 访问非 RLS 表；BYPASSRLS `background_db` 仅用于 `PostgresActiveCurrencyQuery`。该权限边界仍须在 P1-S12 真实运行验证。
+- P1-S12-01 已在两个全新构建目录完成 Windows GCC 16.1 / PostgreSQL OFF Debug 与 Release：两者均 104/104 build steps、341/341 CTest，三类 production compile gate 通过；详细结果见 `Docs/Development/Phase_1_S12_Delivery_Summary.md`。
 
 ---
 
@@ -206,7 +207,8 @@ Status: Active
 ### 5.4 Phase 1 外部环境阻断门禁
 
 - [~] 在另一台机器执行 P1-S12：Linux Debug/Release 构建、Docker 服务启动、PostgreSQL 16+ 空库迁移、真实 Repository/UoW/RLS/并发/数值边界、API smoke、Outbox/Scheduler 测试，并记录 commit hash、环境版本、命令和结果 <!-- id: 57 -->
-  - S10 基础预检已在 Colima Ubuntu ARM64 完成 Debug/Release production ON 321/321、V1-V5、双角色启动、认证/RLS/财务 smoke。S11 本地 341/341 与离线 compile gate 已通过；V6、真实 HTTP、Outbox/Scheduler 多连接/重启、完整 Repository fixture、应用镜像与最终签署仍未执行，任务保持部分完成。
+  - S10 基础预检已在 Colima Ubuntu ARM64 完成 Debug/Release production ON 321/321、V1-V5、双角色启动、认证/RLS/财务 smoke；S12-01 Windows 独立 Debug/Release 341/341 已完成。
+  - 仍待执行：V6 与 legacy processing 升级、真实 HTTP、Outbox/Scheduler 多连接/数据库时钟/重启、完整 PostgreSQL fixture、应用镜像与最终签署。当前 PostgreSQL-backed integration target 和应用 Dockerfile 尚不存在，须在 S12-03/S12-06 补齐并实测，任务保持部分完成。
 
 - [x] V3 修复后在 PostgreSQL 16.14 + Flyway OSS 10.22.0 环境对 V1-V3 执行真实空库 `migrate` / `info` / `validate`、第二次 no-op、种子数据断言和完整 CTest，确认 28 处 enum cast 修复有效 <!-- id: 58 -->
   - 外部复测提交 `4621f69`：33 条币种、55 条分类模板、27 root + 28 child、40 expense + 15 income 全部符合预期，254/254 CTest 通过；该结论只关闭迁移缺陷，不替代 #46 的真实 Repository/UoW/RLS 验收。
@@ -321,3 +323,13 @@ S10 报告 §4.2 暴露：V3 中 7 段二级分类 `INSERT ... SELECT ... UNION 
 - 汇率刷新和认证数据清理使用 scheduled lease；Outbox 依靠行级 claim 并行消费。过期清理覆盖 refresh token、revoked access token 和 revoked session 三张表，并以数据库 `NOW()` 判断安全记录是否真正过期。
 - Production composition root 中所有后台写 adapter 使用普通 request-role DbClient；BYPASSRLS/default-read-only client 仍只注入跨租户活跃币种查询。
 - Windows GCC 16 Debug、PostgreSQL OFF 全量 341/341 通过；PostgreSQL adapter、production bootstrap 和 security compile gates 通过。V6 与真实 runtime 继续由 #57/P1-S12 阻断。
+
+---
+
+## 12. P1-S12-01 Windows 本地门禁记录
+
+- 测试对象：`6cd41bc2c60af1298544d975c58819cc8c0600a9`，分支 `feature/phase1-foundation`，测试前主工作区干净并与远端一致。
+- Windows `10.0.22631.6060` x64、GCC 16.1、CMake 4.3.2、Ninja 1.13.2；Debug 与 Release 分别使用全新构建目录，`PFH_BUILD_POSTGRESQL=OFF`。
+- Debug：configure PASS、104/104 build steps、341/341 CTest；Release：configure PASS、104/104 build steps、341/341 CTest。
+- 两个配置均覆盖 292 unit/use-case、17 In-Memory integration、28 framework-neutral API 和 4 static gates；PostgreSQL adapter、production bootstrap 与 production security compile gate 均编译通过。
+- 本机阶段未发现产品缺陷。真实数据库、运行时和容器阻断项继续由 #57 跟踪；Windows 结果不得替代 S12-02 至 S12-06。

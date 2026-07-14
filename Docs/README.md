@@ -40,6 +40,7 @@ Docs/
 │   ├── Phase_1_S09_Delivery_Summary.md # Phase 1 S09 Application Use Cases 交付记录
 │   ├── Phase_1_S10_Delivery_Summary.md # Phase 1 S10 本地交付记录
 │   ├── Phase_1_S11_Delivery_Summary.md # Phase 1 S11 Outbox 与后台任务交付记录
+│   ├── Phase_1_S12_Delivery_Summary.md # Phase 1 S12 测试收尾与外部交接记录
 │   ├── Phase_1_S10_PostgreSQL_Persistence_Validation_Report.md # V3 外部复测最终报告
 │   └── tasks.md                        # 待办任务跟踪
 │
@@ -83,7 +84,7 @@ Docs/
 6. **全局异常拦截**：通过 Drogon 全局异常处理器捕获非预期异常，生成唯一 `TraceId`，在保障生产环境安全（不泄露敏感信息）的同时提供完整的服务端日志追溯。
 7. **受控后台运行时**：Drogon timer 只触发有界 worker 入队；Outbox 使用行级租约，汇率刷新和认证清理使用 PostgreSQL 任务租约，并统一由 `JobManager` 管理启动与优雅退出。
 
-当前进度（2026-07-15）：P1-S01 至 P1-S11 已完成实现、全量 review 和 Windows 本地 341/341，下一步进入 P1-S12。S10 基础提交已在 macOS/Colima Ubuntu ARM64 通过真实依赖 Debug/Release、V1-V5、双角色启动与核心 API smoke；S11 的 V6、真实 OpenExchangeRates、Outbox/Scheduler 多连接与重启恢复、完整 PostgreSQL fixture、应用镜像和最终 Linux/Docker 签署仍未完成，不能据此视为 Phase 1 已交付。
+当前进度（2026-07-15）：P1-S01 至 P1-S11 已完成实现与全量 review，P1-S12-01 Windows 独立 Debug/Release 均通过 341/341。下一步交接 macOS/Colima Linux 执行 S12-02 至 S12-06；V1-V6、真实 PostgreSQL/Drogon/OpenExchangeRates、Outbox/Scheduler 多连接与重启恢复、完整 PostgreSQL fixture、应用镜像和最终 Linux/Docker 签署仍未完成，不能据此视为 Phase 1 已交付。
 
 ---
 

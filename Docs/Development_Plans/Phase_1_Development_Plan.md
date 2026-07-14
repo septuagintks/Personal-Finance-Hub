@@ -43,7 +43,7 @@ Phase 1 的具体开发顺序、目录结构、实现步骤和测试收尾清单
 
 ### 1.4 当前进度
 
-截至 2026-07-15，P1-S01 至 P1-S11 已完成实现、全量 review 与 Windows 本地 341/341，当前进入 P1-S12。S10 基础已在外部真实依赖环境通过 Debug/Release、PostgreSQL V1-V5、双角色启动及核心 API smoke；S11 V6、真实 OpenExchangeRates/Outbox/Scheduler、完整 PostgreSQL fixture、应用镜像及最终 Linux/Docker 门禁保留到 P1-S12。
+截至 2026-07-15，P1-S01 至 P1-S11 已完成实现与全量 review，P1-S12-01 Windows 独立 Debug/Release 均完成全新构建并通过 341/341。S12-02 至 S12-06 将交接至 macOS/Colima Linux，执行 V1-V6、真实 OpenExchangeRates/Outbox/Scheduler、完整 PostgreSQL fixture、应用镜像及最终 Linux/Docker 门禁；结果返回后由 Windows 完成 S12-07 与 Phase 1 签署。
 
 以下内容尚未完成，不能由现有 In-Memory 测试替代：
 

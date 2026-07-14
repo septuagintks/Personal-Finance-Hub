@@ -21,7 +21,7 @@ Architecture: Clean Architecture + GoogleTest
 
 ### 1.1 Phase 1 当前基线与最终门禁
 
-- 截至 2026-07-15，Windows GCC 16 / PostgreSQL OFF 已通过 292 个 unit/use-case、17 个 In-Memory integration scenarios、28 个 framework-neutral API tests 和 4 个静态契约门禁，共 341/341；PostgreSQL、production bootstrap 与 security 翻译单元另由窄 API stub compile gate 覆盖。
+- 截至 2026-07-15，P1-S12-01 已在 Windows GCC 16 / PostgreSQL OFF 的两个全新构建目录分别完成 Debug 与 Release；每个配置均通过 292 个 unit/use-case、17 个 In-Memory integration scenarios、28 个 framework-neutral API tests 和 4 个静态契约门禁，共 341/341。PostgreSQL、production bootstrap 与 security 翻译单元另由窄 API stub compile gate 覆盖。
 - S10 基础提交已在外部 PostgreSQL 16.14 + 真实 Drogon/OpenSSL/Argon2 环境完成 Debug/Release 321/321、V1-V5、双角色启动和核心 API smoke。S11 的 V6、Outbox/Scheduler runtime 与完整 PostgreSQL Repository fixture 尚未在真实环境执行。
 - In-Memory scenarios 用于快速固定 Repository/UoW 语义，不是 PostgreSQL Repository Integration Test 的替代品。
 - P1-S12 必须在另一台机器完成 Linux、Docker、PostgreSQL 16+、Debug/Release、真实 Repository/UoW/RLS、API 和后台任务测试；取得可追溯结果前，Phase 1 不得签署完成或合并到 `main`。

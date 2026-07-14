@@ -11,7 +11,7 @@ Status: Active
 
 本文档是 `Phase_1_Development_Plan.md` 的细化子计划，用于描述 Phase 1 从创建工程目录结构开始，到第一阶段测试收尾为止的具体开发顺序、交付物和验收口径。
 
-当前进度（2026-07-15）：P1-S01 至 P1-S11 已完成实现、全量 review 与 Windows 本地门禁，下一步进入 P1-S12。当前 GCC 16 / PostgreSQL OFF 为 292 个 unit/use-case、17 个 In-Memory integration、28 个 framework-neutral API 和 4 个静态门禁，共 341/341；PostgreSQL adapter、production bootstrap 与 security compile gates 通过。提交 `db07d64` 的 S10 基础已在 macOS/Colima Ubuntu ARM64 通过真实依赖 Debug/Release、V1-V5、双角色启动与核心 API smoke；S11 新增 V6、Outbox/Scheduler、真实 HTTP Provider、完整 PostgreSQL fixture、应用镜像和最终 Phase 1 签署仍须在 P1-S12 外部环境验证。
+当前进度（2026-07-15）：P1-S01 至 P1-S11 已完成实现与全量 review，P1-S12-01 Windows 本地收尾门禁已通过。GCC 16 / PostgreSQL OFF 的独立 Debug、Release 均完成全新配置、104-step 构建和 341/341 CTest；341 项由 292 个 unit/use-case、17 个 In-Memory integration、28 个 framework-neutral API 和 4 个静态门禁组成，三类 production compile gate 同时通过。下一步将签名基线交接至 macOS/Colima Linux，执行 S12-02 至 S12-06 的 V1-V6、真实 PostgreSQL/Drogon/OpenExchangeRates、Outbox/Scheduler、多连接/重启、应用镜像与 Linux Debug/Release 门禁；结果返回前 Phase 1 不得签署完成。
 
 ### 1.1 执行原则
 
@@ -584,15 +584,21 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S12-01 Windows 本地回归
 
+状态：**已完成（2026-07-15）**。提交 `6cd41bc` 在两个全新构建目录完成 GCC 16.1 / PostgreSQL OFF Debug 与 Release 配置、104/104 build steps 和各 341/341 CTest；三类 production compile gate、`git diff --check` 与 Markdown 基础检查通过。详细证据见 `Docs/Development/Phase_1_S12_Delivery_Summary.md`。
+
 - 执行 Debug configure/build、全部 unit/In-Memory integration/API tests、Markdown 检查和 `git diff --check`。
 - 复核 Release configure/build，确认无仅在 Debug 可编译的路径。
 
 #### P1-S12-02 外部机器环境准备
 
+状态：**待 macOS/Colima Linux 接收**。交接必须固定完整主项目 commit 和交接仓库 commit，接收方确认环境及两个干净工作区后再开始测试。
+
 - 固定 Linux 发行版、GCC/libstdc++、CMake、Drogon、PostgreSQL、Flyway、Docker 与 `tzdata` 版本。
 - 使用独立测试凭据和数据库；记录 commit hash、镜像/工具版本、执行命令与时间。
 
 #### P1-S12-03 空库迁移与真实持久化
+
+状态：**待外部执行**。当前 `tests/integration` 仅有 In-Memory fixture；macOS 侧须在真实依赖环境补齐可重复运行的 PostgreSQL-backed fixture，并在最终提交上出具结果。
 
 - 从空 PostgreSQL 16+ 数据库执行 V1-V6 全部迁移，并验证重复启动不会破坏 schema；另从含 legacy `processing` outbox 行的 V1-V5 库升级 V6，验证迁移恢复路径。
 - 用与 In-Memory 基线相同的 scenarios 复跑全部 PostgreSQL Repository 与 `DrogonUnitOfWork` 测试。
@@ -601,10 +607,14 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S12-04 API 与认证 Smoke Test
 
+状态：**待外部执行**。S10 基础 smoke 不覆盖 S11 后台 runtime，也不能替代当前最终提交上的完整 API/RLS 回归。
+
 - 在真实 Drogon + PostgreSQL 上覆盖 register/login/refresh/logout、JWT 拒绝、资源用户隔离和主要业务写读路径。
 - 验证 JSON number 拒绝、错误状态码、TraceId、异常脱敏、转账原子性和报表时区月边界。
 
 #### P1-S12-05 Outbox 与 Scheduler 真实运行验证
+
+状态：**待外部执行**。离线并发与恢复测试已通过；真实多连接、数据库时钟、Drogon timer、HTTPS、重启和长任务接管仍为阻断项。
 
 - 验证事件只在 commit 后被 claim，失败重试、dead letter、幂等 handler 和进程重启恢复均符合设计。
 - 验证真实汇率 HTTP Provider、历史降级、周期调度、token 清理和优雅停止。
@@ -612,10 +622,14 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S12-06 Linux Debug/Release 与 Docker 门禁
 
+状态：**待外部执行**。当前 Compose 只提供 PostgreSQL/Flyway，应用 Dockerfile、应用 service、双角色初始化与容器 smoke 入口须在本步骤补齐并验证。
+
 - 在目标 Linux 工具链分别完成 Debug/Release configure、build 和全量测试。
 - 构建并启动 Docker 运行环境，执行健康检查和关键 API smoke test；确认 `tzdata`、迁移和运行时配置齐全。
 
 #### P1-S12-07 文档定稿与分支交付
+
+状态：**等待外部结果返回**。Windows 侧接收后执行最终签名复核、本地回归、全量设计一致性 review 和 Phase 1 签署。
 
 - 回写 `Docs/Development/tasks.md`、测试基线、环境记录和 `Phase_1_S12_Delivery_Summary.md`。
 - 已验收的阶段交付总结按文档规范归档；未完成项继续留在 Tasks，不以说明文字代替验收。

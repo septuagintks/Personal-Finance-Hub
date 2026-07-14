@@ -4,7 +4,7 @@ Version: 0.1.0-alpha
 Backend: C++23
 Architecture: Clean Architecture + Lightweight DDD
 
-Personal Finance Hub（PFH）是一个面向个人财务管理场景的聚合平台，目标是把账户、流水、转账、预算、报表、汇率和外部账单同步整合到一个高精度、可审计、可扩展的后端系统中。项目当前处于 **Phase 1 开发阶段**，P1-S01 至 P1-S11 已完成实现、全量 review 和 Windows 本地门禁，下一步进入 P1-S12 最终验收。当前 Windows GCC 16 / PostgreSQL OFF 基线为 341/341；S10 已通过外部真实依赖 Debug/Release、PostgreSQL V1-V5、双角色启动和核心 API smoke，S11 的 V6、真实 HTTP/Outbox/Scheduler、完整 PostgreSQL fixture、Linux/Docker 与合并签署保留到 P1-S12。详细开发规范见 [Docs/README.md](Docs/README.md)。
+Personal Finance Hub（PFH）是一个面向个人财务管理场景的聚合平台，目标是把账户、流水、转账、预算、报表、汇率和外部账单同步整合到一个高精度、可审计、可扩展的后端系统中。项目当前处于 **Phase 1 开发阶段**，P1-S01 至 P1-S11 已完成实现与全量 review，P1-S12-01 Windows 独立 Debug/Release 均通过 341/341。下一步交接 macOS/Colima Linux 执行 S12-02 至 S12-06；V1-V6、真实 HTTP/Outbox/Scheduler、完整 PostgreSQL fixture、应用 Docker 镜像与合并签署仍是阻断项。详细开发规范见 [Docs/README.md](Docs/README.md)。
 
 ## 主要功能
 
