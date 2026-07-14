@@ -30,10 +30,10 @@ Status: Active
 
 ### 2.1 近期顺序
 
-1. 将已通过 P1-S12-01 的签名基线交接到 macOS/Colima Linux，并确认环境、范围与返回条件。
-2. 执行 V1-V6、真实 PostgreSQL fixture、Outbox/Scheduler runtime 和 API smoke；补齐当前缺少的 PostgreSQL 测试入口。
-3. 完成 Linux Debug/Release、应用 Docker 镜像、双角色测试配置、健康检查及关键业务闭环。
-4. 结果返回 Windows 后完成 S12-07 全量 review、文档定稿与 Phase 1 分支交付；全部门禁通过前不合并 `main`。
+1. macOS 侧提交并返回 P1-S12-02 至 S12-06 的 Linux/PostgreSQL/Docker 结果。
+2. Windows 侧 fast-forward、验证 macOS 提交签名并执行 S12-07 全量 review 与本地回归。
+3. 维护者决定是否提供 OpenExchangeRates API key 补测真实 HTTPS，或接受明确延期限制。
+4. 完成 Phase 1 文档定稿与分支交付；S12-07 签署前不合并 `main`。
 
 ### 2.2 当前前置条件
 
@@ -41,10 +41,10 @@ Status: Active
 - P1-S10 以 `Docs/Development_Plans/Phase_1/Phase_1_Detailed_Development_Plan.md` 的 3.10 节为执行边界。
 - P1-S10-01 至 S10-11 已完成本地实现与全量 review；Windows GCC 16 / PostgreSQL OFF 基线为 272 个 unit/use-case、17 个 In-Memory integration、28 个 framework-neutral API 和 4 个静态门禁，共 321/321。
 - CMake configure 必须通过 `std::chrono` IANA tzdb 能力探测；Linux 运行环境必须安装 `tzdata`。
-- PostgreSQL/Drogon/Argon2/OpenSSL 核心适配器与 production composition root 已在 macOS/Colima Ubuntu ARM64 完成真实依赖 Debug/Release 构建、V1-V5、双角色启动及核心 API smoke；完整 Repository fixture 仍不得由 smoke 或 In-Memory 结果代替。
-- request RLS DbClient 与后台 BYPASSRLS/default-read-only DbClient 已分离装配并通过真实角色启动校验；P1-S12 仍需覆盖连接池复用、并发、故障注入与数值边界。
+- PostgreSQL/Drogon/Argon2/OpenSSL 核心适配器与 production composition root 已在 macOS/Colima Ubuntu ARM64 完成真实依赖 Debug/Release、V1-V6、双角色、完整 PostgreSQL fixture、API/runtime 和 Docker 门禁。
+- request RLS DbClient 与后台 BYPASSRLS/default-read-only DbClient 已分离装配，并通过连接池复用、并发、故障注入、数值边界与容器后置权限断言。
 - P1-S11-01 至 S11-07 已完成本地实现与全量 review；Windows GCC 16 / PostgreSQL OFF 当前为 292 个 unit/use-case、17 个 In-Memory integration、28 个 framework-neutral API 和 4 个静态门禁，共 341/341。
-- S11 后台写任务只使用普通 request-role client 访问非 RLS 表；BYPASSRLS `background_db` 仅用于 `PostgresActiveCurrencyQuery`。该权限边界仍须在 P1-S12 真实运行验证。
+- S11 后台写任务只使用普通 request-role client 访问非 RLS 表；BYPASSRLS `background_db` 仅用于 `PostgresActiveCurrencyQuery`。该权限边界已在 P1-S12 fixture 与容器中通过真实角色验证。
 - P1-S12-01 已在两个全新构建目录完成 Windows GCC 16.1 / PostgreSQL OFF Debug 与 Release：两者均 104/104 build steps、341/341 CTest，三类 production compile gate 通过；详细结果见 `Docs/Development/Phase_1_S12_Delivery_Summary.md`。
 
 ---
@@ -80,9 +80,9 @@ Status: Active
 - [x] 搭建 GoogleTest 单元测试框架，并提供统一测试命令 <!-- id: 10 -->
 - [x] 建立测试数据目录和测试命名规范，覆盖正常路径、边界路径和错误路径 <!-- id: 11 -->
 - [x] 编写核心金融原语与领域服务的单元测试 <!-- id: 12 -->
-- [~] 编写 Repository 集成测试，覆盖事务和 outbox 落库行为 <!-- id: 13 -->
-  - 更正（S09 review item 16）：集成测试当前运行在 In-Memory 语义等价实现上，**尚未对真实 PostgreSQL 执行**。事务、outbox 同事务落库、用户隔离、乐观锁、余额缓存、数值边界、历史汇率和转账聚合规则已被 13 个集成用例覆盖，但连库验证归入 #46，S12 用同一批 scenarios 对真实测试库复跑后方可标记为 `[x]`。
-- [x] 编写 framework-neutral API 接口集成测试，并以 OpenAPI/route 静态门禁和 Drogon compile gate 覆盖生产 adapter 形状；真实 Drogon/PostgreSQL smoke test 单独由 #57/P1-S12 阻断 <!-- id: 14 -->
+- [x] 编写 Repository 集成测试，覆盖事务和 outbox 落库行为 <!-- id: 13 -->
+  - P1-S12 新增 12 个真实 PostgreSQL scenario，覆盖 UoW/outbox 原子性与回滚、RLS/连接池、主要 Repository、并发锁、余额缓存、NUMERIC、历史汇率和 Transfer 聚合；与 17 个 In-Memory integration 并行保留。
+- [x] 编写 framework-neutral API 接口集成测试，并以 OpenAPI/route 静态门禁和 Drogon compile gate 覆盖生产 adapter 形状；P1-S12 已补真实 Drogon/PostgreSQL API smoke <!-- id: 14 -->
 - [x] 增加本地质量检查命令，至少覆盖构建、测试和 Markdown 检查 <!-- id: 15 -->
 
 ### 3.4 核心金融原语 (Core Financial Primitives)
@@ -107,27 +107,27 @@ Status: Active
 ### 3.6 持久化与事务 (Repository & Persistence)
 
 - [x] 配置 PostgreSQL 16+ 数据库连接与 Flyway 迁移脚本 <!-- id: 28 -->
-  - S10 基础预检：PostgreSQL 16.14 空库 V1-V5、第二次 no-op、request/background 真实双角色连接和 production 启动权限校验均通过；完整 Repository fixture 继续由 #46/#57 跟踪。
+  - P1-S12：PostgreSQL 16.14 空库 V1-V6、`info`/`validate`、第二次 no-op、legacy processing 升级、双角色和 8 张 FORCE RLS 表全部通过。
 - [x] 编写 Phase 1 初始迁移，覆盖用户、偏好、账户、分类、流水、汇率、余额缓存和 outbox 表 <!-- id: 29 -->
-- [~] 实现 `DrogonUnitOfWork`，确保业务写入和 outbox 写入使用同一数据库事务上下文 <!-- id: 30 -->
-  - S10-03 进展：`DrogonUnitOfWork` 已实现同一 Drogon Transaction 内业务写入 + outbox、异常回滚、事务级 RLS 和 commit callback 确认；离线 adapter compile gate 通过。真实提交失败、回滚和 outbox 原子性仍随 #46/S12 连库验证。
-- [~] 实现 `UserRepository` 与 `UserPreferenceRepository` <!-- id: 31 -->
-  - S10 完成态：Domain、In-Memory 与 PostgreSQL 实现及 composition root 接线均已交付；偏好 fallback 与 RLS 读取固定在同一短事务。真实 read-your-writes 复核仍归 #46/S12。
-- [~] 实现 `AccountRepository` 与 `TransactionRepository`，覆盖用户隔离、乐观锁和余额缓存更新 <!-- id: 32 -->
-  - S10-03 进展：PostgreSQL 实现已覆盖 request-scoped RLS、`FOR UPDATE NOWAIT`、同事务乐观锁检查、余额缓存、signed 流水、Transfer + Adjustment 聚合保存/级联删除；真实并发和 NUMERIC round-trip 仍归 #46/S12。
-- [~] 实现 `ExchangeRateRepository`，保证汇率 append-only 和历史时间点查询 <!-- id: 33 -->
-  - S10-03 进展：PostgreSQL append 与 latest/historical/pair 查询已实现并通过离线编译门禁；真实 DB append-only trigger 与时间 round-trip 仍归 #46/S12。
-- [~] 实现 `ICategoryRepository`，供创建流水校验真实分类并支持报表按一级分类聚合 <!-- id: 33a -->
-  - S10-03 进展：PostgreSQL 实现已覆盖租户读取、锁定读、父子 board 校验与 root 回溯；真实 RLS/并发场景复核仍随 #46/#47/S12 落地。
+- [x] 实现 `DrogonUnitOfWork`，确保业务写入和 outbox 写入使用同一数据库事务上下文 <!-- id: 30 -->
+  - P1-S12 真实验证 commit、action error/exception/outbox error rollback、read-your-writes、commit callback 和业务事实 + outbox 原子性。
+- [x] 实现 `UserRepository` 与 `UserPreferenceRepository` <!-- id: 31 -->
+  - P1-S12 真实验证用户/偏好写读、fallback、注册默认值、RLS 与连接池复用隔离。
+- [x] 实现 `AccountRepository` 与 `TransactionRepository`，覆盖用户隔离、乐观锁和余额缓存更新 <!-- id: 32 -->
+  - P1-S12 真实验证 `FOR UPDATE NOWAIT`、乐观锁、余额缓存、signed 流水、Transfer + Adjustment、并发冲突和 NUMERIC round-trip。
+- [x] 实现 `ExchangeRateRepository`，保证汇率 append-only 和历史时间点查询 <!-- id: 33 -->
+  - P1-S12 真实验证 append-only trigger、latest-at-or-before、时间与 `NUMERIC(20,10)` round-trip。
+- [x] 实现 `ICategoryRepository`，供创建流水校验真实分类并支持报表按一级分类聚合 <!-- id: 33a -->
+  - P1-S12 真实验证租户读取、父节点锁、board 约束、root 回溯及 API 报表聚合。
 - [x] 实现 `OutboxPublisherJob`，支持 pending/failed claim、processing lease、有限退避、dead letter、失败 handler/时间/摘要与旧 claim token 拒绝 <!-- id: 34 -->
-  - P1-S11 已完成 In-Memory 并发/恢复测试、PostgreSQL adapter、V6 约束、幂等补充审计和 production composition root 接线；真实多连接 `SKIP LOCKED` 与进程重启恢复由 #57/S12-05 验证。
+  - P1-S12 已通过真实多连接 `SKIP LOCKED`、crashed-worker lease 恢复、旧 token 拒绝、完整退避/dead-letter、幂等补充审计和容器 Outbox 发布。
 
 ### 3.7 应用层用例 (Application Use Cases)
 
 - [x] 实现 `CreateTransactionUseCase` 与 `DeleteTransactionUseCase`，包含权限校验、事务边界和领域错误映射 <!-- id: 35 -->
 - [x] 实现 `CreateTransferUseCase`，串联账户读取、转账聚合构造、余额更新和 outbox 写入 <!-- id: 36 -->
 - [x] 实现 `RefreshExchangeRatesUseCase`，负责外部汇率拉取、降级、告警事件和非阻塞调度入口 <!-- id: 37 -->
-  - P1-S11 已接入真实 OpenExchangeRates adapter、Provider identity、`IClock`、SAX 数值 token 解析、精确响应集合校验和有界 worker 调度；真实 HTTPS/TLS/API 与历史降级 runtime 由 #57/S12-05 验证。
+  - P1-S12 已验证真实 Drogon transport 生命周期、Scheduler 接线和错误路径；因未提供外部 API key，真实 OpenExchangeRates HTTPS/TLS/API 响应仍为 `BLOCKED`，由 #57/S12-07 决策。
 - [x] 实现账户查询与余额查询用例，提供 API 所需 DTO，不暴露持久化模型 <!-- id: 38 -->
 - [x] 实现报表 QueryService，支持 net worth、cash flow 和 dashboard summary 的最小查询 <!-- id: 39 -->
   - 备注：cash flow 显式排除 Transfer；跨币种折算走汇率仓储（直接/反向/USD 三角），缺失汇率报错、DB 故障映射为 InfrastructureFailure（不吞错）。
@@ -177,24 +177,24 @@ Status: Active
 
 ### 5.1 高优先级（进入生产写路径前必须解决）
 
-- [~] 接入真实持久化：实现 `DrogonUnitOfWork` 与 PostgreSQL 版 `*RepositoryImpl`，替换现有 In-Memory 实现；用同一批 integration scenarios 对真实测试库复跑 <!-- id: 46 -->
-  - S10 基础预检：真实依赖构建、核心认证/账户/流水/转账/报表 smoke、双角色与基础 RLS 隔离通过，并修复 Drogon include/timestamp 与 SMALLINT bind 缺陷；同批 Repository scenarios、连接池复用、并发与失败注入尚未执行，因此不得标记完成。
+- [x] 接入真实持久化：实现 `DrogonUnitOfWork` 与 PostgreSQL 版 `*RepositoryImpl`，替换现有 In-Memory 实现；用同一批 integration scenarios 对真实测试库复跑 <!-- id: 46 -->
+  - P1-S12 已完成 12 个强制真实 PostgreSQL scenario，覆盖主要 adapter、UoW、RLS/连接池、并发、失败注入、NUMERIC、Outbox/Scheduler 和数据库时钟；生产 composition root 与真实 API 同时通过。
   - 执行归属：适配器、composition root 与测试场景在 P1-S10-03/S10-04 落地；真实 PostgreSQL 复跑与签署在另一台机器的 P1-S12-03 完成。
   - RLS 依赖：租户仓储必须在固定 Drogon Transaction 上先执行 `SET LOCAL app.current_user_id`，并在同一 Transaction 上完成后续 SQL；事务结束自动清除 GUC。禁止对普通池化 `DbClient` 先 SET 再查询，也禁止依赖手工 RESET 修复连接亲和性。
   - In-Memory 模型仍缺 `transaction_tag_relations.user_id`、`account_balance_cache.user_id` 等新增列的对应；接 SQL 时以迁移 schema 为准。
-- [~] 实现 `ICategoryRepository`，由仓储解析分类 board，替换 `CreateTransactionCommand.category_board` 的显式传入方式 <!-- id: 47 -->
+- [x] 实现 `ICategoryRepository`，由仓储解析分类 board，替换 `CreateTransactionCommand.category_board` 的显式传入方式 <!-- id: 47 -->
   - 进展（S09 review 收尾）：已交付接口 + In-Memory 实现（含锁定读取与 `resolve_root_id_for_user`），`CreateTransactionUseCase` 已将分类仓储设为必需依赖并按 `user_id + category_id` 读取真实 board；命令中的 `category_board` 已移除，报表也已接入一级分类聚合。
-  - 剩余：PostgreSQL `CategoryRepositoryImpl` 已实现；仍需用真实事务、RLS 与并发场景复核（随 #46、S12）。
+  - P1-S12 已完成 PostgreSQL 真实事务、RLS、父节点锁与 API 路径复核。
 - [x] 实现转账手续费 / 汇兑损益承载路径：`CreateTransferCommand` 支持 `FeeSource`、手续费金额与可选第三方账户，用例构造独立 signed `Adjustment`，并测试余额、cash flow、原子回滚与级联删除 <!-- id: 48 -->
   - P1-S10-01 已完成 Application/Domain/Repository 接线；P1-S10-09 只负责 Transfer API 暴露。手续费为负 Adjustment，未来 FX gain/loss 继续复用 signed Adjustment；在没有市场基准汇率输入时不自动虚构汇兑损益。
 
 ### 5.2 中优先级
 
 - [x] 实现 `ITagRepository` 与 `IAuditLogRepository` 及对应用例，打通标签、同步业务审计与幂等补充系统审计闭环 <!-- id: 49 -->
-  - S11 已完成 `AuditActorType::User/System`、handler receipt、普通/死信 identity 隔离和 receipt+AuditLog 同事务 adapter；真实 PostgreSQL 原子性由 #57/S12-05 复核。
+  - P1-S12 已通过真实 PostgreSQL receipt + AuditLog 同事务回滚/幂等和 dead-letter 审计复核。
 - [x] 明确 `transactions` 并发更新策略：Phase 1 采用追加 + 软删除，不提供普通更新，不增加行级 `version`；账户聚合并发继续使用 `Account.version` <!-- id: 50 -->
-- [~] PostgreSQL `AccountRepositoryImpl` 的余额缓存 `source_version` 必须严格对齐 schema 的 `version` 语义（`MAX(version)` 或等价），不得照搬 In-Memory 的「未删除流水条数」简化实现（P1-S10-03/S12-03）<!-- id: 51 -->
-  - S10-03 已实现 `MAX(version)` + 最新流水 ID 双校验、同事务 rebuild/UPSERT，以及全部流水写路径缓存失效；真实 PostgreSQL 命中、失效和并发复核保留到 S12-03。
+- [x] PostgreSQL `AccountRepositoryImpl` 的余额缓存 `source_version` 必须严格对齐 schema 的 `version` 语义（`MAX(version)` 或等价），不得照搬 In-Memory 的「未删除流水条数」简化实现（P1-S10-03/S12-03）<!-- id: 51 -->
+  - P1-S12 已真实验证 `MAX(version)` + 最新流水 ID、cache miss rebuild、写路径失效、乐观锁和并发行为。
 - [x] 明确转账删除边界：Phase 1 不注册转账删除路由，普通流水删除同时拒绝 Transfer 双边与同组 Adjustment；待 `DeleteTransferUseCase` 支持完整聚合级联并通过测试后再开放 <!-- id: 52 -->
 
 ### 5.3 低优先级 / 技术债
@@ -207,8 +207,8 @@ Status: Active
 ### 5.4 Phase 1 外部环境阻断门禁
 
 - [~] 在另一台机器执行 P1-S12：Linux Debug/Release 构建、Docker 服务启动、PostgreSQL 16+ 空库迁移、真实 Repository/UoW/RLS/并发/数值边界、API smoke、Outbox/Scheduler 测试，并记录 commit hash、环境版本、命令和结果 <!-- id: 57 -->
-  - S10 基础预检已在 Colima Ubuntu ARM64 完成 Debug/Release production ON 321/321、V1-V5、双角色启动、认证/RLS/财务 smoke；S12-01 Windows 独立 Debug/Release 341/341 已完成。
-  - 仍待执行：V6 与 legacy processing 升级、真实 HTTP、Outbox/Scheduler 多连接/数据库时钟/重启、完整 PostgreSQL fixture、应用镜像与最终签署。当前 PostgreSQL-backed integration target 和应用 Dockerfile 尚不存在，须在 S12-03/S12-06 补齐并实测，任务保持部分完成。
+  - S12-02 至 S12-06：Colima Ubuntu ARM64 production ON Debug/Release 343/343、V1-V6 与 legacy 升级、12 个 PostgreSQL scenario、真实 Drogon API、Outbox/Scheduler、双角色和最终 Docker 镜像均 `PASS`；PostgreSQL OFF 341/341 回归通过。
+  - 剩余：真实 OpenExchangeRates HTTPS/TLS/API 因缺少维护者提供的 key 为 `BLOCKED`；Windows S12-07 终审和 Phase 1 签署未执行，因此任务保持部分完成。
 
 - [x] V3 修复后在 PostgreSQL 16.14 + Flyway OSS 10.22.0 环境对 V1-V3 执行真实空库 `migrate` / `info` / `validate`、第二次 no-op、种子数据断言和完整 CTest，确认 28 处 enum cast 修复有效 <!-- id: 58 -->
   - 外部复测提交 `4621f69`：33 条币种、55 条分类模板、27 root + 28 child、40 expense + 15 income 全部符合预期，254/254 CTest 通过；该结论只关闭迁移缺陷，不替代 #46 的真实 Repository/UoW/RLS 验收。
@@ -333,3 +333,14 @@ S10 报告 §4.2 暴露：V3 中 7 段二级分类 `INSERT ... SELECT ... UNION 
 - Debug：configure PASS、104/104 build steps、341/341 CTest；Release：configure PASS、104/104 build steps、341/341 CTest。
 - 两个配置均覆盖 292 unit/use-case、17 In-Memory integration、28 framework-neutral API 和 4 static gates；PostgreSQL adapter、production bootstrap 与 production security compile gate 均编译通过。
 - 本机阶段未发现产品缺陷。真实数据库、运行时和容器阻断项继续由 #57 跟踪；Windows 结果不得替代 S12-02 至 S12-06。
+
+---
+
+## 13. P1-S12-02 至 S12-06 macOS/Linux 门禁记录
+
+- Colima Ubuntu 24.04 ARM64、GCC 13.3、Drogon 1.8.7、PostgreSQL 16.14、Flyway 10.22.0、OpenSSL 3.0.13、Argon2 20190702。
+- production ON Debug/Release configure/build 与 CTest 均 343/343；全新 PostgreSQL OFF Debug 88/88 build steps、341/341。
+- V1-V6 空库 migrate/info/validate/no-op、V1-V5 legacy processing 升级、seed/schema/8 张 FORCE RLS 断言通过。
+- 12 个真实 PostgreSQL scenario 与真实 Drogon API smoke 通过；runtime client 禁用宿主代理并连续 10/10 稳定复跑。
+- Ubuntu 24.04 多阶段镜像冷构建通过；最终 arm64 image `sha256:b2e161b3a551b06c50d8a31760397e2e15f49e70e8049e391692f4b6a5af9217`，non-root、healthy、双角色、11/11 Outbox、两个 lease 释放、SIGTERM exit 0、无 OOM。
+- 已修复 Drogon 1.8 ending ABI 与重复 Content-Type；详细缺陷、命令、环境和 blocker 见 `Phase_1_S12_Delivery_Summary.md`。

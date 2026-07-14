@@ -1,46 +1,100 @@
-version: '3.9'
-
 services:
-  # PostgreSQL 16+ database for local development
   postgres:
     image: postgres:16-alpine
-    container_name: pfh-postgres
     environment:
-      POSTGRES_DB: pfh_dev
-      POSTGRES_USER: pfh_user
-      POSTGRES_PASSWORD: ${PFH_DB_PASSWORD:-pfh_dev_password_REPLACE_ME}
+      POSTGRES_DB: ${PFH_DB_NAME:-pfh_dev}
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${PFH_POSTGRES_ADMIN_PASSWORD:?set PFH_POSTGRES_ADMIN_PASSWORD}
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
     ports:
-      - "5432:5432"
+      - "${PFH_POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U pfh_user -d pfh_dev"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U postgres -d $${POSTGRES_DB}"]
+      interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 12
     networks:
       - pfh-network
 
-  # Flyway migration runner (optional; can also run CLI directly)
   flyway:
-    image: flyway/flyway:10
-    container_name: pfh-flyway
+    image: flyway/flyway:10.22.0
     command: migrate
     environment:
-      FLYWAY_URL: jdbc:postgresql://postgres:5432/pfh_dev
-      FLYWAY_USER: pfh_user
-      FLYWAY_PASSWORD: ${PFH_DB_PASSWORD:-pfh_dev_password_REPLACE_ME}
+      FLYWAY_URL: jdbc:postgresql://postgres:5432/${PFH_DB_NAME:-pfh_dev}
+      FLYWAY_USER: postgres
+      FLYWAY_PASSWORD: ${PFH_POSTGRES_ADMIN_PASSWORD:?set PFH_POSTGRES_ADMIN_PASSWORD}
       FLYWAY_LOCATIONS: filesystem:/flyway/sql
-      FLYWAY_BASELINE_ON_MIGRATE: "true"
       FLYWAY_VALIDATE_ON_MIGRATE: "true"
+      FLYWAY_OUT_OF_ORDER: "false"
     volumes:
-      - ./migrations:/flyway/sql
+      - ./migrations:/flyway/sql:ro
     depends_on:
       postgres:
         condition: service_healthy
     networks:
       - pfh-network
+
+  role-init:
+    image: postgres:16-alpine
+    environment:
+      PGPASSWORD: ${PFH_POSTGRES_ADMIN_PASSWORD:?set PFH_POSTGRES_ADMIN_PASSWORD}
+    command:
+      - psql
+      - -h
+      - postgres
+      - -U
+      - postgres
+      - -d
+      - ${PFH_DB_NAME:-pfh_dev}
+      - -v
+      - ON_ERROR_STOP=1
+      - -v
+      - request_user=${PFH_DB_USER:-pfh_user}
+      - -v
+      - request_password=${PFH_DB_PASSWORD:?set PFH_DB_PASSWORD}
+      - -v
+      - background_user=${PFH_BACKGROUND_DB_USER:-pfh_background}
+      - -v
+      - background_password=${PFH_BACKGROUND_DB_PASSWORD:?set PFH_BACKGROUND_DB_PASSWORD}
+      - -f
+      - /opt/pfh/init-roles.sql
+    volumes:
+      - ./docker/postgres/init-roles.sql:/opt/pfh/init-roles.sql:ro
+    depends_on:
+      flyway:
+        condition: service_completed_successfully
+    networks:
+      - pfh-network
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      PFH_ENVIRONMENT: container
+      PFH_DB_HOST: postgres
+      PFH_DB_PORT: "5432"
+      PFH_DB_NAME: ${PFH_DB_NAME:-pfh_dev}
+      PFH_DB_USER: ${PFH_DB_USER:-pfh_user}
+      PFH_DB_PASSWORD: ${PFH_DB_PASSWORD:?set PFH_DB_PASSWORD}
+      PFH_BACKGROUND_DB_HOST: postgres
+      PFH_BACKGROUND_DB_PORT: "5432"
+      PFH_BACKGROUND_DB_NAME: ${PFH_DB_NAME:-pfh_dev}
+      PFH_BACKGROUND_DB_USER: ${PFH_BACKGROUND_DB_USER:-pfh_background}
+      PFH_BACKGROUND_DB_PASSWORD: ${PFH_BACKGROUND_DB_PASSWORD:?set PFH_BACKGROUND_DB_PASSWORD}
+      PFH_JWT_SECRET: ${PFH_JWT_SECRET:?set PFH_JWT_SECRET}
+      PFH_PASSWORD_PEPPER: ${PFH_PASSWORD_PEPPER:-}
+      PFH_EXCHANGE_RATE_API_KEY: ${PFH_EXCHANGE_RATE_API_KEY:?set PFH_EXCHANGE_RATE_API_KEY}
+    ports:
+      - "${PFH_HTTP_PORT:-8080}:8080"
+    depends_on:
+      role-init:
+        condition: service_completed_successfully
+    networks:
+      - pfh-network
+    stop_grace_period: 20s
 
 volumes:
   postgres_data:

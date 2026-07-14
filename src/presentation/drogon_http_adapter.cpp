@@ -23,7 +23,11 @@ namespace {
         static_cast<drogon::HttpStatusCode>(source.status));
     response->setBody(std::move(source.body));
     for (const auto& [name, value] : source.headers) {
-        response->addHeader(name, value);
+        if (name == "Content-Type") {
+            response->setContentTypeString(value);
+        } else {
+            response->addHeader(name, value);
+        }
     }
     return response;
 }

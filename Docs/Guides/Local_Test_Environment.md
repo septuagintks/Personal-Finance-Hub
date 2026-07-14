@@ -1,8 +1,8 @@
 # Personal Finance Hub - Local Test Environment
 
-**Version**: 1.2
+**Version**: 1.3
 **Last Updated**: 2026-07-15
-**Scope**: Historical validation, current S10 production preflight, and pending final S12 sign-off
+**Scope**: Historical validation, S10 production preflight, and current S12 Linux/Docker gate
 
 ---
 
@@ -12,14 +12,14 @@ This document records the local test environment used to validate the PFH backen
 
 The project targets Linux deployment, so local feature work should periodically be checked with a Linux toolchain even when the primary development machine is macOS or Windows.
 
-The GCC 13 / 142-test result in Sections 2-7 is historical. Section 8 records the current S10 production preflight at commit `db07d64`. That preflight validates the real dependency ABI, V1-V5 and the core API runtime, but it is not the final S12 sign-off because exhaustive PostgreSQL fixtures, S11 background jobs and the application image remain pending.
+The GCC 13 / 142-test result in Sections 2-7 is historical. Section 8 records the S10 production preflight at commit `db07d64`. Section 9 records the current combined S12 Linux/PostgreSQL/Docker result. Windows still owns the final S12-07 review and Phase 1 sign-off.
 
 ---
 
 ## 2. Host Environment
 
 - Host OS: macOS / Darwin
-- Workspace path: `/Users/septu/EMT/WorkSpace/C++/PFH`
+- Workspace path: project root mounted into the Colima VM
 - Git branch verified: `feature/phase1-foundation`
 - Linux provider: Colima VM
 - Container runtime: Docker runtime inside Colima
@@ -200,11 +200,48 @@ The S10 preflight completed on 2026-07-15 using macOS 26.5.2 ARM64 with Colima 0
 
 The run found and fixed four real-environment defects in signed commit `db07d64`: a libstdc++ 13 `std::quoted` overload collision, missing real Drogon Row/Field includes, unsupported `Field::as<trantor::Date>()` conversion, and a four-byte integer bound to PostgreSQL `SMALLINT`. The disposable service, database container and network were removed after validation; no credentials, tokens or database dump were retained.
 
-This was a foundation preflight, not a full PostgreSQL integration suite. S11 has since completed its Windows implementation and 341/341 local regression, but the combined binary has not been rerun here. Repository/UoW scenario parity, connection-pool reuse, concurrent locks, failure injection, NUMERIC boundary matrices, V6/background runtime and the application Docker image remain P1-S12 work.
+This was a foundation preflight, not a full PostgreSQL integration suite. The combined S12 validation in the next section supersedes its pending-work statement.
 
 ---
 
-## 9. Follow-Up Notes
+## 9. Current S12 Linux and Docker Gate
+
+The P1-S12-02 through S12-06 run used the same Colima Ubuntu 24.04 ARM64 environment after the S11 implementation was integrated.
+
+| Item | Result |
+| ---- | ------ |
+| Production baseline | `ed0b10f4567232d5558914464092a24213958941` plus the S12 delivery changes |
+| Linux dependencies | GCC 13.3.0, Drogon 1.8.7, Trantor 1.5.12, PostgreSQL 16.14, OpenSSL 3.0.13, Argon2 20190702 |
+| Debug production ON | Configure/build PASS, CTest 343/343 |
+| Release production ON | Configure/build PASS, CTest 343/343 |
+| Debug PostgreSQL OFF | Fresh 88/88-step build, CTest 341/341 |
+| Flyway | V1-V6 migrate/info/validate/no-op and V1-V5 legacy upgrade PASS |
+| PostgreSQL fixture | 12/12 real scenarios PASS; CTest target is mandatory when production is ON |
+| Drogon runtime | Auth, RLS, finance/report API, headers and SIGTERM PASS |
+| Docker runtime | Healthy, non-root, dual role, Outbox/Scheduler and exit 0 PASS |
+
+Production ON adds two CTest entries to the 341-test base: `postgresql_integration` runs 12 real database scenarios, and `drogon_runtime_integration` starts the production server against the same disposable database. The outer CTest environment should expose only these connection strings:
+
+```bash
+export PFH_TEST_DB_ADMIN='host=127.0.0.1 port=<port> dbname=<db> user=<admin> password=<temporary-password>'
+export PFH_TEST_DB_REQUEST='host=127.0.0.1 port=<port> dbname=<db> user=<request-role> password=<temporary-password>'
+export PFH_TEST_DB_BACKGROUND='host=127.0.0.1 port=<port> dbname=<db> user=<background-role> password=<temporary-password>'
+
+ctest --test-dir build/s12-linux-debug --output-on-failure
+ctest --test-dir build/s12-linux-release --output-on-failure
+```
+
+Do not export `PFH_DB_*` to the full CTest process. The runtime script parses the request/background libpq conninfo and injects application variables only into its `pfh_server` child. It also disables HTTP proxies for loopback requests because this Colima profile does not bypass `127.0.0.1` automatically.
+
+The Docker gate cold-built the repository `Dockerfile` from Ubuntu 24.04 base digest `sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90`. The final ARM64 image was `sha256:b2e161b3a551b06c50d8a31760397e2e15f49e70e8049e391692f4b6a5af9217`, 36,763,570 bytes, with tzdata 2026b. It ran as user `pfh`, reached `healthy`, published 11/11 Outbox rows, released both scheduled job leases, preserved FORCE RLS on all eight tenant tables, and stopped with exit code 0 without OOM.
+
+The real OpenExchangeRates HTTPS/API response remains `BLOCKED` because no external API key was supplied. Mock transport tests and a dummy-key Scheduler run are not evidence that the real provider passed.
+
+All disposable S12 application/database containers and the dedicated network were removed after validation, and Colima was stopped. No test password, JWT, API key, token, response body, raw log or database dump was retained.
+
+---
+
+## 10. Follow-Up Notes
 
 - The recorded GCC 13 / 142-test run predates the timezone-aware reporting
   implementation. Current HEAD requires the CMake chrono-tzdb probe to pass and
@@ -213,9 +250,8 @@ This was a foundation preflight, not a full PostgreSQL integration suite. S11 ha
 - A later external PostgreSQL 16.14/Flyway 10.22.0 run validated V1-V3 and the
   then-current 254-test baseline; see
   `Docs/Development/Phase_1_S10_PostgreSQL_Persistence_Validation_Report.md`.
-  The newer S10 preflight above supersedes that build/runtime baseline, while final P1-S12 still requires the omitted fixture and release gates.
+  The S10 preflight superseded that build/runtime baseline; the S12 run above now supersedes both for current Linux behavior.
 - Keep `build/` and `config/config.local.json` local.
 - Run Linux validation before phase delivery or before merging phase work back to `main`.
-- Re-run the completed S10 PostgreSQL/Drogon composition root and shared repository scenarios as a full PostgreSQL fixture in P1-S12.
-- Re-run the real Drogon API smoke after S11 integration, including V6, OpenExchangeRates, Outbox claim/recovery, scheduled leases, token cleanup and graceful shutdown; the S10 preflight is not evidence for the later combined binary.
-- Record the current commit hash, environment versions, Debug/Release commands, Docker startup/health result, migration result, PostgreSQL tests, API tests and Outbox/Scheduler tests before Phase 1 sign-off.
+- Windows S12-07 must verify the returned signed commit, review the new fixture/Docker changes, rerun its PostgreSQL OFF gate and decide how to handle the external Provider blocker.
+- Record the final returned commit hash and blocker decision before Phase 1 sign-off.

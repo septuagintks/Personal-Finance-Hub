@@ -43,6 +43,7 @@ public:
     }
     void setStatusCode(HttpStatusCode) {}
     void setBody(std::string) {}
+    void setContentTypeString(const std::string&) {}
     void addHeader(const std::string&, const std::string&) {}
     [[nodiscard]] HttpStatusCode getStatusCode() const noexcept {
         return k200OK;
