@@ -19,7 +19,9 @@
 #include "pfh/domain/user.h"
 #include "pfh/domain/user_preference.h"
 
+#include <drogon/orm/Field.h>
 #include <drogon/orm/Result.h>
+#include <drogon/orm/Row.h>
 #include <trantor/utils/Date.h>
 #include <chrono>
 #include <cstddef>

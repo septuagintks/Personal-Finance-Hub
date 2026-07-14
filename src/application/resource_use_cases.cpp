@@ -65,7 +65,7 @@ using TimePoint = std::chrono::system_clock::time_point;
         preference.default_report_period()};
 }
 
-[[nodiscard]] std::string quoted(std::string_view value) {
+[[nodiscard]] std::string json_quoted(std::string_view value) {
     return domain::event_detail::json_string(value);
 }
 
@@ -168,7 +168,7 @@ Result<AccountDto> CreateAccountUseCase::execute(
                     "Account",
                     persisted_id.to_string(),
                     {},
-                    "{\"name\":" + quoted(command.name) + "}",
+                    "{\"name\":" + json_quoted(command.name) + "}",
                     now));
         });
     if (!write) {
@@ -414,7 +414,7 @@ Result<CategoryDto> CreateCategoryUseCase::execute(
                         "Category",
                         persisted_id.to_string(),
                         {},
-                        "{\"name\":" + quoted(name) + "}",
+                        "{\"name\":" + json_quoted(name) + "}",
                         now));
                 !audited) {
                 return audited;
@@ -456,7 +456,7 @@ VoidResult DeleteCategoryUseCase::execute(
                         domain::AuditAction::Delete,
                         "Category",
                         command.category_id.to_string(),
-                        "{\"name\":" + quoted(category->name()) + "}",
+                        "{\"name\":" + json_quoted(category->name()) + "}",
                         "{\"deleted\":true}",
                         deleted_at));
                 !audited) {
@@ -509,7 +509,7 @@ Result<TagDto> CreateTagUseCase::execute(const CreateTagCommand& command) {
                     "Tag",
                     persisted_id.to_string(),
                     {},
-                    "{\"name\":" + quoted(command.name) + "}",
+                    "{\"name\":" + json_quoted(command.name) + "}",
                     now));
         });
     if (!write) {
@@ -543,7 +543,7 @@ VoidResult DeleteTagUseCase::execute(const DeleteTagCommand& command) {
                     domain::AuditAction::Delete,
                     "Tag",
                     command.tag_id.to_string(),
-                    "{\"name\":" + quoted(tag->name()) + "}",
+                    "{\"name\":" + json_quoted(tag->name()) + "}",
                     "{\"deleted\":true}",
                     deleted_at));
         });
@@ -649,9 +649,9 @@ Result<UserPreferenceDto> UpdateUserPreferenceUseCase::execute(
                         "UserPreference",
                         command.user_id.to_string(),
                         "{\"baseCurrency\":" +
-                            quoted(before->base_currency().code()) + "}",
+                            json_quoted(before->base_currency().code()) + "}",
                         "{\"baseCurrency\":" +
-                            quoted(preference.base_currency().code()) + "}",
+                            json_quoted(preference.base_currency().code()) + "}",
                         now));
                 !audited) {
                 return audited;

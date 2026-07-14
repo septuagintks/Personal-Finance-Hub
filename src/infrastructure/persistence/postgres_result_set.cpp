@@ -6,10 +6,117 @@
 
 #ifdef PFH_HAS_POSTGRESQL
 
+#include <charconv>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace pfh::infrastructure::pg {
+
+namespace {
+
+[[nodiscard]] int parseNumber(
+    std::string_view value, size_t offset, size_t length) {
+    if (offset > value.size() || length > value.size() - offset) {
+        throw std::invalid_argument("timestamp component is missing");
+    }
+
+    int parsed = 0;
+    const auto* first = value.data() + offset;
+    const auto* last = first + length;
+    const auto [end, error] = std::from_chars(first, last, parsed);
+    if (error != std::errc{} || end != last) {
+        throw std::invalid_argument("timestamp component is invalid");
+    }
+    return parsed;
+}
+
+[[nodiscard]] std::chrono::seconds parseUtcOffset(
+    std::string_view value) {
+    if (value == "Z") {
+        return std::chrono::seconds::zero();
+    }
+    if (value.size() != 3 && value.size() != 6 && value.size() != 9) {
+        throw std::invalid_argument("timestamp UTC offset has invalid length");
+    }
+    if ((value.front() != '+' && value.front() != '-') ||
+        (value.size() >= 6 && value[3] != ':') ||
+        (value.size() == 9 && value[6] != ':')) {
+        throw std::invalid_argument("timestamp UTC offset is invalid");
+    }
+
+    const int hours = parseNumber(value, 1, 2);
+    const int minutes = value.size() >= 6 ? parseNumber(value, 4, 2) : 0;
+    const int seconds = value.size() == 9 ? parseNumber(value, 7, 2) : 0;
+    if (hours > 15 || minutes > 59 || seconds > 59) {
+        throw std::invalid_argument("timestamp UTC offset is out of range");
+    }
+
+    const auto magnitude = std::chrono::hours(hours) +
+                           std::chrono::minutes(minutes) +
+                           std::chrono::seconds(seconds);
+    return value.front() == '+' ? magnitude : -magnitude;
+}
+
+[[nodiscard]] std::chrono::system_clock::time_point parseTimestamp(
+    std::string_view value) {
+    size_t offset_position = std::string_view::npos;
+    if (!value.empty() && value.back() == 'Z') {
+        offset_position = value.size() - 1;
+    } else {
+        offset_position = value.find_last_of("+-");
+    }
+    if (offset_position == std::string_view::npos || offset_position < 19) {
+        throw std::invalid_argument("timestamp UTC offset is missing");
+    }
+
+    const auto timestamp = value.substr(0, offset_position);
+    const auto utc_offset = parseUtcOffset(value.substr(offset_position));
+    if (timestamp.size() < 19 || timestamp.size() > 26 ||
+        timestamp[4] != '-' || timestamp[7] != '-' ||
+        timestamp[10] != ' ' || timestamp[13] != ':' ||
+        timestamp[16] != ':') {
+        throw std::invalid_argument("timestamp layout is invalid");
+    }
+
+    const int year = parseNumber(timestamp, 0, 4);
+    const int month = parseNumber(timestamp, 5, 2);
+    const int day = parseNumber(timestamp, 8, 2);
+    const int hour = parseNumber(timestamp, 11, 2);
+    const int minute = parseNumber(timestamp, 14, 2);
+    const int second = parseNumber(timestamp, 17, 2);
+
+    int microseconds = 0;
+    if (timestamp.size() > 19) {
+        const size_t fraction_length = timestamp.size() - 20;
+        if (timestamp[19] != '.' || fraction_length == 0 ||
+            fraction_length > 6) {
+            throw std::invalid_argument("timestamp fraction is invalid");
+        }
+        microseconds = parseNumber(timestamp, 20, fraction_length);
+        for (size_t digit = fraction_length; digit < 6; ++digit) {
+            microseconds *= 10;
+        }
+    }
+
+    const std::chrono::year_month_day date{
+        std::chrono::year(year),
+        std::chrono::month(static_cast<unsigned>(month)),
+        std::chrono::day(static_cast<unsigned>(day))};
+    if (!date.ok() || hour > 23 || minute > 59 || second > 59) {
+        throw std::invalid_argument("timestamp value is out of range");
+    }
+
+    const auto local_time = std::chrono::sys_days(date) +
+                            std::chrono::hours(hour) +
+                            std::chrono::minutes(minute) +
+                            std::chrono::seconds(second) +
+                            std::chrono::microseconds(microseconds);
+    return std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+        local_time - utc_offset);
+}
+
+}  // namespace
 
 std::string getString(const drogon::orm::Row& row, size_t col) {
     if (row[col].isNull()) {
@@ -58,9 +165,13 @@ std::chrono::system_clock::time_point getTimestamp(const drogon::orm::Row& row, 
     if (row[col].isNull()) {
         throw std::runtime_error("pg::getTimestamp: column " + std::to_string(col) + " is NULL");
     }
-    const auto value = row[col].as<trantor::Date>();
-    return std::chrono::system_clock::time_point(
-        std::chrono::microseconds(value.microSecondsSinceEpoch()));
+    try {
+        return parseTimestamp(row[col].as<std::string>());
+    } catch (const std::invalid_argument&) {
+        throw std::runtime_error(
+            "pg::getTimestamp: column " + std::to_string(col) +
+            " is not a valid TIMESTAMPTZ value");
+    }
 }
 
 std::optional<std::chrono::system_clock::time_point> getOptionalTimestamp(

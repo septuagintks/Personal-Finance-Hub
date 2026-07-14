@@ -10,6 +10,7 @@
 #include "pfh/infrastructure/persistence/postgres_repository_support.h"
 #include "pfh/infrastructure/persistence/postgres_result_set.h"
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <utility>
@@ -415,7 +416,7 @@ TransactionRepositoryImpl::save_transfer(
             kInsertGroupSql,
             tenant_user_id_.value(),
             outgoing.description(),
-            static_cast<int>(transfer.mode()),
+            static_cast<std::int16_t>(transfer.mode()),
             rate_value,
             rate_source,
             rate_time,
