@@ -85,9 +85,6 @@ public:
     template <typename Advice>
     void registerBeginningAdvice(Advice&&) {}
 
-    template <typename Advice>
-    void registerEndingAdvice(Advice&&) {}
-
     void quit() {}
     void run() {}
 

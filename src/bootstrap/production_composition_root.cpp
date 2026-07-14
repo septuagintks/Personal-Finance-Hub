@@ -354,10 +354,6 @@ application::VoidResult ProductionCompositionRoot::initialize() {
                 drogon::app().quit();
             }
         });
-        drogon::app().registerEndingAdvice([this] {
-            job_manager_->stop_all();
-            background_executor_->shutdown();
-        });
     }
 
     auth_service_ = std::make_unique<application::AuthService>(
