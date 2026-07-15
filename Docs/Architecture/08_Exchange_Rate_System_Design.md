@@ -510,9 +510,9 @@ public:
 
 基础设施层负责真正的 HTTP 请求和 PostgreSQL 读写。
 
-### 4.1 主备外部提供方实现 (Drogon HTTP Client)
+### 4.1 主备外部提供方实现 (libcurl HTTPS Client)
 
-Phase 1 使用 FreeCurrencyAPI 作为主源、exchangerate.fun 作为无密钥备用源。两个 API 由独立 `DrogonHttpTransport` 访问，各自的响应格式只在 Infrastructure 防腐层解析，再由组合 Provider 对 Application 暴露一个稳定端口。
+Phase 1 使用 FreeCurrencyAPI 作为主源、exchangerate.fun 作为无密钥备用源。两个 API 由独立 `CurlHttpTransport` 访问，各自的响应格式只在 Infrastructure 防腐层解析，再由组合 Provider 对 Application 暴露一个稳定端口。Drogon 继续承载入站 HTTP 服务；出站客户端使用构建时验证了 HTTPS/SSL 能力的 libcurl，强制 HTTPS、peer/host 证书校验、hard timeout 和响应大小上限。
 
 **Phase 1 规范实现（2026-07-15）：**
 

@@ -98,7 +98,7 @@ def main() -> int:
         "postgres_supplemental_audit_store.cpp",
         "postgres_session_cleanup_repository.cpp",
         "postgres_job_lease_repository.cpp",
-        "drogon_http_transport.cpp",
+        "curl_http_transport.cpp",
         "drogon_timer_scheduler.cpp",
     ]
     require(

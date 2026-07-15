@@ -1,4 +1,4 @@
-// Personal Finance Hub - Drogon HTTP Transport
+// Personal Finance Hub - libcurl HTTPS Transport
 
 #pragma once
 
@@ -11,17 +11,18 @@
 
 namespace pfh::infrastructure {
 
-class DrogonHttpTransport final : public IHttpTransport {
+class CurlHttpTransport final : public IHttpTransport {
 public:
-    explicit DrogonHttpTransport(std::string base_url)
-        : base_url_(std::move(base_url)) {}
+    explicit CurlHttpTransport(std::string base_url);
 
     [[nodiscard]] HttpTransportResult get(
         std::string_view path,
+        const HttpQueryParameters& query,
         std::chrono::milliseconds timeout) override;
 
 private:
     std::string base_url_;
+    bool available_ = false;
 };
 
 } // namespace pfh::infrastructure

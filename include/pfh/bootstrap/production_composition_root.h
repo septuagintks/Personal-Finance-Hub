@@ -26,7 +26,7 @@ class Argon2PasswordHasher;
 class AuditLogRepositoryImpl;
 class AuthSessionRepositoryImpl;
 class BoundedThreadPool;
-class DrogonHttpTransport;
+class CurlHttpTransport;
 class DrogonTimerScheduler;
 class DrogonUnitOfWork;
 class DrogonUnitOfWorkFactory;
@@ -97,9 +97,9 @@ private:
     std::unique_ptr<infrastructure::DrogonUnitOfWorkFactory> uow_factory_;
     std::unique_ptr<infrastructure::PostgresActiveCurrencyQuery>
         background_currency_query_;
-    std::unique_ptr<infrastructure::DrogonHttpTransport>
+    std::unique_ptr<infrastructure::CurlHttpTransport>
         primary_rate_http_transport_;
-    std::unique_ptr<infrastructure::DrogonHttpTransport>
+    std::unique_ptr<infrastructure::CurlHttpTransport>
         fallback_rate_http_transport_;
     std::unique_ptr<infrastructure::FreeCurrencyApiProvider>
         primary_rate_provider_;

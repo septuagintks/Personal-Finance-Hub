@@ -269,27 +269,6 @@ private:
     bool rates_seen_ = false;
 };
 
-[[nodiscard]] std::string percent_encode(std::string_view value) {
-    static constexpr char kHex[] = "0123456789ABCDEF";
-    std::string encoded;
-    encoded.reserve(value.size());
-    for (const char raw : value) {
-        const auto c = static_cast<unsigned char>(raw);
-        const bool unreserved =
-            (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-            (c >= '0' && c <= '9') || c == '-' || c == '_' ||
-            c == '.' || c == '~';
-        if (unreserved) {
-            encoded.push_back(raw);
-            continue;
-        }
-        encoded.push_back('%');
-        encoded.push_back(kHex[(c >> 4U) & 0x0fU]);
-        encoded.push_back(kHex[c & 0x0fU]);
-    }
-    return encoded;
-}
-
 [[nodiscard]] domain::RepositoryError invalid_response(
     std::string_view provider_name) {
     return domain::RepositoryError::validation(
@@ -462,11 +441,13 @@ FreeCurrencyApiProvider::fetch_latest(
         return std::vector<domain::ExchangeRate>{};
     }
 
-    const std::string path =
-        "/v1/latest?apikey=" + percent_encode(api_key_) +
-        "&base_currency=" + percent_encode(base.code()) +
-        "&currencies=" + percent_encode(make_symbols(*requested));
-    auto response = transport_.get(path, timeout_);
+    const std::string symbols = make_symbols(*requested);
+    auto response = transport_.get(
+        "/v1/latest",
+        {{"apikey", api_key_},
+         {"base_currency", base.code()},
+         {"currencies", symbols}},
+        timeout_);
     if (!response) {
         return std::unexpected(
             transport_error(provider_name(), response.error().kind));
@@ -504,10 +485,11 @@ ExchangeRateFunProvider::fetch_latest(
         return std::vector<domain::ExchangeRate>{};
     }
 
-    const std::string path =
-        "/latest?base=" + percent_encode(base.code()) +
-        "&symbols=" + percent_encode(make_symbols(*requested));
-    auto response = transport_.get(path, timeout_);
+    const std::string symbols = make_symbols(*requested);
+    auto response = transport_.get(
+        "/latest",
+        {{"base", base.code()}, {"symbols", symbols}},
+        timeout_);
     if (!response) {
         return std::unexpected(
             transport_error(provider_name(), response.error().kind));

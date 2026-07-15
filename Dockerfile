@@ -11,6 +11,7 @@ RUN apt-get update \
         default-libmysqlclient-dev \
         libargon2-dev \
         libbrotli-dev \
+        libcurl4-openssl-dev \
         libdrogon-dev \
         libgtest-dev \
         libhiredis-dev \

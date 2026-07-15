@@ -102,6 +102,7 @@ if(PFH_BUILD_POSTGRESQL)
     find_package(Drogon REQUIRED)
     find_package(PostgreSQL REQUIRED)
     find_package(OpenSSL REQUIRED)
+    find_package(CURL REQUIRED COMPONENTS HTTPS SSL)
     find_path(PFH_ARGON2_INCLUDE_DIR NAMES argon2.h REQUIRED)
     find_library(PFH_ARGON2_LIBRARY NAMES argon2 libargon2 REQUIRED)
     add_library(pfh_argon2 UNKNOWN IMPORTED)
@@ -176,7 +177,7 @@ set(PFH_POSTGRESQL_SOURCES
     src/infrastructure/persistence/postgres_supplemental_audit_store.cpp
     src/infrastructure/persistence/postgres_session_cleanup_repository.cpp
     src/infrastructure/persistence/postgres_job_lease_repository.cpp
-    src/infrastructure/external/drogon_http_transport.cpp
+    src/infrastructure/external/curl_http_transport.cpp
     src/infrastructure/scheduler/drogon_timer_scheduler.cpp
 )
 
@@ -248,6 +249,7 @@ if(PFH_BUILD_POSTGRESQL)
         Drogon::Drogon
         PostgreSQL::PostgreSQL
         OpenSSL::Crypto
+        CURL::libcurl
         pfh_argon2
     )
 endif()
@@ -284,6 +286,7 @@ if(NOT PFH_BUILD_POSTGRESQL)
     )
     target_include_directories(pfh_postgresql_adapter_compile_gate BEFORE PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/support/drogon_stub
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/support/curl_stub
         ${PFH_INCLUDE_DIR}
     )
     target_link_libraries(pfh_postgresql_adapter_compile_gate PRIVATE

@@ -28,8 +28,13 @@ class FakeHttpTransport final : public IHttpTransport {
 public:
     [[nodiscard]] HttpTransportResult get(
         std::string_view path,
+        const HttpQueryParameters& query,
         std::chrono::milliseconds timeout) override {
         last_path = std::string(path);
+        last_query.clear();
+        for (const auto& [key, value] : query) {
+            last_query.emplace_back(key, value);
+        }
         last_timeout = timeout;
         ++calls;
         return result;
@@ -37,6 +42,7 @@ public:
 
     HttpTransportResult result = HttpTransportResponse{200, "{}"};
     std::string last_path;
+    std::vector<std::pair<std::string, std::string>> last_query;
     std::chrono::milliseconds last_timeout{};
     int calls = 0;
 };
@@ -68,9 +74,13 @@ TEST(FreeCurrencyApiProviderTest,
     EXPECT_EQ((*result)[1].rate().to_string(), "0.923456789");
     EXPECT_EQ((*result)[0].source(), "FreeCurrencyAPI");
     EXPECT_EQ((*result)[0].fetched_at(), clock.now());
+    EXPECT_EQ(transport.last_path, "/v1/latest");
     EXPECT_EQ(
-        transport.last_path,
-        "/v1/latest?apikey=secret%2Bkey&base_currency=USD&currencies=CNY%2CEUR");
+        transport.last_query,
+        (std::vector<std::pair<std::string, std::string>>{
+            {"apikey", "secret+key"},
+            {"base_currency", "USD"},
+            {"currencies", "CNY,EUR"}}));
     EXPECT_EQ(transport.last_timeout, 2500ms);
 }
 
@@ -171,9 +181,11 @@ TEST(ExchangeRateFunProviderTest,
     EXPECT_EQ(
         (*result)[0].fetched_at(),
         std::chrono::system_clock::time_point{1700000000s});
+    EXPECT_EQ(transport.last_path, "/latest");
     EXPECT_EQ(
-        transport.last_path,
-        "/latest?base=USD&symbols=CNY%2CEUR");
+        transport.last_query,
+        (std::vector<std::pair<std::string, std::string>>{
+            {"base", "USD"}, {"symbols", "CNY,EUR"}}));
     EXPECT_EQ(transport.last_timeout, 1500ms);
 }
 

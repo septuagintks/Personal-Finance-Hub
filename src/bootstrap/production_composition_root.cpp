@@ -13,7 +13,7 @@
 #include "pfh/application/maintenance/cleanup_expired_sessions_use_case.h"
 #include "pfh/application/use_cases/refresh_exchange_rates_use_case.h"
 #include "pfh/bootstrap/database_client_factory.h"
-#include "pfh/infrastructure/external/drogon_http_transport.h"
+#include "pfh/infrastructure/external/curl_http_transport.h"
 #include "pfh/infrastructure/external/exchange_rate_providers.h"
 #include "pfh/infrastructure/persistence/audit_log_repository_impl.h"
 #include "pfh/infrastructure/persistence/auth_session_repository_impl.h"
@@ -228,10 +228,10 @@ application::VoidResult ProductionCompositionRoot::initialize() {
         // role against non-RLS tables. The BYPASSRLS client remains confined
         // to PostgresActiveCurrencyQuery above.
         primary_rate_http_transport_ =
-            std::make_unique<infrastructure::DrogonHttpTransport>(
+            std::make_unique<infrastructure::CurlHttpTransport>(
                 "https://api.freecurrencyapi.com");
         fallback_rate_http_transport_ =
-            std::make_unique<infrastructure::DrogonHttpTransport>(
+            std::make_unique<infrastructure::CurlHttpTransport>(
                 "https://api.exchangerate.fun");
         primary_rate_provider_ =
             std::make_unique<infrastructure::FreeCurrencyApiProvider>(

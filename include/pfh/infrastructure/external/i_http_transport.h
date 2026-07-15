@@ -6,6 +6,8 @@
 #include <expected>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace pfh::infrastructure {
 
@@ -26,6 +28,8 @@ struct HttpTransportResponse {
 
 using HttpTransportResult =
     std::expected<HttpTransportResponse, HttpTransportError>;
+using HttpQueryParameters =
+    std::vector<std::pair<std::string_view, std::string_view>>;
 
 class IHttpTransport {
 public:
@@ -33,6 +37,7 @@ public:
 
     [[nodiscard]] virtual HttpTransportResult get(
         std::string_view path,
+        const HttpQueryParameters& query,
         std::chrono::milliseconds timeout) = 0;
 };
 
