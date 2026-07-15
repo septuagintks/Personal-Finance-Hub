@@ -3,7 +3,7 @@
 Version: 1.1
 Backend: C++23
 Architecture: Clean Architecture + Lightweight DDD
-Status: Active
+Status: Complete
 
 ---
 
@@ -11,7 +11,7 @@ Status: Active
 
 本文档是 `Phase_1_Development_Plan.md` 的细化子计划，用于描述 Phase 1 从创建工程目录结构开始，到第一阶段测试收尾为止的具体开发顺序、交付物和验收口径。
 
-当前进度（2026-07-15）：P1-S01 至 P1-S11 和 S12 原 Linux/PostgreSQL/Drogon/Docker 门禁已完成。外部汇率随后改为 FreeCurrencyAPI 主源与 exchangerate.fun 整批备用源；Windows GCC 16 / PostgreSQL OFF Debug、Release 均通过 349/349，构成为 300 个 unit/use-case、17 个 In-Memory integration、28 个 framework-neutral API 和 4 个静态门禁，三类 production compile gate 同时通过。脱敏真实端点探测已验证主源成功批次及主源 422 后备用源完整覆盖；新提交仍须交接 macOS/Colima 复测真实 Drogon HTTPS、Linux production ON、Scheduler 和 Docker，结果返回前 Phase 1 不得签署完成。
+当前进度（2026-07-16）：P1-S01 至 P1-S12 全部完成。最终提交链已通过 Windows PostgreSQL OFF Debug/Release 349/349、Linux production ON Debug/Release 351/351、Linux PostgreSQL OFF 349/349、真实 PostgreSQL/Drogon/Scheduler/Outbox、FreeCurrencyAPI 主源、exchangerate.fun 整批备用、双源失败历史降级和 Docker 冷构建/runtime 门禁。Windows 已完成 S12-07 全项目一致性 review、文档归档和阶段签署；Phase 1 分支具备合并到 `main` 的条件。
 
 ### 1.1 执行原则
 
@@ -391,7 +391,7 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S10-03 PostgreSQL Repository 与 DrogonUnitOfWork
 
-状态：**核心适配器、S10-04 装配与真实 production 基础 smoke 已完成（2026-07-15）；完整 Repository fixture 与并发/失败矩阵保留到 P1-S12**。
+状态：**已完成**。核心适配器、S10-04 装配与真实 production 基础 smoke 于 2026-07-15 完成；完整 Repository fixture 与并发/失败矩阵后续已在 P1-S12 通过。
 
 - 实现 `DrogonUnitOfWork`，把同一 `Transaction` 上下文显式传给所有写 Repository 和 outbox。
 - 实现 PostgreSQL 版 User、UserPreference、Account、Transaction（含 Transfer + Adjustment 聚合持久化）、ExchangeRate、Category 核心适配器，以及供无用户后台任务使用的 `PostgresActiveCurrencyQuery`。
@@ -403,7 +403,7 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S10-04 Composition Root、DbClient 与 RLS 上下文
 
-状态：**已完成实现、真实双角色启动和基础 RLS smoke（2026-07-15）；连接池复用与并发隔离矩阵保留到 S12**。
+状态：**已完成**。实现、真实双角色启动和基础 RLS smoke 于 2026-07-15 完成；连接池复用与并发隔离矩阵后续已在 P1-S12 通过。
 
 - 在 bootstrap 层创建 DbClient、Repository、UnitOfWork、Use Case、QueryService、Controller 和 Filter 的唯一装配入口。
 - request-serving DbClient 使用受 FORCE RLS 约束的普通应用角色；`PostgresActiveCurrencyQuery` 使用独立后台只读角色/连接。两个连接不得混用，后台特权 client 不得注入 Controller 或用户 Use Case。
@@ -439,7 +439,7 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S10-07 基础资源 API
 
-状态：**已完成实现、本地回归与真实 PostgreSQL/Drogon 最小资源 smoke（2026-07-15）**。完整 fixture 仍保留到 P1-S12。
+状态：**已完成**。实现、本地回归与真实 PostgreSQL/Drogon 最小资源 smoke 于 2026-07-15 完成；完整 fixture 后续已在 P1-S12 通过。
 
 - 在 Controller 前补齐 CreateAccount、ArchiveAccount、Category、Tag 和 UserPreference 所需的 Application Command/Use Case；Presentation 不直接编排 Repository。
 - 按 Account、Category、Tag、UserPreference、Currency metadata 的顺序接入 API。
@@ -498,7 +498,7 @@ P1-S12 Phase 1 测试收尾与文档回写
 - Account、Transaction、Transfer 和 Report 的最小路径均有成功与错误场景。
 - 未认证、无权限、找不到资源、冲突、业务规则错误和系统错误能返回正确 HTTP 状态码。
 - 生产响应不泄露堆栈、SQL、文件路径或密钥。
-- S10 本机门禁通过；真实 PostgreSQL 与 Linux/Docker 的最终签署保留到 P1-S12。
+- S10 本机门禁通过；真实 PostgreSQL 与 Linux/Docker 的最终签署后续已在 P1-S12 完成。
 
 ### 3.11 P1-S11 Outbox、调度与后台任务基础
 
@@ -510,7 +510,7 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S11-01 Outbox 领取与状态机
 
-状态：**已完成实现、并发/恢复专项测试与离线 PostgreSQL 契约门禁（2026-07-15）；due、退避和租约统一使用数据库时钟，真实多连接行为保留到 S12-05**。
+状态：**已完成**。实现、并发/恢复专项测试与离线 PostgreSQL 契约门禁于 2026-07-15 完成；due、退避和租约统一使用数据库时钟，真实多连接行为后续已在 S12-05 通过。
 
 - 使用 `FOR UPDATE SKIP LOCKED` 或等价机制批量 claim pending 事件，定义 processing、published、failed/dead-letter 状态转换。
 - claim、锁超时恢复、重试次数、下一次重试时间和最后错误摘要必须可观测。
@@ -533,14 +533,14 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S11-04 汇率 HTTP Provider
 
-状态：**已完成实现与离线严格解析测试（2026-07-15）；真实 HTTPS/TLS/API 响应保留到 S12-05**。
+状态：**已完成**。实现与离线严格解析测试于 2026-07-15 完成；真实 HTTPS/TLS/API 响应后续已在 corrective round 通过。
 
 - 实现真实 HTTP Provider，严格校验响应集合、币种、时间戳、正汇率和重复项。
 - 网络失败、部分响应和非法响应进入既定历史降级路径，并发出 `ExchangeRateRefreshFailedEvent`。
 
 #### P1-S11-05 Scheduler 与 JobManager
 
-状态：**已完成实现、本机/多实例租约、异常收束与清理专项测试（2026-07-15）；Phase 1 无 lease heartbeat，长任务接管及真实 Drogon timer/PostgreSQL runtime 保留到 S12-05**。
+状态：**已完成**。实现、本机/多实例租约、异常收束与清理专项测试于 2026-07-15 完成；Phase 1 无 lease heartbeat，长任务接管及真实 Drogon timer/PostgreSQL runtime 后续已在 S12-05 通过。
 
 - 实现汇率刷新、outbox 发布、过期 Refresh Token 和 Access Token 撤销记录清理任务。
 - 定义启动、停止、优雅退出、单实例防重入和任务超时行为。
@@ -554,7 +554,7 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S11-07 后台任务测试与交付总结
 
-状态：**本地完成（2026-07-15）**。Windows Debug 341/341、三类 production compile gate 与文档回写通过；外部阻断项已转入 P1-S12。
+状态：**已完成**。Windows Debug 341/341、三类 production compile gate 与文档回写于 2026-07-15 通过；转入 P1-S12 的外部阻断项后续已全部关闭。
 
 - 覆盖并发 claim、崩溃恢复、重复投递、退避、dead letter、历史汇率降级、任务防重入和优雅停止。
 - 回写 Tasks 并新增 `Phase_1_S11_Delivery_Summary.md`。
@@ -578,27 +578,27 @@ P1-S12 Phase 1 测试收尾与文档回写
 执行位置：
 
 - Windows 本地门禁在当前开发机执行。
-- Linux、Docker、PostgreSQL 16+ 和真实 Drogon 运行时验证在另一台具备对应环境的机器执行；该项必须保留在 Tasks 中，取得可追溯结果前不得视为 Phase 1 已签署通过。
+- Linux、Docker、PostgreSQL 16+ 和真实 Drogon 运行时验证已在另一台具备对应环境的机器完成，并在归档交付记录中保留可追溯结果。
 
 开发顺序：
 
 #### P1-S12-01 Windows 本地回归
 
-状态：**已完成（2026-07-15）**。提交 `6cd41bc` 在两个全新构建目录完成 GCC 16.1 / PostgreSQL OFF Debug 与 Release 配置、104/104 build steps 和各 341/341 CTest；三类 production compile gate、`git diff --check` 与 Markdown 基础检查通过。详细证据见 `Docs/Development/Phase_1_S12_Delivery_Summary.md`。
+状态：**已完成（2026-07-15）**。提交 `6cd41bc` 在两个全新构建目录完成 GCC 16.1 / PostgreSQL OFF Debug 与 Release 配置、104/104 build steps 和各 341/341 CTest；三类 production compile gate、`git diff --check` 与 Markdown 基础检查通过。详细证据见 `Docs/Archive/Phase_1_S12_Delivery_Summary.md`。
 
 - 执行 Debug configure/build、全部 unit/In-Memory integration/API tests、Markdown 检查和 `git diff --check`。
 - 复核 Release configure/build，确认无仅在 Debug 可编译的路径。
 
 #### P1-S12-02 外部机器环境准备
 
-状态：**原门禁已完成；等待 Provider 修正复测交接**。macOS/Colima Ubuntu 24.04 ARM64 环境和版本矩阵已记录；新一轮仍须固定完整主项目 commit 与交接仓库 commit，并在两个干净工作区上复用该环境。
+状态：**已完成（2026-07-16）**。macOS/Colima Ubuntu 24.04 ARM64 环境、版本矩阵、主项目 commit 与独立交接 commit 均已固定并返回 Windows。
 
 - 固定 Linux 发行版、GCC/libstdc++、CMake、Drogon、PostgreSQL、Flyway、Docker 与 `tzdata` 版本。
 - 使用独立测试凭据和数据库；记录 commit hash、镜像/工具版本、执行命令与时间。
 
 #### P1-S12-03 空库迁移与真实持久化
 
-状态：**已完成原基线**。V1-V6、legacy 升级和 12 个 PostgreSQL-backed scenario 已通过；Provider 修正未改 migration/Repository，但新 production ON 全量 CTest 必须继续执行该强制 fixture，证明接线未回归。
+状态：**已完成（2026-07-16）**。V1-V6、legacy 升级和 12 个 PostgreSQL-backed scenario 已通过；Provider 修正后的 production ON Debug/Release 也实际执行并通过该强制 fixture。
 
 - 从空 PostgreSQL 16+ 数据库执行 V1-V6 全部迁移，并验证重复启动不会破坏 schema；另从含 legacy `processing` outbox 行的 V1-V5 库升级 V6，验证迁移恢复路径。
 - 用与 In-Memory 基线相同的 scenarios 复跑全部 PostgreSQL Repository 与 `DrogonUnitOfWork` 测试。
@@ -607,14 +607,14 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S12-04 API 与认证 Smoke Test
 
-状态：**已完成原基线；新提交需回归**。真实 Drogon API、认证、RLS、财务与报表 smoke 已通过；Provider 修正返回后仍以同一 production binary 复跑完整 runtime target。
+状态：**已完成（2026-07-16）**。真实 Drogon API、认证、RLS、财务与报表 smoke 已通过；Provider 修正提交使用同一 production binary 复跑完整 runtime target 且无回归。
 
 - 在真实 Drogon + PostgreSQL 上覆盖 register/login/refresh/logout、JWT 拒绝、资源用户隔离和主要业务写读路径。
 - 验证 JSON number 拒绝、错误状态码、TraceId、异常脱敏、转账原子性和报表时区月边界。
 
 #### P1-S12-05 Outbox 与 Scheduler 真实运行验证
 
-状态：**原后台基线已通过，Provider 定向复测待执行**。多连接、数据库时钟、Drogon timer、Outbox、重启与停止语义已有结果；新提交必须补真实 FreeCurrencyAPI 成功、主源失败后 exchangerate.fun 整批成功、实际入库 source 和双源失败历史降级。
+状态：**已完成（2026-07-16）**。多连接、数据库时钟、Drogon timer、Outbox、重启与停止语义均通过；真实 FreeCurrencyAPI 主源、exchangerate.fun 整批备用、实际入库 source 和双源失败完整/不完整历史降级均已验证。
 
 - 验证事件只在 commit 后被 claim，失败重试、dead letter、幂等 handler 和进程重启恢复均符合设计。
 - 验证真实汇率 HTTP Provider、历史降级、周期调度、token 清理和优雅停止。
@@ -622,16 +622,16 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S12-06 Linux Debug/Release 与 Docker 门禁
 
-状态：**原基线已完成；新提交复测待执行**。应用 Dockerfile、service、双角色初始化和 smoke 已落地；Provider 修正提交须重新通过 Linux production ON Debug/Release 预期 351 项与 Docker 冷构建、健康检查、Scheduler 和优雅停止。
+状态：**已完成（2026-07-16）**。Provider 修正提交通过 Linux production ON Debug/Release 351/351，以及 Docker 冷构建、健康检查、Scheduler、权限后置断言和优雅停止。
 
 - 在目标 Linux 工具链分别完成 Debug/Release configure、build 和全量测试。
 - 构建并启动 Docker 运行环境，执行健康检查和关键 API smoke test；确认 `tzdata`、迁移和运行时配置齐全。
 
 #### P1-S12-07 文档定稿与分支交付
 
-状态：**等待 Provider 外部复测返回**。Windows 侧接收后验证签名与证据，执行最终本地回归、全量设计一致性 review 和 Phase 1 签署。
+状态：**已完成（2026-07-16）**。Windows 已接收并核验返回对象与证据，完成 Debug/Release 349/349、全量设计一致性 review、交付记录归档和 Phase 1 签署。
 
-- 回写 `Docs/Development/tasks.md`、测试基线、环境记录和 `Phase_1_S12_Delivery_Summary.md`。
+- 回写 `Docs/Development/tasks.md`、测试基线、环境记录和 `Docs/Archive/Phase_1_S12_Delivery_Summary.md`。
 - 已验收的阶段交付总结按文档规范归档；未完成项继续留在 Tasks，不以说明文字代替验收。
 - 审核架构、代码和 API 契约；存在偏差时先明确设计结论，再修代码或文档。
 - 所有阻断项通过后，才允许将完整 Phase 1 分支合并到 `main`。

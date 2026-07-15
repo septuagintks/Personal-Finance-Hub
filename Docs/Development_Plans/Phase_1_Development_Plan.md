@@ -3,7 +3,7 @@
 Version: 1.1
 Backend: C++23
 Architecture: Clean Architecture + Lightweight DDD
-Status: Active
+Status: Complete
 
 ---
 
@@ -43,13 +43,9 @@ Phase 1 的具体开发顺序、目录结构、实现步骤和测试收尾清单
 
 ### 1.4 当前进度
 
-截至 2026-07-15，P1-S01 至 P1-S11 已完成实现与全量 review，S12 原 Linux/PostgreSQL/Drogon/Docker 门禁也已形成通过记录。随后外部汇率实现改为 FreeCurrencyAPI 主源与 exchangerate.fun 整批备用源；Windows PostgreSQL OFF Debug/Release 349/349 和脱敏真实端点契约探测已通过。下一步由 macOS/Colima 在新提交上复测真实主备 HTTPS、production ON Debug/Release、Scheduler 与 Docker，结果返回后由 Windows 完成 S12-07 与 Phase 1 签署。
+截至 2026-07-16，P1-S01 至 P1-S12 已全部完成。最终提交链通过 Windows PostgreSQL OFF Debug/Release 349/349、Linux production ON Debug/Release 351/351、Linux PostgreSQL OFF 349/349、真实 PostgreSQL/Drogon/Scheduler/Outbox、FreeCurrencyAPI 主源、exchangerate.fun 整批备用、双源失败历史降级和 Docker 冷构建/runtime 门禁。Windows 已完成 S12-07 全量设计一致性 review、文档归档与阶段签署；当前 Phase 1 分支满足合并到 `main` 的条件。
 
-以下当前修正项尚未完成，不能由 Windows mock 或旧提交的外部门禁替代：
-
-- 新 Provider 在真实 Drogon transport 下的 FreeCurrencyAPI 成功路径与主源失败后 exchangerate.fun 整批切换。
-- 同一新提交上的 Linux production ON Debug/Release、Scheduler/PostgreSQL runtime 和 Docker 冷构建/启动回归。
-- macOS 返回后的 Windows S12-07 全量设计一致性 review、文档定稿与分支签署。
+完整加密货币定价源不属于 Phase 1。本阶段保留明确失败与完整历史快照降级语义，后续实现已转入 Phase 2 计划。
 
 ---
 
@@ -173,7 +169,7 @@ Presentation
 - `DrogonUnitOfWork` 与 `OutboxPublisherJob`。
 - Repository 集成测试。
 
-当前状态：迁移脚本、接口、In-Memory 事务语义、17 个 integration scenarios、核心 PostgreSQL Repository / `DrogonUnitOfWork`、production composition root、双 DbClient 与 S11 `OutboxPublisherJob` 均已完成实现和本地门禁；真实完整 fixture 与后台运行期验收统一在 P1-S12 签署。
+完成状态：迁移脚本、接口、In-Memory 事务语义、17 个 integration scenarios、核心 PostgreSQL Repository / `DrogonUnitOfWork`、production composition root、双 DbClient 与 S11 `OutboxPublisherJob` 均已实现；真实完整 fixture 与后台运行期验收已在 P1-S12 签署通过。
 
 验收标准：
 

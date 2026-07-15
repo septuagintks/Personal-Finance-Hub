@@ -26,17 +26,6 @@ Docs/
 │   └── 16_Testing_Strategy.md
 │
 ├── Development/
-│   ├── Phase_1_S01-S03_Delivery_Summary.md
-│   ├── Phase_1_S04_Delivery_Summary.md
-│   ├── Phase_1_S05_Delivery_Summary.md
-│   ├── Phase_1_S06_Delivery_Summary.md
-│   ├── Phase_1_S07_Delivery_Summary.md
-│   ├── Phase_1_S08_Delivery_Summary.md
-│   ├── Phase_1_S09_Delivery_Summary.md
-│   ├── Phase_1_S10_Delivery_Summary.md
-│   ├── Phase_1_S11_Delivery_Summary.md
-│   ├── Phase_1_S12_Delivery_Summary.md
-│   ├── Phase_1_S10_PostgreSQL_Persistence_Validation_Report.md
 │   └── tasks.md
 │
 ├── Development_Plans/
@@ -62,7 +51,18 @@ Docs/
     ├── Config_Env_Overlay_Design.md
     ├── Documents_Optimize_1.md
     ├── Documents_Optimize_2.md
-    └── Documents_Optimize_3.md
+    ├── Documents_Optimize_3.md
+    ├── Phase_1_S01-S03_Delivery_Summary.md
+    ├── Phase_1_S04_Delivery_Summary.md
+    ├── Phase_1_S05_Delivery_Summary.md
+    ├── Phase_1_S06_Delivery_Summary.md
+    ├── Phase_1_S07_Delivery_Summary.md
+    ├── Phase_1_S08_Delivery_Summary.md
+    ├── Phase_1_S09_Delivery_Summary.md
+    ├── Phase_1_S10_Delivery_Summary.md
+    ├── Phase_1_S10_PostgreSQL_Persistence_Validation_Report.md
+    ├── Phase_1_S11_Delivery_Summary.md
+    └── Phase_1_S12_Delivery_Summary.md
 ```
 
 说明：

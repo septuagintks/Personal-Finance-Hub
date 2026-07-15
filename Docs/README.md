@@ -31,18 +31,7 @@ Docs/
 │   └── 16_Testing_Strategy.md          # 测试策略与规范
 │
 ├── Development/                        # 开发过程管理
-│   ├── Phase_1_S01-S03_Delivery_Summary.md # Phase 1 S01-S03 工程骨架交付记录
-│   ├── Phase_1_S04_Delivery_Summary.md # Phase 1 S04 基础类型与错误模型交付记录
-│   ├── Phase_1_S05_Delivery_Summary.md # Phase 1 S05 金融原语交付记录
-│   ├── Phase_1_S06_Delivery_Summary.md # Phase 1 S06 领域模型与领域服务交付记录
-│   ├── Phase_1_S07_Delivery_Summary.md # Phase 1 S07 数据库迁移与持久化基础交付记录
-│   ├── Phase_1_S08_Delivery_Summary.md # Phase 1 S08 Repository 与 Unit of Work 交付记录
-│   ├── Phase_1_S09_Delivery_Summary.md # Phase 1 S09 Application Use Cases 交付记录
-│   ├── Phase_1_S10_Delivery_Summary.md # Phase 1 S10 本地交付记录
-│   ├── Phase_1_S11_Delivery_Summary.md # Phase 1 S11 Outbox 与后台任务交付记录
-│   ├── Phase_1_S12_Delivery_Summary.md # Phase 1 S12 测试收尾与外部交接记录
-│   ├── Phase_1_S10_PostgreSQL_Persistence_Validation_Report.md # V3 外部复测最终报告
-│   └── tasks.md                        # 待办任务跟踪
+│   └── tasks.md                        # Phase 1 最终任务与签署记录
 │
 ├── Development_Plans/                  # 阶段性开发计划
 │   ├── Overall_Development_Plan.md     # 三阶段总开发计划大纲
@@ -67,7 +56,18 @@ Docs/
     ├── Config_Env_Overlay_Design.md    # 配置环境变量覆盖设计与实现记录
     ├── Documents_Optimize_1.md         # 优化记录 1 (安全、多币种、I18n、异常、迁移)
     ├── Documents_Optimize_2.md         # 优化记录 2 (偏好存储、服务命名、手续费、事件、报表)
-    └── Documents_Optimize_3.md         # 优化记录 3 (文档治理、任务清单、计划归档)
+    ├── Documents_Optimize_3.md         # 优化记录 3 (文档治理、任务清单、计划归档)
+    ├── Phase_1_S01-S03_Delivery_Summary.md # Phase 1 S01-S03 交付归档
+    ├── Phase_1_S04_Delivery_Summary.md # Phase 1 S04 交付归档
+    ├── Phase_1_S05_Delivery_Summary.md # Phase 1 S05 交付归档
+    ├── Phase_1_S06_Delivery_Summary.md # Phase 1 S06 交付归档
+    ├── Phase_1_S07_Delivery_Summary.md # Phase 1 S07 交付归档
+    ├── Phase_1_S08_Delivery_Summary.md # Phase 1 S08 交付归档
+    ├── Phase_1_S09_Delivery_Summary.md # Phase 1 S09 交付归档
+    ├── Phase_1_S10_Delivery_Summary.md # Phase 1 S10 交付归档
+    ├── Phase_1_S10_PostgreSQL_Persistence_Validation_Report.md # V3 外部复测归档
+    ├── Phase_1_S11_Delivery_Summary.md # Phase 1 S11 交付归档
+    └── Phase_1_S12_Delivery_Summary.md # Phase 1 最终签署归档
 ```
 
 计划类文档按需创建并跟随任务推进维护：`Docs/Development/Documents_Optimize_Plan.md` 仅在有正在设计中的文档优化方案时创建；当前文档优化事项已归档到 `Docs/Archive/Documents_Optimize_3.md`。开发阶段交付记录在开发中存放于 `Docs/Development/`，推荐命名为 `Phase_<N>_S<start>-S<end>_Delivery_Summary.md`，验收完成后归档到 `Docs/Archive/`。总体路线以 [Development_Plans/Overall_Development_Plan.md](Development_Plans/Overall_Development_Plan.md) 为准，阶段性开发计划以 `Docs/Development_Plans/Phase_N_Development_Plan.md` 为准，开发任务跟踪以 [Development/tasks.md](Development/tasks.md) 为准。
@@ -84,7 +84,7 @@ Docs/
 6. **全局异常拦截**：通过 Drogon 全局异常处理器捕获非预期异常，生成唯一 `TraceId`，在保障生产环境安全（不泄露敏感信息）的同时提供完整的服务端日志追溯。
 7. **受控后台运行时**：Drogon timer 只触发有界 worker 入队；Outbox 使用行级租约，汇率刷新和认证清理使用 PostgreSQL 任务租约，并统一由 `JobManager` 管理启动与优雅退出。
 
-当前进度（2026-07-15）：P1-S12 原 Linux/PostgreSQL/Drogon/Docker 基线已完成，随后汇率外部源改为 FreeCurrencyAPI 主源与 exchangerate.fun 整批备用源。新实现已通过 Windows Debug/Release 349/349、主源真实成功和“主源 422 后备用源完整覆盖”脱敏契约探测；仍需在 macOS/Colima 对同一新提交复测真实 Drogon HTTPS、production ON Debug/Release、Scheduler 与 Docker。结果返回并完成 S12-07 前，Phase 1 仍未最终交付。
+当前进度（2026-07-16）：P1-S01 至 P1-S12 已全部完成。最终提交链通过 Windows PostgreSQL OFF Debug/Release 349/349、Linux production ON Debug/Release 351/351、真实 PostgreSQL/Drogon/Scheduler/Outbox、FreeCurrencyAPI 主源、exchangerate.fun 整批备用、双源失败历史降级和 Docker 冷构建/runtime 门禁。S12-07 全项目一致性 review 与文档归档已完成，Phase 1 分支满足合并到 `main` 的条件。
 
 ---
 
@@ -105,4 +105,4 @@ Docs/
 1. **阅读顺序推荐**：先看 [Architecture/01_Technical_Architecture.md](Architecture/01_Technical_Architecture.md) 和 [Architecture/07_Workflow_and_Lifecycle_Design.md](Architecture/07_Workflow_and_Lifecycle_Design.md)，再看 [Architecture/04_Money_Currency_System_Design.md](Architecture/04_Money_Currency_System_Design.md)、[Architecture/06_Service_and_Use_Case_Design.md](Architecture/06_Service_and_Use_Case_Design.md)、[Architecture/08_Exchange_Rate_System_Design.md](Architecture/08_Exchange_Rate_System_Design.md)，最后补齐 [Architecture/02_Database_Design.md](Architecture/02_Database_Design.md) 与 [Architecture/05_Repository_and_Persistence_Design.md](Architecture/05_Repository_and_Persistence_Design.md)。
 2. **阶段计划**：进入代码实现前，先阅读 [Development_Plans/Overall_Development_Plan.md](Development_Plans/Overall_Development_Plan.md) 与对应 Phase 开发计划，并以 [Development/tasks.md](Development/tasks.md) 跟踪进度。
 3. **开发规范**：新文档或修改文档时，请遵守 [Standards/Documents_Format_Standard.md](Standards/Documents_Format_Standard.md)；目录树变更时，请同步更新 [Guides/Directory_Guidance.md](Guides/Directory_Guidance.md)。
-4. **Linux 工作流**：最终部署目标为 Linux；Phase 1 开发期间按 [Guides/Linux_Development_Workflow.md](Guides/Linux_Development_Workflow.md) 保持可复现命令，并在 P1-S12 由另一台机器完成 Linux、Docker 与真实 PostgreSQL 阻断门禁。
+4. **Linux 工作流**：最终部署目标为 Linux；按 [Guides/Linux_Development_Workflow.md](Guides/Linux_Development_Workflow.md) 保持可复现命令。Phase 1 的 Linux、Docker 与真实 PostgreSQL 阻断门禁结果见 [Archive/Phase_1_S12_Delivery_Summary.md](Archive/Phase_1_S12_Delivery_Summary.md)。

@@ -253,4 +253,4 @@ Presentation → Application → Domain ← Infrastructure
 
 - 项目文档：`Docs/`
 - 任务跟踪：`Docs/Development/tasks.md`
-- 阶段交付记录：`Docs/Development/Phase_1_S01-S03_Delivery_Summary.md`
+- Phase 1 交付归档：`Docs/Archive/Phase_1_S12_Delivery_Summary.md`

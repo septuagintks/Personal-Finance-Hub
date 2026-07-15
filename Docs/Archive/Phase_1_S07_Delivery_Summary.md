@@ -206,4 +206,4 @@ DELETE FROM exchange_rates WHERE source = 'Test';             -- 应失败
 - [Database Migration Guide](../Guides/Database_Migration_Guide.md)
 - [Phase 1 Detailed Plan](../Development_Plans/Phase_1/Phase_1_Detailed_Development_Plan.md)
 - [S08 Delivery Summary](Phase_1_S08_Delivery_Summary.md)
-- [tasks](tasks.md)
+- [tasks](../Development/tasks.md)

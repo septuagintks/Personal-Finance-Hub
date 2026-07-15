@@ -2,7 +2,7 @@
 
 **更新日期**: 2026-07-16
 **阶段**: P1-S12 Phase 1 测试收尾与文档回写
-**当前状态**: S12-01 至 S12-06 及 FreeCurrencyAPI/exchangerate.fun macOS/Colima corrective round 已完成；等待 Windows 执行 S12-07
+**当前状态**: S12-01 至 S12-07 全部完成；Phase 1 已签署并具备合并条件
 
 ---
 
@@ -17,7 +17,7 @@
 - Provider TLS 修复与 macOS 测试对象：`ef66d995f0f9f51e7936f43af9ddc9d524fc6e56`（`fix: use TLS-capable exchange rate transport`）。
 - 所有测试数据库、容器、网络和凭据均为一次性本地资源；未保存认证响应、Token、数据库转储或原始日志。
 
-原轮次完成 P1-S12-02 至 S12-06；当前 corrective round 只替换外部汇率 Provider 并复测受影响门禁。S12-07、`main` 合并和 Phase 2 仍不在本提交范围。
+原轮次完成 P1-S12-02 至 S12-06；corrective round 只替换外部汇率 Provider 并复测受影响门禁。Windows 已在返回提交上完成 S12-07 最终回归、全项目一致性 review、文档定稿与 Phase 1 签署；`main` 合并和 Phase 2 开发仍不在本记录范围。
 
 ---
 
@@ -164,16 +164,17 @@ Provider corrective round 再次从当前 `Dockerfile` 执行 `--no-cache --pull
 
 ---
 
-## 9. 返回条件
+## 9. 最终签署
 
-P1-S12-02 至 S12-06 原基线已经形成可追溯结果。Provider corrective round 返回后，Windows S12-07 应：
+P1-S12-02 至 S12-06 原基线和 Provider corrective round 均已形成可追溯结果。Windows S12-07 已完成：
 
-1. fast-forward 并验证 macOS 返回提交的 GPG 签名与固定测试对象。
-2. 确认新提交上的 Linux production ON Debug/Release、真实主备 HTTPS、Scheduler 入库 source 和 Docker 均通过。
-3. 重跑 Windows PostgreSQL OFF 门禁并完成 Provider、配置、文档和全项目一致性 review。
-4. 定稿 Tasks 与交付文档，完成 Phase 1 最终签署和合并决策。
+1. 主仓库 fast-forward 到 `9c470dd1d7c75ffc6848a741c1b8ff186620aa18`，父链包含 `ef66d995f0f9f51e7936f43af9ddc9d524fc6e56`。两次提交均携带预期 macOS key id；macOS 已记录 `Good signature`，Windows 因缺少对应公钥只验证了提交对象、父链、key id 与远端一致。
+2. Linux production ON Debug/Release、真实主备 HTTPS、Scheduler 入库 source、双源失败历史降级和 Docker 结果全部满足返回条件。
+3. Windows Debug / PostgreSQL OFF 通过 `quality_check.ps1` 与 349/349 CTest；独立 Release 配置、编译和 349/349 CTest 通过。
+4. Provider、配置、安全边界、架构依赖、OpenAPI、迁移、Scheduler/Outbox、Docker 与文档完成全项目一致性 review，未发现新的产品缺陷或设计偏离。
+5. Tasks 与交付文档已定稿，Phase 1 阶段记录已归档；测试 API key 已轮换。
 
-在 S12-07 完成前，Phase 1 仍不得宣告最终完成或合并到 `main`。
+结论：Phase 1 已完成并满足合并到 `main` 的门槛。本结论不表示 feature 分支已经实际合并；合并仍由维护者单独确认。
 
 ---
 
@@ -207,4 +208,4 @@ P1-S12-02 至 S12-06 原基线已经形成可追溯结果。Provider corrective 
 3. EUR + ETH 双源失败且历史完整：无新快照，保留 2 条预置历史；失败事件 provider 为 `FreeCurrencyAPI/exchangerate.fun`、`historicalAvailable=true`，事件 published，活跃 lease 为 0。
 4. EUR + ETH 双源失败且历史不完整：无新快照，仅保留 1 条预置 EUR 历史；失败事件 provider 相同、`historicalAvailable=false`，事件 published，活跃 lease 为 0。
 
-所有场景与最终 Docker runtime 的日志扫描均未发现 key、Authorization、完整 query URL、response body 或临时诊断标记。API key 轮换状态：待轮换；维护者应在本轮验证后撤销或轮换测试 key，仓库中不得记录任何可关联材料。
+所有场景与最终 Docker runtime 的日志扫描均未发现 key、Authorization、完整 query URL、response body 或临时诊断标记。API key 轮换状态：已轮换；仓库中未记录任何可关联材料。

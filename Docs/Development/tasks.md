@@ -3,7 +3,7 @@
 Version: 2.0
 Backend: C++23
 Architecture: Clean Architecture + Lightweight DDD
-Status: Active
+Status: Complete
 
 ---
 
@@ -30,9 +30,9 @@ Status: Active
 
 ### 2.1 近期顺序
 
-1. macOS 返回 Provider corrective round 的签名提交、Linux/HTTPS/Scheduler/Docker 证据与交接所有权。
-2. Windows 验证返回签名，执行 S12-07 全量 review 与最终本地回归。
-3. 完成 Phase 1 文档定稿与分支交付；S12-07 签署前不合并 `main`。
+1. P1-S12-07 已完成，Phase 1 分支满足交付与合并门槛。
+2. 由维护者确认后，将 `feature/phase1-foundation` 合并到 `main`。
+3. 合并完成后，在独立 Phase 2 分支接续产品化开发与延期能力。
 
 ### 2.2 当前前置条件
 
@@ -44,10 +44,11 @@ Status: Active
 - request RLS DbClient 与后台 BYPASSRLS/default-read-only DbClient 已分离装配，并通过连接池复用、并发、故障注入、数值边界与容器后置权限断言。
 - P1-S11-01 至 S11-07 已完成本地实现与全量 review；Windows GCC 16 / PostgreSQL OFF 当前为 292 个 unit/use-case、17 个 In-Memory integration、28 个 framework-neutral API 和 4 个静态门禁，共 341/341。
 - S11 后台写任务只使用普通 request-role client 访问非 RLS 表；BYPASSRLS `background_db` 仅用于 `PostgresActiveCurrencyQuery`。该权限边界已在 P1-S12 fixture 与容器中通过真实角色验证。
-- P1-S12-01 已在两个全新构建目录完成 Windows GCC 16.1 / PostgreSQL OFF Debug 与 Release：两者均 104/104 build steps、341/341 CTest，三类 production compile gate 通过；详细结果见 `Docs/Development/Phase_1_S12_Delivery_Summary.md`。
+- P1-S12-01 已在两个全新构建目录完成 Windows GCC 16.1 / PostgreSQL OFF Debug 与 Release：两者均 104/104 build steps、341/341 CTest，三类 production compile gate 通过；详细结果见 `Docs/Archive/Phase_1_S12_Delivery_Summary.md`。
 - S12-02 至 S12-06 原基线已在 macOS/Colima 完成 production ON 343/343、真实 PostgreSQL/Drogon/Outbox/Scheduler 和 Docker 验证。
 - Provider 修正后的 Windows PostgreSQL OFF Debug/Release 均为 349/349；新增测试固定 FreeCurrencyAPI 严格响应、exchangerate.fun superset、外部 rate Half-Even 归一、整批切换、双源失败脱敏及新环境变量优先级。
-- Provider corrective round 已在 `ef66d99` 完成 Linux production ON Debug/Release 351/351、PostgreSQL OFF 349/349、四个真实 Scheduler 场景和新 Docker 冷构建/runtime；测试 key 仍待维护者轮换。
+- Provider corrective round 已在 `ef66d99` 完成 Linux production ON Debug/Release 351/351、PostgreSQL OFF 349/349、四个真实 Scheduler 场景和新 Docker 冷构建/runtime；测试 API key 已轮换。
+- Windows 已在返回提交 `9c470dd` 上完成 P1-S12-07：Debug/Release PostgreSQL OFF 均为 349/349，质量检查、三类 production compile gate、文档检查和全项目设计一致性 review 均通过。
 
 ---
 
@@ -58,7 +59,7 @@ Status: Active
 - [x] 编写 Phase 1 开发计划文档 `Docs/Development_Plans/Phase_1_Development_Plan.md` <!-- id: 1 -->
 - [x] 编写 Phase 1 细化子计划文档 `Docs/Development_Plans/Phase_1/Phase_1_Detailed_Development_Plan.md` <!-- id: 2 -->
 - [x] 根据 Phase 1 细化子计划评审结果，回写并细化 P1-S10 至 P1-S12 的执行顺序、产物与阻断门禁 <!-- id: 3 -->
-- [ ] 在 Phase 1 每个里程碑完成后回写任务状态和风险记录，保持计划与实际进度同步 <!-- id: 4 -->
+- [x] 在 Phase 1 每个里程碑完成后回写任务状态和风险记录，保持计划与实际进度同步 <!-- id: 4 -->
 
 ### 3.2 工程骨架与本地开发 (Project Foundation)
 
@@ -205,17 +206,19 @@ Status: Active
 - [x] 报表命名对齐：Phase 1 以 `ReportQueryService` 承载最小报表读路径，不另设 `GenerateMonthlyReportUseCase` <!-- id: 54 -->
 - [x] DTO 金额符号说明：API 设计文档已明确业务 magnitude、signed Adjustment 与存储层带符号金额的边界 <!-- id: 55 -->
 - [x] `TransferResultDto` 与 Transaction mapper 已统一对外金额口径：Transfer 双边/手续费为正数 magnitude，Income/Expense 由 type 表达方向，Adjustment 保留 signed 语义 <!-- id: 56 -->
-- [ ] 接入覆盖完整加密货币白名单的专用定价源；当前 FreeCurrencyAPI 不覆盖 TWD/加密货币，exchangerate.fun 可补 TWD/BTC 但缺 ETH、USDT、USDC、BNB、XRP、ADA、DOGE、SOL、TRX、MATIC、DOT、WBTC。完成前，包含这些缺失币种的批次按明确失败进入历史汇率降级，不拆批混源 <!-- id: 59 -->
-
 ### 5.4 Phase 1 外部环境阻断门禁
 
-- [~] 在另一台机器执行 P1-S12：Linux Debug/Release 构建、Docker 服务启动、PostgreSQL 16+ 空库迁移、真实 Repository/UoW/RLS/并发/数值边界、API smoke、Outbox/Scheduler 测试，并记录 commit hash、环境版本、命令和结果 <!-- id: 57 -->
+- [x] 在另一台机器执行 P1-S12：Linux Debug/Release 构建、Docker 服务启动、PostgreSQL 16+ 空库迁移、真实 Repository/UoW/RLS/并发/数值边界、API smoke、Outbox/Scheduler 测试，并记录 commit hash、环境版本、命令和结果 <!-- id: 57 -->
   - S12-02 至 S12-06：Colima Ubuntu ARM64 production ON Debug/Release 343/343、V1-V6 与 legacy 升级、12 个 PostgreSQL scenario、真实 Drogon API、Outbox/Scheduler、双角色和最终 Docker 镜像均 `PASS`；PostgreSQL OFF 341/341 回归通过。
   - Provider corrective round：`ef66d99` 上 production ON Debug/Release 351/351、PostgreSQL OFF 349/349；真实 FreeCurrencyAPI 主源、exchangerate.fun 整批备用、双源失败完整/不完整历史四个场景均 `PASS`。
-  - 新 Docker 冷构建/runtime `PASS`：image `sha256:86d3ef5d0c29a26fc4a4d13548ba1969bf4302d0509aad27ae66ddf64c7fed1e`，healthy/non-root、双角色、8/8 FORCE RLS、Outbox/lease、唯一 JSON Content-Type、SIGTERM exit 0、无 OOM。仅 Windows S12-07 尚未执行，因此任务保持部分完成。
+  - 新 Docker 冷构建/runtime `PASS`：image `sha256:86d3ef5d0c29a26fc4a4d13548ba1969bf4302d0509aad27ae66ddf64c7fed1e`，healthy/non-root、双角色、8/8 FORCE RLS、Outbox/lease、唯一 JSON Content-Type、SIGTERM exit 0、无 OOM。Windows S12-07 已在返回提交上完成最终回归与签署。
 
 - [x] V3 修复后在 PostgreSQL 16.14 + Flyway OSS 10.22.0 环境对 V1-V3 执行真实空库 `migrate` / `info` / `validate`、第二次 no-op、种子数据断言和完整 CTest，确认 28 处 enum cast 修复有效 <!-- id: 58 -->
   - 外部复测提交 `4621f69`：33 条币种、55 条分类模板、27 root + 28 child、40 expense + 15 income 全部符合预期，254/254 CTest 通过；该结论只关闭迁移缺陷，不替代 #46 的真实 Repository/UoW/RLS 验收。
+
+### 5.5 Phase 2 移交
+
+- [x] 明确完整加密货币定价源不属于 Phase 1：当前 FreeCurrencyAPI 不覆盖 TWD/加密货币，exchangerate.fun 可补 TWD/BTC 但缺 ETH、USDT、USDC、BNB、XRP、ADA、DOGE、SOL、TRX、MATIC、DOT、WBTC；实现任务已转入 `Phase_2_Development_Plan.md`，完成前继续按明确失败进入历史汇率降级，不拆批混源 <!-- id: 59 -->
 
 ---
 
@@ -256,7 +259,7 @@ S10 报告 §4.2 暴露：V3 中 7 段二级分类 `INSERT ... SELECT ... UNION 
 3. 在根 `CMakeLists.txt` 用 `add_test(migration_enum_casts ...)` 挂入 CTest，离线可跑，无需 PostgreSQL/Flyway/Docker；带 `migrations` / `sql` 标签。
 4. Mutation 验证：临时把一行 `'expense'::category_board` 改回 `'expense'`，门禁 FAIL；还原后 PASS（不漏报、不误报）。
 
-后续已在外部 macOS ARM64 + Colima Ubuntu 24.04 环境完成真实复测：PostgreSQL 16.14 空库 V1-V3、Flyway `migrate/info/validate`、第二次 no-op、全部种子断言与 254/254 CTest 均通过。详细结果见 `Phase_1_S10_PostgreSQL_Persistence_Validation_Report.md`。
+后续已在外部 macOS ARM64 + Colima Ubuntu 24.04 环境完成真实复测：PostgreSQL 16.14 空库 V1-V3、Flyway `migrate/info/validate`、第二次 no-op、全部种子断言与 254/254 CTest 均通过。详细结果见 `Docs/Archive/Phase_1_S10_PostgreSQL_Persistence_Validation_Report.md`。
 
 新增跟踪项：
 - 当前机器无可用 WSL 发行版或 Docker，未执行当前 HEAD 的 Linux 测试；仅确认 Windows GCC 16 的 CMake tzdb 探针通过。合并 Phase 分支前必须按 `Docs/Guides/Linux_Development_Workflow.md` 在安装 `tzdata` 的 Linux 环境重新构建并全量测试。
@@ -285,7 +288,7 @@ S10 报告 §4.2 暴露：V3 中 7 段二级分类 `INSERT ... SELECT ... UNION 
 - `DrogonUnitOfWork` 改用 Transaction 生命周期 + commit callback 确认提交；异常、outbox 失败和 action error 均回滚并清空事件。
 - PostgreSQL 流水写入补账户币种、分类 board、NUMERIC 与 tenant 校验；Transfer Adjustment 使用新 group ID，危险删除覆盖 tag relations、第三方手续费账户与完整聚合。
 - 余额缓存实现 `MAX(version)` + 最新流水 ID 双校验、同事务 rebuild/UPSERT 与全写路径失效。
-- S10-03 持久化实现已由 S10-04 composition root 接入；真实 Drogon ABI、PostgreSQL fixture、RLS/锁/事务/NUMERIC 行为仍由 #46 与 S12 阻断。
+- S10-03 当时的真实 Drogon ABI、PostgreSQL fixture、RLS/锁/事务/NUMERIC 阻断项，后续已由 #46 与 P1-S12 全部关闭。
 
 ---
 
@@ -295,9 +298,9 @@ S10 报告 §4.2 暴露：V3 中 7 段二级分类 `INSERT ... SELECT ... UNION 
 - 注册 bootstrap UoW 支持 User INSERT 后在同一 Transaction 上 `bind_tenant_once`，Preference、默认分类、refresh hash、同步 audit 和 outbox 任一失败均整体回滚。
 - 通用 HTTP 边界已覆盖严格 JSON type/字段、RFC 3339、稳定错误映射、TraceId header/body 和异常脱敏；Application/Presentation 已转为静态库。
 - 认证已覆盖 Argon2id、OpenSSL HS256 完整 claims 校验、Refresh Token hash-only rotation、旧 token 复用整 session 撤销、logout `iss+jti` 黑名单。
-- 新增 V4 `revoked_sessions` 与认证 audit actions；该迁移只通过纸面/静态门禁，尚未在外部 PostgreSQL 执行。
+- 新增 V4 `revoked_sessions` 与认证 audit actions；该迁移在本检查点只通过纸面/静态门禁，后续已在 P1-S12 外部 PostgreSQL 门禁通过。
 - 专项 review 修复未知用户登录时序差异、密钥/pepper 生命周期清零、refresh 事务内 session 检查、空模板初始化和成功响应 TraceId 缺失。
-- S10-06 检查点：Windows GCC 16 Debug 构建与 294/294 CTest 通过；PostgreSQL/production bootstrap/security 三类 compile gate 通过。真实 ABI、数据库、角色权限和连接池行为继续由 #46/#57/S12 阻断。
+- S10-06 检查点：Windows GCC 16 Debug 构建与 294/294 CTest 通过；PostgreSQL/production bootstrap/security 三类 compile gate 通过。当时保留的真实 ABI、数据库、角色权限和连接池阻断项后续已由 #46/#57/P1-S12 关闭。
 
 ---
 
@@ -312,7 +315,7 @@ S10 报告 §4.2 暴露：V3 中 7 段二级分类 `INSERT ... SELECT ... UNION 
 - 配置安全终审拒绝未替换的 JWT/password pepper 模板值；可选 pepper 只允许留空或使用真实密钥，loader 与 production composition root 双层 fail fast。
 - 现行架构文档中的汇率数据库边界已统一为 `NUMERIC(20,10)`；`NUMERIC(30,10)` 只保留在 V1 迁移及 S07 历史说明中，并由 V5 收紧。
 - 当前 Windows GCC 16 / PostgreSQL OFF：272 unit/use-case + 17 In-Memory integration + 28 framework-neutral API + 4 static gates，共 321/321 PASS；PostgreSQL/production bootstrap/security compile gates PASS。
-- S10 的 V1-V5、真实 Drogon/OpenSSL/Argon2 ABI、双角色启动和核心 API smoke 已完成基础预检；完整 PostgreSQL Repository/UoW/RLS/并发/NUMERIC、连接池复用、S11 V6/runtime、应用镜像和最终发布门禁继续由 #46/#57/P1-S12 阻断。
+- S10 的 V1-V5、真实 Drogon/OpenSSL/Argon2 ABI、双角色启动和核心 API smoke 已完成基础预检；当时保留的完整 PostgreSQL Repository/UoW/RLS/并发/NUMERIC、连接池复用、S11 V6/runtime、应用镜像和最终发布门禁后续已由 #46/#57/P1-S12 关闭。
 
 ---
 
@@ -326,7 +329,7 @@ S10 报告 §4.2 暴露：V3 中 7 段二级分类 `INSERT ... SELECT ... UNION 
 - `BoundedThreadPool`、`RecurringJob`、`DrogonTimerScheduler` 与 `JobManager` 固定 Event Loop 非阻塞边界；本机重入、队列溢出、executor/lease 异常收束、软超时、启动/停止和优雅 drain 均有测试。
 - 汇率刷新和认证数据清理使用 scheduled lease；Outbox 依靠行级 claim 并行消费。过期清理覆盖 refresh token、revoked access token 和 revoked session 三张表，并以数据库 `NOW()` 判断安全记录是否真正过期。
 - Production composition root 中所有后台写 adapter 使用普通 request-role DbClient；BYPASSRLS/default-read-only client 仍只注入跨租户活跃币种查询。
-- Windows GCC 16 Debug、PostgreSQL OFF 全量 341/341 通过；PostgreSQL adapter、production bootstrap 和 security compile gates 通过。V6 与真实 runtime 继续由 #57/P1-S12 阻断。
+- Windows GCC 16 Debug、PostgreSQL OFF 全量 341/341 通过；PostgreSQL adapter、production bootstrap 和 security compile gates 通过。当时保留的 V6 与真实 runtime 阻断项后续已由 #57/P1-S12 关闭。
 
 ---
 
@@ -336,7 +339,7 @@ S10 报告 §4.2 暴露：V3 中 7 段二级分类 `INSERT ... SELECT ... UNION 
 - Windows `10.0.22631.6060` x64、GCC 16.1、CMake 4.3.2、Ninja 1.13.2；Debug 与 Release 分别使用全新构建目录，`PFH_BUILD_POSTGRESQL=OFF`。
 - Debug：configure PASS、104/104 build steps、341/341 CTest；Release：configure PASS、104/104 build steps、341/341 CTest。
 - 两个配置均覆盖 292 unit/use-case、17 In-Memory integration、28 framework-neutral API 和 4 static gates；PostgreSQL adapter、production bootstrap 与 production security compile gate 均编译通过。
-- 本机阶段未发现产品缺陷。真实数据库、运行时和容器阻断项继续由 #57 跟踪；Windows 结果不得替代 S12-02 至 S12-06。
+- 本机阶段未发现产品缺陷。当时由 #57 跟踪的真实数据库、运行时和容器阻断项后续已在 S12-02 至 S12-06 及 Provider corrective round 完成。
 
 ---
 
@@ -347,7 +350,7 @@ S10 报告 §4.2 暴露：V3 中 7 段二级分类 `INSERT ... SELECT ... UNION 
 - V1-V6 空库 migrate/info/validate/no-op、V1-V5 legacy processing 升级、seed/schema/8 张 FORCE RLS 断言通过。
 - 12 个真实 PostgreSQL scenario 与真实 Drogon API smoke 通过；runtime client 禁用宿主代理并连续 10/10 稳定复跑。
 - Ubuntu 24.04 多阶段镜像冷构建通过；最终 arm64 image `sha256:b2e161b3a551b06c50d8a31760397e2e15f49e70e8049e391692f4b6a5af9217`，non-root、healthy、双角色、11/11 Outbox、两个 lease 释放、SIGTERM exit 0、无 OOM。
-- 已修复 Drogon 1.8 ending ABI 与重复 Content-Type；详细缺陷、命令、环境和 blocker 见 `Phase_1_S12_Delivery_Summary.md`。
+- 已修复 Drogon 1.8 ending ABI 与重复 Content-Type；详细缺陷、命令、环境和 blocker 见 `Docs/Archive/Phase_1_S12_Delivery_Summary.md`。
 
 ---
 
@@ -368,4 +371,15 @@ S10 报告 §4.2 暴露：V3 中 7 段二级分类 `INSERT ... SELECT ... UNION 
 - Linux production ON Debug/Release 均 351/351，PostgreSQL OFF 349/349；两个 production ON 外部 target 均实际执行，Provider unit tests 13/13。
 - 真实 Scheduler：CNY/EUR 主源 2 条快照全部来自 `FreeCurrencyAPI`；CNY/TWD 整批备用 2 条全部来自 `exchangerate.fun` 且无主源部分写入；EUR/ETH 双源失败的完整与不完整历史语义均正确。
 - 新 Docker image `sha256:86d3ef5d0c29a26fc4a4d13548ba1969bf4302d0509aad27ae66ddf64c7fed1e`，36,770,560 bytes；真实主源刷新、11/11 Outbox、lease 释放、双角色、8/8 FORCE RLS、唯一 JSON Content-Type、non-root、healthy、SIGTERM exit 0 和无 OOM 均通过。
-- 所有日志与仓库扫描均无 key、Authorization、完整 query URL、response body 或临时诊断材料。测试 API key 状态为待轮换，Windows S12-07 仍是 Phase 1 最终签署前置条件。
+- 所有日志与仓库扫描均无 key、Authorization、完整 query URL、response body 或临时诊断材料。测试 API key 状态为已轮换。
+
+---
+
+## 16. P1-S12-07 最终签署记录
+
+- Windows 已 fast-forward 到 macOS 返回提交 `9c470dd1d7c75ffc6848a741c1b8ff186620aa18`；父链包含 TLS transport 修复 `ef66d995f0f9f51e7936f43af9ddc9d524fc6e56`，主仓库接收时与远端同哈希且工作区干净。
+- 两个返回提交均携带预期 macOS key id `81BFB01482975987`。Windows 当前密钥环缺少该公钥，无法独立建立信任；macOS 返回证据已记录两次 `git verify-commit` 为 `Good signature`，提交哈希、父链、主题和远端均一致。
+- Windows Debug / PostgreSQL OFF 通过 `quality_check.ps1` 与 349/349 CTest；独立 Release 配置、编译与 349/349 CTest 通过。Release 仅复用项目锁定版本的 FetchContent 源码，未复用 Debug 二进制。
+- 最终 review 覆盖 Clean Architecture 依赖边界、金融十进制路径、Provider 整批主备、配置与密钥注入、Scheduler/Outbox、PostgreSQL source 语义、OpenAPI、迁移、Docker 与文档状态；未发现新的产品缺陷或设计偏离。
+- 全部 Phase 1 交付记录已按规范移入 `Docs/Archive/`。完整加密货币定价源作为已知能力边界转入 Phase 2，不阻断 Phase 1 签署。
+- 结论：Phase 1 已完成并满足合并到 `main` 的门槛；本记录不表示分支已经实际合并。

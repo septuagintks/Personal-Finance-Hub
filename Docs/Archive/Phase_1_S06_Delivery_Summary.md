@@ -235,4 +235,4 @@ tasks.md 已勾选：#12、#21、#22、#23、#24、#25、#26、#27。
 - [金额与货币系统设计](../Architecture/04_Money_Currency_System_Design.md)
 - [领域服务与用例设计](../Architecture/06_Service_and_Use_Case_Design.md)
 - [Phase 1 详细开发计划](../Development_Plans/Phase_1/Phase_1_Detailed_Development_Plan.md)
-- [任务跟踪](tasks.md)
+- [任务跟踪](../Development/tasks.md)

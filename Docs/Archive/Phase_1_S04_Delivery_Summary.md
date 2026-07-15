@@ -540,7 +540,7 @@ Copy-Item config/config.example.json config/config.local.json
 ## 📚 相关文档
 
 - [Phase 1 详细开发计划](../Development_Plans/Phase_1/Phase_1_Detailed_Development_Plan.md) - P1-S04 章节
-- [任务跟踪](tasks.md) - 任务 #8, #9, #9a-9e
+- [任务跟踪](../Development/tasks.md) - 任务 #8, #9, #9a-9e
 - [依赖安装指南](../Guides/Dependency_Installation_Guide.md)
 - [快速参考](../Guides/Quick_Reference.md)
 

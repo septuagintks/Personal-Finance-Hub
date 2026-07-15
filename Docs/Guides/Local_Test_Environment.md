@@ -274,7 +274,7 @@ All `pfh-provider-*` containers and the dedicated network were removed after the
   current-head Linux sign-off.
 - A later external PostgreSQL 16.14/Flyway 10.22.0 run validated V1-V3 and the
   then-current 254-test baseline; see
-  `Docs/Development/Phase_1_S10_PostgreSQL_Persistence_Validation_Report.md`.
+  `Docs/Archive/Phase_1_S10_PostgreSQL_Persistence_Validation_Report.md`.
   The S10 preflight superseded that build/runtime baseline; the S12 run above now supersedes both for current Linux behavior.
 - Keep `build/` and `config/config.local.json` local.
 - Run Linux validation before phase delivery or before merging phase work back to `main`.
