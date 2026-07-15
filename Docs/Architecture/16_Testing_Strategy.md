@@ -64,7 +64,7 @@ Unit Test 不访问数据库、不启动 Drogon、不依赖网络。
 - Category board rule
 - AccountType / AccountCategory behavior
 - Outbox claim token、租约恢复、退避、dead letter 与 handler 幂等
-- OpenExchangeRates 严格响应解析和 Decimal 数值 token
+- FreeCurrencyAPI/exchangerate.fun 严格响应解析、Decimal 数值 token 与主备切换
 - 有界 worker、任务防重入、分布式 lease、认证数据清理和优雅退出
 
 重点用例：

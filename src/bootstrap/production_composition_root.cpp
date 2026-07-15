@@ -14,7 +14,7 @@
 #include "pfh/application/use_cases/refresh_exchange_rates_use_case.h"
 #include "pfh/bootstrap/database_client_factory.h"
 #include "pfh/infrastructure/external/drogon_http_transport.h"
-#include "pfh/infrastructure/external/open_exchange_rates_provider.h"
+#include "pfh/infrastructure/external/exchange_rate_providers.h"
 #include "pfh/infrastructure/persistence/audit_log_repository_impl.h"
 #include "pfh/infrastructure/persistence/auth_session_repository_impl.h"
 #include "pfh/infrastructure/persistence/drogon_unit_of_work.h"
@@ -146,13 +146,13 @@ application::VoidResult ProductionCompositionRoot::validate_config() const {
                 application::ErrorCode::ConfigurationError,
                 "Scheduler configuration is invalid"));
         }
-        if (config_.exchange_rate.provider != "openexchangerates" ||
+        if (config_.exchange_rate.provider != "freecurrencyapi" ||
             missing_or_placeholder(config_.exchange_rate.api_key) ||
             config_.exchange_rate.api_key.size() > 512 ||
             config_.exchange_rate.request_timeout <=
                 std::chrono::seconds::zero() ||
             config_.exchange_rate.request_timeout >
-                config_.scheduler.job_execution_timeout) {
+                config_.scheduler.job_execution_timeout / 2) {
             return application::err(application::Error(
                 application::ErrorCode::ConfigurationError,
                 "Production exchange-rate provider configuration is invalid"));
@@ -227,15 +227,27 @@ application::VoidResult ProductionCompositionRoot::initialize() {
         // All state-changing background adapters use the ordinary application
         // role against non-RLS tables. The BYPASSRLS client remains confined
         // to PostgresActiveCurrencyQuery above.
-        rate_http_transport_ =
+        primary_rate_http_transport_ =
             std::make_unique<infrastructure::DrogonHttpTransport>(
-                "https://openexchangerates.org");
-        rate_provider_ =
-            std::make_unique<infrastructure::OpenExchangeRatesProvider>(
-                *rate_http_transport_,
+                "https://api.freecurrencyapi.com");
+        fallback_rate_http_transport_ =
+            std::make_unique<infrastructure::DrogonHttpTransport>(
+                "https://api.exchangerate.fun");
+        primary_rate_provider_ =
+            std::make_unique<infrastructure::FreeCurrencyApiProvider>(
+                *primary_rate_http_transport_,
                 *clock_,
                 std::move(config_.exchange_rate.api_key),
                 config_.exchange_rate.request_timeout);
+        fallback_rate_provider_ =
+            std::make_unique<infrastructure::ExchangeRateFunProvider>(
+                *fallback_rate_http_transport_,
+                *clock_,
+                config_.exchange_rate.request_timeout);
+        rate_provider_ =
+            std::make_unique<infrastructure::FailoverExchangeRateProvider>(
+                *primary_rate_provider_,
+                *fallback_rate_provider_);
         rate_repository_ =
             std::make_unique<infrastructure::ExchangeRateRepositoryImpl>(
                 request_db_);

@@ -4,7 +4,7 @@ Version: 0.1.0-alpha
 Backend: C++23
 Architecture: Clean Architecture + Lightweight DDD
 
-Personal Finance Hub（PFH）是一个面向个人财务管理场景的聚合平台，目标是把账户、流水、转账、预算、报表、汇率和外部账单同步整合到一个高精度、可审计、可扩展的后端系统中。项目当前处于 **Phase 1 开发阶段**，P1-S01 至 P1-S11 已完成实现与全量 review，P1-S12-01 Windows 独立 Debug/Release 均通过 341/341。下一步交接 macOS/Colima Linux 执行 S12-02 至 S12-06；V1-V6、真实 HTTP/Outbox/Scheduler、完整 PostgreSQL fixture、应用 Docker 镜像与合并签署仍是阻断项。详细开发规范见 [Docs/README.md](Docs/README.md)。
+Personal Finance Hub（PFH）是一个面向个人财务管理场景的聚合平台，目标是把账户、流水、转账、预算、报表、汇率和外部账单同步整合到一个高精度、可审计、可扩展的后端系统中。项目当前处于 **Phase 1 收尾阶段**：S12 的 Linux/PostgreSQL/Drogon/Docker 基线已经通过；汇率 Provider 随后改为 FreeCurrencyAPI 主源与 exchangerate.fun 整批备用源，Windows Debug/Release 349/349 和脱敏 HTTPS 契约探测已通过。当前等待 macOS/Colima 在新提交上复测真实主备切换、Linux 生产构建、Scheduler 与 Docker，返回后执行 S12-07 最终 review 和分支签署。详细开发规范见 [Docs/README.md](Docs/README.md)。
 
 ## 主要功能
 
@@ -134,7 +134,7 @@ C++/PFH/
 - [x] REST API、认证、基础资源、流水、转账与报表的本地实现
 - [x] OpenAPI、framework-neutral API 回归与离线生产源码门禁
 - [x] P1-S11 Outbox、Scheduler、汇率 Provider 与后台任务
-- [ ] P1-S12 真实 PostgreSQL/Drogon/Linux/Docker 验收与 Phase 分支交付
+- [ ] P1-S12 新 Provider 外部复测、最终 review 与 Phase 分支交付
 
 ### Phase 2: 增强功能（计划中）
 

@@ -71,7 +71,7 @@ def main() -> int:
         "src/infrastructure/persistence/postgres_job_lease_repository.cpp"
     )
     rate_provider = read(
-        "src/infrastructure/external/open_exchange_rates_provider.cpp"
+        "src/infrastructure/external/exchange_rate_providers.cpp"
     )
     recurring_job = read(
         "src/infrastructure/scheduler/recurring_job.cpp"
@@ -337,9 +337,11 @@ def main() -> int:
     )
     require(
         "nlohmann::json::sax_parse" in rate_provider
-        and "parse_numeric_20_10" in rate_provider
+        and "domain::Decimal::parse(" in rate_provider
+        and "fits_numeric_20_10" in rate_provider
         and "duplicate object key" in rate_provider,
-        "Exchange-rate parsing must preserve numeric tokens and reject duplicate keys",
+        "Exchange-rate parsing must preserve and explicitly normalize numeric "
+        "tokens, enforce NUMERIC(20,10), and reject duplicate keys",
         failures,
     )
     require(

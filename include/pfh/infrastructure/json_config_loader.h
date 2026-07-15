@@ -252,7 +252,7 @@ public:
                 config.exchange_rate.request_timeout > std::chrono::minutes(5) ||
                 (config.scheduler.enabled &&
                  config.exchange_rate.request_timeout >
-                     config.scheduler.job_execution_timeout)) {
+                     config.scheduler.job_execution_timeout / 2)) {
                 return std::unexpected(Error(application::ErrorCode::ConfigurationError,
                     "Exchange-rate provider configuration is invalid"));
             }
@@ -306,7 +306,8 @@ private:
     /// - PFH_BACKGROUND_DB_NAME
     /// - PFH_BACKGROUND_DB_USER
     /// - PFH_BACKGROUND_DB_PASSWORD
-    /// - PFH_EXCHANGE_RATE_API_KEY / EXCHANGE_RATE_API_KEY
+    /// - PFH_FREECURRENCYAPI_API_KEY (preferred)
+    /// - PFH_EXCHANGE_RATE_API_KEY / EXCHANGE_RATE_API_KEY (legacy aliases)
     ///
     /// @param config Configuration to apply overrides to (modified in-place).
     /// @return empty on success; a ConfigurationError when a provided value is
@@ -398,7 +399,12 @@ private:
             v != nullptr && v[0] != '\0') {
             config.background_database.password = v;
         }
-        if (const char* v = env_or("PFH_EXCHANGE_RATE_API_KEY", "EXCHANGE_RATE_API_KEY")) {
+        if (const char* v = std::getenv("PFH_FREECURRENCYAPI_API_KEY");
+            v != nullptr && v[0] != '\0') {
+            config.exchange_rate.api_key = v;
+        } else if (const char* v = env_or(
+                       "PFH_EXCHANGE_RATE_API_KEY",
+                       "EXCHANGE_RATE_API_KEY")) {
             config.exchange_rate.api_key = v;
         }
         return {};

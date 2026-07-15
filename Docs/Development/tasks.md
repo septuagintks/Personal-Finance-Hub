@@ -30,9 +30,9 @@ Status: Active
 
 ### 2.1 近期顺序
 
-1. macOS 侧提交并返回 P1-S12-02 至 S12-06 的 Linux/PostgreSQL/Docker 结果。
-2. Windows 侧 fast-forward、验证 macOS 提交签名并执行 S12-07 全量 review 与本地回归。
-3. 维护者决定是否提供 OpenExchangeRates API key 补测真实 HTTPS，或接受明确延期限制。
+1. Windows 提交 FreeCurrencyAPI 主源 + exchangerate.fun 整批备用源修正及 349/349 本地证据，固定交接基线。
+2. macOS/Colima 在该提交上执行真实主源成功、主源失败后备用源整批成功、Linux production ON Debug/Release、Scheduler 与 Docker 定向复测。
+3. macOS 返回所有权后，Windows 验证签名、执行 S12-07 全量 review 与最终本地回归。
 4. 完成 Phase 1 文档定稿与分支交付；S12-07 签署前不合并 `main`。
 
 ### 2.2 当前前置条件
@@ -46,6 +46,8 @@ Status: Active
 - P1-S11-01 至 S11-07 已完成本地实现与全量 review；Windows GCC 16 / PostgreSQL OFF 当前为 292 个 unit/use-case、17 个 In-Memory integration、28 个 framework-neutral API 和 4 个静态门禁，共 341/341。
 - S11 后台写任务只使用普通 request-role client 访问非 RLS 表；BYPASSRLS `background_db` 仅用于 `PostgresActiveCurrencyQuery`。该权限边界已在 P1-S12 fixture 与容器中通过真实角色验证。
 - P1-S12-01 已在两个全新构建目录完成 Windows GCC 16.1 / PostgreSQL OFF Debug 与 Release：两者均 104/104 build steps、341/341 CTest，三类 production compile gate 通过；详细结果见 `Docs/Development/Phase_1_S12_Delivery_Summary.md`。
+- S12-02 至 S12-06 原基线已在 macOS/Colima 完成 production ON 343/343、真实 PostgreSQL/Drogon/Outbox/Scheduler 和 Docker 验证；该证据仍覆盖未受影响范围，但不能替代新 Provider 提交上的 Linux/HTTPS/Docker 复测。
+- Provider 修正后的 Windows PostgreSQL OFF Debug/Release 均为 349/349；新增测试固定 FreeCurrencyAPI 严格响应、exchangerate.fun superset、外部 rate Half-Even 归一、整批切换、双源失败脱敏及新环境变量优先级。
 
 ---
 
@@ -127,7 +129,7 @@ Status: Active
 - [x] 实现 `CreateTransactionUseCase` 与 `DeleteTransactionUseCase`，包含权限校验、事务边界和领域错误映射 <!-- id: 35 -->
 - [x] 实现 `CreateTransferUseCase`，串联账户读取、转账聚合构造、余额更新和 outbox 写入 <!-- id: 36 -->
 - [x] 实现 `RefreshExchangeRatesUseCase`，负责外部汇率拉取、降级、告警事件和非阻塞调度入口 <!-- id: 37 -->
-  - P1-S12 已验证真实 Drogon transport 生命周期、Scheduler 接线和错误路径；因未提供外部 API key，真实 OpenExchangeRates HTTPS/TLS/API 响应仍为 `BLOCKED`，由 #57/S12-07 决策。
+  - 当前 Provider 为 FreeCurrencyAPI 主源 + exchangerate.fun 整批备用源；Windows 已完成脱敏端点契约探测和 mock transport 回归，真实 Drogon/Scheduler 组合路径由 #57 的 macOS 复测关闭。
 - [x] 实现账户查询与余额查询用例，提供 API 所需 DTO，不暴露持久化模型 <!-- id: 38 -->
 - [x] 实现报表 QueryService，支持 net worth、cash flow 和 dashboard summary 的最小查询 <!-- id: 39 -->
   - 备注：cash flow 显式排除 Transfer；跨币种折算走汇率仓储（直接/反向/USD 三角），缺失汇率报错、DB 故障映射为 InfrastructureFailure（不吞错）。
@@ -203,12 +205,13 @@ Status: Active
 - [x] 报表命名对齐：Phase 1 以 `ReportQueryService` 承载最小报表读路径，不另设 `GenerateMonthlyReportUseCase` <!-- id: 54 -->
 - [x] DTO 金额符号说明：API 设计文档已明确业务 magnitude、signed Adjustment 与存储层带符号金额的边界 <!-- id: 55 -->
 - [x] `TransferResultDto` 与 Transaction mapper 已统一对外金额口径：Transfer 双边/手续费为正数 magnitude，Income/Expense 由 type 表达方向，Adjustment 保留 signed 语义 <!-- id: 56 -->
+- [ ] 接入覆盖完整加密货币白名单的专用定价源；当前 FreeCurrencyAPI 不覆盖 TWD/加密货币，exchangerate.fun 可补 TWD/BTC 但缺 ETH、USDT、USDC、BNB、XRP、ADA、DOGE、SOL、TRX、MATIC、DOT、WBTC。完成前，包含这些缺失币种的批次按明确失败进入历史汇率降级，不拆批混源 <!-- id: 59 -->
 
 ### 5.4 Phase 1 外部环境阻断门禁
 
 - [~] 在另一台机器执行 P1-S12：Linux Debug/Release 构建、Docker 服务启动、PostgreSQL 16+ 空库迁移、真实 Repository/UoW/RLS/并发/数值边界、API smoke、Outbox/Scheduler 测试，并记录 commit hash、环境版本、命令和结果 <!-- id: 57 -->
   - S12-02 至 S12-06：Colima Ubuntu ARM64 production ON Debug/Release 343/343、V1-V6 与 legacy 升级、12 个 PostgreSQL scenario、真实 Drogon API、Outbox/Scheduler、双角色和最终 Docker 镜像均 `PASS`；PostgreSQL OFF 341/341 回归通过。
-  - 剩余：真实 OpenExchangeRates HTTPS/TLS/API 因缺少维护者提供的 key 为 `BLOCKED`；Windows S12-07 终审和 Phase 1 签署未执行，因此任务保持部分完成。
+  - Provider 替换后剩余：在新签名提交上复测 production ON Debug/Release（预期 351 项）、真实 FreeCurrencyAPI 成功、强制主源失败后的 exchangerate.fun 整批成功、Scheduler 入库 source、Docker 冷构建/运行和优雅停止；Windows S12-07 尚未执行，因此任务保持部分完成。
 
 - [x] V3 修复后在 PostgreSQL 16.14 + Flyway OSS 10.22.0 环境对 V1-V3 执行真实空库 `migrate` / `info` / `validate`、第二次 no-op、种子数据断言和完整 CTest，确认 28 处 enum cast 修复有效 <!-- id: 58 -->
   - 外部复测提交 `4621f69`：33 条币种、55 条分类模板、27 root + 28 child、40 expense + 15 income 全部符合预期，254/254 CTest 通过；该结论只关闭迁移缺陷，不替代 #46 的真实 Repository/UoW/RLS 验收。
@@ -234,7 +237,7 @@ Status: Active
 
 - **item 12 事件契约**：新增强类型领域事件；payload 携带必备字段并对字符串执行 JSON 转义，`ExchangeRateRefreshed` 按返回币种对逐条发出且包含 `targetCurrency`；迁移与 outbox 示例均落 `occurred_at`。生产用例不再使用测试性 `SimpleDomainEvent`。
 - **item 14 In-Memory 事务语义**：User/Preference 仓储改为 staged 优先；Account、Preference、Category、Transaction 增加用户归属、父分类同用户同 board、分类与流水类型等外键/约束等价校验。剩余真实事务上下文与数据库约束复核归入 #46。
-- **item 15 Config / 汇率降级**：config overlay 补 `PFH_ENVIRONMENT`、`PFH_EXCHANGE_RATE_API_KEY`，非法端口改为报错；汇率降级只有在**全部请求币种对**均有历史值时才标记 fallback 可用；成功响应必须精确覆盖请求集合且不得重复，并按币种对发刷新事件。
+- **item 15 Config / 汇率降级**：config overlay 补 `PFH_ENVIRONMENT` 与汇率 key；当前优先读取 `PFH_FREECURRENCYAPI_API_KEY`，旧 `PFH_EXCHANGE_RATE_API_KEY` / `EXCHANGE_RATE_API_KEY` 仅作兼容别名。非法端口改为报错；汇率降级只有在**全部请求币种对**均有历史值时才标记 fallback 可用；成功响应必须精确覆盖请求集合且不得重复，并按币种对发刷新事件。
 - **item 10 Currency / Decimal 与 DB 边界**：Domain 币种白名单与 V2 种子统一（20 法币 + 13 加密）；用户输入在 Decimal 内部舍入前拒绝超过 `NUMERIC(20,8/10)` 的有效小数位和范围；普通流水、三种转账输入及 Repository 写入均有边界校验，转账派生金额显式按 Half-Even 舍入到 scale 8。真实 PostgreSQL 范围/舍入复核随 #46、S12 验证。
 
 ### 6.4 仍需在 S12 收尾核对（item 16）
@@ -317,7 +320,7 @@ S10 报告 §4.2 暴露：V3 中 7 段二级分类 `INSERT ... SELECT ... UNION 
 - V6 新增 Outbox processing lease、claim token、失败 handler/时间、幂等 handler receipt、User/System Audit actor 和 token-guarded scheduled job lease；迁移会先恢复 legacy `processing` 行再启用约束。
 - `PostgresOutboxRepository` 使用 `FOR UPDATE SKIP LOCKED` 批量 claim；状态更新必须匹配当前 claim token，失败按 1m/5m/15m/1h/6h 退避并在上限后进入 dead letter；PostgreSQL due/lease/退避时间统一基于数据库 `NOW()`，Application 只传时长，不依赖应用主机时钟。
 - `SupplementalAuditHandler` 只记录汇率系统事件和 dead letter 等补充事实；普通补充审计与死信使用不同 receipt identity，避免重复或漏记。
-- OpenExchangeRates adapter 通过 SAX 保留 JSON 数值 token，不经 `double`；base、请求集合、重复 key、时间戳、正数和 `NUMERIC(20,10)` 任一不符时整批拒绝。
+- 本节记录 S11 当时的 OpenExchangeRates adapter；该实现已由 FreeCurrencyAPI、exchangerate.fun 与整批 Failover Provider 替代，当前规则见第 14 节。
 - `RefreshExchangeRatesUseCase` 改为注入 `IClock`，失败事件携带真实 Provider identity；历史 fallback 仍要求全部目标币种对可用。
 - `BoundedThreadPool`、`RecurringJob`、`DrogonTimerScheduler` 与 `JobManager` 固定 Event Loop 非阻塞边界；本机重入、队列溢出、executor/lease 异常收束、软超时、启动/停止和优雅 drain 均有测试。
 - 汇率刷新和认证数据清理使用 scheduled lease；Outbox 依靠行级 claim 并行消费。过期清理覆盖 refresh token、revoked access token 和 revoked session 三张表，并以数据库 `NOW()` 判断安全记录是否真正过期。
@@ -344,3 +347,14 @@ S10 报告 §4.2 暴露：V3 中 7 段二级分类 `INSERT ... SELECT ... UNION 
 - 12 个真实 PostgreSQL scenario 与真实 Drogon API smoke 通过；runtime client 禁用宿主代理并连续 10/10 稳定复跑。
 - Ubuntu 24.04 多阶段镜像冷构建通过；最终 arm64 image `sha256:b2e161b3a551b06c50d8a31760397e2e15f49e70e8049e391692f4b6a5af9217`，non-root、healthy、双角色、11/11 Outbox、两个 lease 释放、SIGTERM exit 0、无 OOM。
 - 已修复 Drogon 1.8 ending ABI 与重复 Content-Type；详细缺陷、命令、环境和 blocker 见 `Phase_1_S12_Delivery_Summary.md`。
+
+---
+
+## 14. P1-S12 Provider 替换与 Windows 复测记录
+
+- 外部源统一为 FreeCurrencyAPI 主源与 exchangerate.fun 无密钥备用源；主源 transport、HTTP、超时或非法/不完整响应会触发原请求批次整体切换，成功批次不混用 source。
+- 两个适配器均以 SAX 保留原始 numeric token，不经 `double`；外部 feed 显式 Half-Even 归一到 10 位后再校验正数与 `NUMERIC(20,10)`，用户输入的严格 scale 拒绝规则不变。
+- 配置优先使用 `PFH_FREECURRENCYAPI_API_KEY`，旧环境变量仅作兼容别名；production root 使用两个独立 HTTPS transport，并要求两次串行 hard timeout 不超过 Scheduler 软期限。
+- 脱敏真实端点探测：FreeCurrencyAPI 支持批次返回 200 且集合精确；加入 TWD 后主源返回 422，exchangerate.fun 返回 200 并覆盖 CNY/TWD；未记录 key、URL 或响应正文。
+- Windows GCC 16.1 / PostgreSQL OFF Debug、Release configure/build 与 CTest 均 `PASS`，349/349；三类 production compile gate 和 4 个静态门禁通过。
+- 外部能力边界：主源覆盖 USD + 18 法币；备用源覆盖 20 法币 + BTC。其余 12 种加密货币定价由 #59 延期，不得伪装为本轮 Provider 已覆盖。

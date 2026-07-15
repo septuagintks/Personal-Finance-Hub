@@ -43,13 +43,13 @@ Phase 1 的具体开发顺序、目录结构、实现步骤和测试收尾清单
 
 ### 1.4 当前进度
 
-截至 2026-07-15，P1-S01 至 P1-S11 已完成实现与全量 review，P1-S12-01 Windows 独立 Debug/Release 均完成全新构建并通过 341/341。S12-02 至 S12-06 将交接至 macOS/Colima Linux，执行 V1-V6、真实 OpenExchangeRates/Outbox/Scheduler、完整 PostgreSQL fixture、应用镜像及最终 Linux/Docker 门禁；结果返回后由 Windows 完成 S12-07 与 Phase 1 签署。
+截至 2026-07-15，P1-S01 至 P1-S11 已完成实现与全量 review，S12 原 Linux/PostgreSQL/Drogon/Docker 门禁也已形成通过记录。随后外部汇率实现改为 FreeCurrencyAPI 主源与 exchangerate.fun 整批备用源；Windows PostgreSQL OFF Debug/Release 349/349 和脱敏真实端点契约探测已通过。下一步由 macOS/Colima 在新提交上复测真实主备 HTTPS、production ON Debug/Release、Scheduler 与 Docker，结果返回后由 Windows 完成 S12-07 与 Phase 1 签署。
 
-以下内容尚未完成，不能由现有 In-Memory 测试替代：
+以下当前修正项尚未完成，不能由 Windows mock 或旧提交的外部门禁替代：
 
-- Drogon/PostgreSQL 生产 Repository、`DrogonUnitOfWork`、DbClient 与 RLS 上下文接线。
-- REST API、认证、Outbox Publisher、Scheduler 和真实汇率 HTTP Provider。
-- 另一台机器上的 Linux、Docker、PostgreSQL 16+、Debug/Release 与 API smoke test 阻断门禁。
+- 新 Provider 在真实 Drogon transport 下的 FreeCurrencyAPI 成功路径与主源失败后 exchangerate.fun 整批切换。
+- 同一新提交上的 Linux production ON Debug/Release、Scheduler/PostgreSQL runtime 和 Docker 冷构建/启动回归。
+- macOS 返回后的 Windows S12-07 全量设计一致性 review、文档定稿与分支签署。
 
 ---
 

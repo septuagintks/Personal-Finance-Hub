@@ -1,6 +1,6 @@
 # Personal Finance Hub - Exchange Rate System Design
 
-Version: 1.1
+Version: 1.2
 
 Backend: C++23
 
@@ -14,7 +14,7 @@ Architecture: Clean Architecture + Lightweight DDD
 **核心原则：**
 
 1. **Append-Only（仅追加）**：历史汇率绝对不能被覆盖，保证过去某天的资产报表和跨币种转账在未来任何时候重算都能得出一致的结果。
-2. **防腐层隔离（Anti-Corruption Layer）**：外部汇率 API（如 OpenExchangeRates, ECB）的数据格式千奇百怪，必须在 Infrastructure 层进行隔离转换，绝不能让 JSON 解析或 HTTP 响应污染 Domain 层。
+2. **防腐层隔离（Anti-Corruption Layer）**：外部汇率 API（如 FreeCurrencyAPI、exchangerate.fun、ECB）的数据格式千奇百怪，必须在 Infrastructure 层进行隔离转换，绝不能让 JSON 解析或 HTTP 响应污染 Domain 层。
 3. **三角套汇推导（Triangulation）**：不需要存储任意两两货币的汇率，通常以外部 API 的基础货币（如 USD 或 EUR）作为枢纽（Pivot），在内存中推导交叉汇率（Cross Rate）。
 
 ---
@@ -41,7 +41,7 @@ private:
     Currency target_;
     Decimal rate_;
     std::chrono::system_clock::time_point fetchedAt_;
-    std::string providerName_; // 例如: "ECB", "Manual", "OpenExchangeRates"
+    std::string providerName_; // 例如: "FreeCurrencyAPI", "exchangerate.fun"
 
 public:
     ExchangeRate(Currency base, Currency target, Decimal rate,
@@ -119,7 +119,7 @@ public:
 
 **设计原则：以 USD 为枢纽货币（Pivot Currency）**
 
-外部汇率 API（如 OpenExchangeRates、ECB）通常只提供相对于单一基准货币（如 USD）的汇率对。PFH 采用以下策略：
+外部汇率 API 通常只提供相对于单一基准货币（如 USD）的汇率对。PFH 采用以下策略：
 
 1. **汇率拉取策略**：仅拉取用户系统中已添加货币与 USD 之间的汇率
 2. **枢纽货币固定为 USD**：所有汇率以 USD 为基准存储
@@ -235,10 +235,10 @@ ExchangeRate eurToCny = *rateResult;
 exchange_rates 表内容示例：
 | base_currency_code | target_currency_code | rate     | source              | fetched_at          |
 |--------------------|----------------------|----------|---------------------|---------------------|
-| USD                | CNY                  | 7.18     | OpenExchangeRates   | 2026-06-25 08:00:00 |
-| USD                | EUR                  | 0.92     | OpenExchangeRates   | 2026-06-25 08:00:00 |
-| USD                | JPY                  | 149.50   | OpenExchangeRates   | 2026-06-25 08:00:00 |
-| USD                | GBP                  | 0.78     | OpenExchangeRates   | 2026-06-25 08:00:00 |
+| USD                | CNY                  | 7.18     | FreeCurrencyAPI     | 2026-06-25 08:00:00 |
+| USD                | EUR                  | 0.92     | FreeCurrencyAPI     | 2026-06-25 08:00:00 |
+| USD                | JPY                  | 149.50   | exchangerate.fun    | 2026-06-25 08:00:00 |
+| USD                | GBP                  | 0.78     | exchangerate.fun    | 2026-06-25 08:00:00 |
 ```
 
 不存储推导出的交叉汇率（如 EUR->CNY、JPY->GBP），这些在运行时按需计算。
@@ -510,30 +510,38 @@ public:
 
 基础设施层负责真正的 HTTP 请求和 PostgreSQL 读写。
 
-### 4.1 外部提供方实现 (Drogon HTTP Client)
+### 4.1 主备外部提供方实现 (Drogon HTTP Client)
 
-这里以抓取 OpenExchangeRates (JSON 格式) 为例，展示防腐层的落地：隔离 JSON 结构，将其转换为纯净的 `ExchangeRate` 对象。
+Phase 1 使用 FreeCurrencyAPI 作为主源、exchangerate.fun 作为无密钥备用源。两个 API 由独立 `DrogonHttpTransport` 访问，各自的响应格式只在 Infrastructure 防腐层解析，再由组合 Provider 对 Application 暴露一个稳定端口。
 
 **Phase 1 规范实现（2026-07-15）：**
 
-1. Application 端口 `IExchangeRateProvider` 暴露稳定 `provider_name()` 和 `fetch_latest(base, targets)`；失败事件必须记录真实 provider identity。
-2. `IHttpTransport` 隔离 framework-neutral HTTP response，`DrogonHttpTransport` 只负责 HTTPS GET、状态和 body；它由 Scheduler 的专用 worker 调用，不在 Drogon HTTP Event Loop callback 中同步等待。
-3. `OpenExchangeRatesProvider` 仅接受 USD base，先去重并排序请求 target，再使用 `symbols` 限定响应。
-4. JSON 使用 nlohmann SAX 读取原始 numeric token，禁止先转 `double` 再生成 Decimal；字符串汇率同样拒绝。
-5. 响应必须包含唯一的 `base`、整数 Unix `timestamp` 和 object `rates`；base 必须为 USD，timestamp 必须为正且不得超过当前 `IClock` 五分钟。
-6. rates key 不得重复，返回集合必须与请求集合完全相等；缺失、额外、非正数或不满足 `NUMERIC(20,10)` 的任一项都会拒绝整批。
-7. HTTP/network/timeout 与非法响应进入 `RefreshExchangeRatesUseCase` 的既定历史降级路径；响应 body、API key 和底层异常不写入应用错误或审计。
+1. Application 端口 `IExchangeRateProvider` 仍只暴露 `provider_name()` 与 `fetch_latest(base, targets)`；Domain 和 Use Case 不感知供应商 JSON 或 fallback 编排。
+2. `FreeCurrencyApiProvider` 请求 `/v1/latest`，API key 仅通过 `PFH_FREECURRENCYAPI_API_KEY` 或兼容环境变量注入。响应必须包含唯一 object `data`，且集合与已排序、去重的请求 target 完全相等；该 API 不返回抓取时间，因此使用注入的 `IClock::now()`。
+3. `ExchangeRateFunProvider` 请求 `/latest` 且不需要 key。响应必须包含唯一 `base`、整数 Unix `timestamp` 和 object `rates`；base 必须为 USD，timestamp 必须为正且不得超过当前 `IClock` 五分钟。
+4. exchangerate.fun 当前会忽略 `symbols` 并返回全量币种。适配层只要求全部请求币种存在并忽略额外币种；请求币种缺失、重复 key、非法值或非法时间仍拒绝整批。
+5. 两个 Provider 都用 nlohmann SAX 保留原始 numeric token，禁止先转 `double`。外部 feed 可以超过 10 位小数，适配器必须显式按 Half-Even 归一到 10 位，再校验正数与 `NUMERIC(20,10)` 范围；用户输入汇率仍执行严格 scale 校验，不复用该外部适配路径。
+6. `FailoverExchangeRateProvider` 先用 FreeCurrencyAPI 拉取完整请求批次；主源发生 transport、timeout、HTTP 非 200 或非法/不完整响应时，原批次整体改由 exchangerate.fun 拉取。一个成功批次不得混用两个来源；两者都失败后才进入 Application 的历史汇率降级路径。
+7. 成功落库的 `source` 必须是实际返回数据的 `FreeCurrencyAPI` 或 `exchangerate.fun`，不能写组合名称；两者都失败时告警 identity 使用 `FreeCurrencyAPI/exchangerate.fun`。
+8. 每个 Provider 使用相同单次硬超时。由于 fallback 串行执行，`2 * request_timeout_seconds` 必须不超过 Scheduler 的软执行期限。
+9. 响应 body、API key、请求 URL 和底层异常不得写入应用错误、审计或交接记录；主源对象析构时清零内存中的 key。
 
-下方代码保留为 Provider/Repository 职责关系的早期示意，不是 Phase 1 的精度、错误或并发实现依据；规范行为以上述条目和仓库当前实现为准。
+**当前外部能力边界（2026-07-15 脱敏实测）：**
+
+- FreeCurrencyAPI 覆盖 PFH 白名单中的 USD 与 18 种法币，暂不提供 TWD 和 13 种加密货币。
+- exchangerate.fun 覆盖 PFH 的 20 种法币与 BTC，暂不提供其余 12 种加密货币；其 `symbols` 参数当前返回全量 superset，适配器只提取请求集合。
+- 若请求批次含 exchangerate.fun 也不支持的目标币种，两个外部批次均失败，Application 只能在全部目标都有历史快照时声明降级可用。完整加密货币定价源不属于 Phase 1 当前 Provider 交付范围，必须由后续任务跟踪。
+
+下方 OpenExchangeRates 代码仅保留为早期防腐层反例和职责关系的历史示意，已不参与构建，也不是 Phase 1 当前 Provider、精度、错误或 failover 行为依据；规范行为以上述条目与 `exchange_rate_providers.cpp` 为准。
 
 **汇率拉取策略**
 
 只拉取系统中用户已添加的货币与 USD 的汇率对，避免拉取无用数据：
 
-1. 查询 `currencies` 表，获取所有 `is_enabled = true` 的货币代码
-2. 过滤掉 USD 本身
-3. 从外部 API 拉取所有汇率后，只保留系统支持的货币
-4. 所有汇率以 USD 为 `base_currency_code` 存储
+1. 通过系统级只读 `IActiveCurrencyQuery` 查询非归档账户币种与用户基准币种的 distinct 集合
+2. 过滤掉 USD 本身，并按代码排序、去重
+3. 主源或备用源必须完整覆盖该请求批次，不能只写入部分返回结果
+4. 所有成功汇率以 USD 为 `base_currency_code`，并按实际 Provider source 存储
 
 ```cpp
 // infrastructure/external/OpenExchangeRatesProvider.cpp
@@ -679,14 +687,14 @@ private:
 ```sql
 INSERT INTO exchange_rates (base_currency_code, target_currency_code, rate, source, fetched_at)
 VALUES
-  ('USD', 'CNY', 7.18, 'OpenExchangeRates', '2026-06-25 08:00:00'),
-  ('USD', 'EUR', 0.92, 'OpenExchangeRates', '2026-06-25 08:00:00'),
-  ('USD', 'JPY', 149.50, 'OpenExchangeRates', '2026-06-25 08:00:00');
+  ('USD', 'CNY', 7.18, 'FreeCurrencyAPI', '2026-06-25 08:00:00'),
+  ('USD', 'EUR', 0.92, 'FreeCurrencyAPI', '2026-06-25 08:00:00'),
+  ('USD', 'JPY', 149.50, 'exchangerate.fun', '2026-06-25 08:00:00');
 ```
 
 **降级策略**
 
-如果外部 API 完全不可用，应用层应使用数据库中最新的历史汇率作为降级方案，并触发告警通知管理员。
+FreeCurrencyAPI 拉取失败时先切换到 exchangerate.fun。只有两个外部 API 都失败，应用层才检查数据库中每个请求币种对的最新历史汇率并触发告警；历史集合不完整时必须显式标记，不能伪装为正常刷新。
 
 ### 4.2 PG 仓储实现 (Repository)
 

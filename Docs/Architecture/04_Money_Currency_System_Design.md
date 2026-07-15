@@ -336,7 +336,8 @@ private:
 - Manual
 - ECB
 - Frankfurter
-- OpenExchangeRates
+- FreeCurrencyAPI（主源）
+- exchangerate.fun（备用源）
 - CurrencyLayer
 
 ---

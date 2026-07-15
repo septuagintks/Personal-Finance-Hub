@@ -338,8 +338,9 @@ Publisher 不使用全局 Job lease，因为 `FOR UPDATE SKIP LOCKED` + 每行 c
 
 在系统的入口，必须按正确的顺序初始化。Phase 1 的实际装配位于
 `ProductionCompositionRoot`：先构造 request/background DbClient 和全部 Job 依赖，
-再通过 Drogon beginning advice 调用 `JobManager::start_all()`，通过 ending advice
-依次 `stop_all()` 和 `BoundedThreadPool::shutdown()`。启动任一 Job 失败时记录 critical
+再通过 Drogon beginning advice 调用 `JobManager::start_all()`。Drogon 1.8.7 没有
+ending advice；服务退出后由 `ProductionCompositionRoot` 析构函数依次执行
+`stop_all()` 和 `BoundedThreadPool::shutdown()`。启动任一 Job 失败时记录 critical
 并退出服务。下面代码只保留生命周期顺序示意，类名和构造参数以实际实现为准。
 
 ```cpp
@@ -350,7 +351,16 @@ Publisher 不使用全局 Job lease，因为 `FOR UPDATE SKIP LOCKED` + 每行 c
 
 int main() {
     // 1. 初始化依赖注入 (Repositories, Providers, UseCases)
-    auto rateProvider = std::make_shared<OpenExchangeRatesProvider>("API_KEY");
+    auto primaryTransport = std::make_shared<DrogonHttpTransport>(
+        "https://api.freecurrencyapi.com");
+    auto fallbackTransport = std::make_shared<DrogonHttpTransport>(
+        "https://api.exchangerate.fun");
+    auto primary = std::make_shared<FreeCurrencyApiProvider>(
+        *primaryTransport, *clock, std::move(config.exchange_rate.api_key));
+    auto fallback = std::make_shared<ExchangeRateFunProvider>(
+        *fallbackTransport, *clock);
+    auto rateProvider = std::make_shared<FailoverExchangeRateProvider>(
+        *primary, *fallback);
     auto rateRepo = std::make_shared<ExchangeRateRepositoryImpl>(drogon::app().getDbClient("default"));
     auto backgroundExecutor = std::make_shared<DrogonBackgroundExecutor>();
     auto rateUseCase = std::make_shared<RefreshExchangeRatesUseCase>(rateProvider, rateRepo);

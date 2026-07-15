@@ -30,10 +30,12 @@ class DrogonHttpTransport;
 class DrogonTimerScheduler;
 class DrogonUnitOfWork;
 class DrogonUnitOfWorkFactory;
+class ExchangeRateFunProvider;
 class ExchangeRateRefreshJob;
 class ExchangeRateRepositoryImpl;
+class FailoverExchangeRateProvider;
+class FreeCurrencyApiProvider;
 class JobManager;
-class OpenExchangeRatesProvider;
 class OpenSslTokenService;
 class PostgresActiveCurrencyQuery;
 class PostgresJobLeaseRepository;
@@ -95,8 +97,16 @@ private:
     std::unique_ptr<infrastructure::DrogonUnitOfWorkFactory> uow_factory_;
     std::unique_ptr<infrastructure::PostgresActiveCurrencyQuery>
         background_currency_query_;
-    std::unique_ptr<infrastructure::DrogonHttpTransport> rate_http_transport_;
-    std::unique_ptr<infrastructure::OpenExchangeRatesProvider> rate_provider_;
+    std::unique_ptr<infrastructure::DrogonHttpTransport>
+        primary_rate_http_transport_;
+    std::unique_ptr<infrastructure::DrogonHttpTransport>
+        fallback_rate_http_transport_;
+    std::unique_ptr<infrastructure::FreeCurrencyApiProvider>
+        primary_rate_provider_;
+    std::unique_ptr<infrastructure::ExchangeRateFunProvider>
+        fallback_rate_provider_;
+    std::unique_ptr<infrastructure::FailoverExchangeRateProvider>
+        rate_provider_;
     std::unique_ptr<infrastructure::ExchangeRateRepositoryImpl> rate_repository_;
     std::unique_ptr<infrastructure::DrogonUnitOfWork> rate_uow_;
     std::unique_ptr<application::RefreshExchangeRatesUseCase>

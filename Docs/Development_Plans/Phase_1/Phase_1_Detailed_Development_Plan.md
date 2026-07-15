@@ -11,7 +11,7 @@ Status: Active
 
 本文档是 `Phase_1_Development_Plan.md` 的细化子计划，用于描述 Phase 1 从创建工程目录结构开始，到第一阶段测试收尾为止的具体开发顺序、交付物和验收口径。
 
-当前进度（2026-07-15）：P1-S01 至 P1-S11 已完成实现与全量 review，P1-S12-01 Windows 本地收尾门禁已通过。GCC 16 / PostgreSQL OFF 的独立 Debug、Release 均完成全新配置、104-step 构建和 341/341 CTest；341 项由 292 个 unit/use-case、17 个 In-Memory integration、28 个 framework-neutral API 和 4 个静态门禁组成，三类 production compile gate 同时通过。下一步将签名基线交接至 macOS/Colima Linux，执行 S12-02 至 S12-06 的 V1-V6、真实 PostgreSQL/Drogon/OpenExchangeRates、Outbox/Scheduler、多连接/重启、应用镜像与 Linux Debug/Release 门禁；结果返回前 Phase 1 不得签署完成。
+当前进度（2026-07-15）：P1-S01 至 P1-S11 和 S12 原 Linux/PostgreSQL/Drogon/Docker 门禁已完成。外部汇率随后改为 FreeCurrencyAPI 主源与 exchangerate.fun 整批备用源；Windows GCC 16 / PostgreSQL OFF Debug、Release 均通过 349/349，构成为 300 个 unit/use-case、17 个 In-Memory integration、28 个 framework-neutral API 和 4 个静态门禁，三类 production compile gate 同时通过。脱敏真实端点探测已验证主源成功批次及主源 422 后备用源完整覆盖；新提交仍须交接 macOS/Colima 复测真实 Drogon HTTPS、Linux production ON、Scheduler 和 Docker，结果返回前 Phase 1 不得签署完成。
 
 ### 1.1 执行原则
 
@@ -591,14 +591,14 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S12-02 外部机器环境准备
 
-状态：**待 macOS/Colima Linux 接收**。交接必须固定完整主项目 commit 和交接仓库 commit，接收方确认环境及两个干净工作区后再开始测试。
+状态：**原门禁已完成；等待 Provider 修正复测交接**。macOS/Colima Ubuntu 24.04 ARM64 环境和版本矩阵已记录；新一轮仍须固定完整主项目 commit 与交接仓库 commit，并在两个干净工作区上复用该环境。
 
 - 固定 Linux 发行版、GCC/libstdc++、CMake、Drogon、PostgreSQL、Flyway、Docker 与 `tzdata` 版本。
 - 使用独立测试凭据和数据库；记录 commit hash、镜像/工具版本、执行命令与时间。
 
 #### P1-S12-03 空库迁移与真实持久化
 
-状态：**待外部执行**。当前 `tests/integration` 仅有 In-Memory fixture；macOS 侧须在真实依赖环境补齐可重复运行的 PostgreSQL-backed fixture，并在最终提交上出具结果。
+状态：**已完成原基线**。V1-V6、legacy 升级和 12 个 PostgreSQL-backed scenario 已通过；Provider 修正未改 migration/Repository，但新 production ON 全量 CTest 必须继续执行该强制 fixture，证明接线未回归。
 
 - 从空 PostgreSQL 16+ 数据库执行 V1-V6 全部迁移，并验证重复启动不会破坏 schema；另从含 legacy `processing` outbox 行的 V1-V5 库升级 V6，验证迁移恢复路径。
 - 用与 In-Memory 基线相同的 scenarios 复跑全部 PostgreSQL Repository 与 `DrogonUnitOfWork` 测试。
@@ -607,14 +607,14 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S12-04 API 与认证 Smoke Test
 
-状态：**待外部执行**。S10 基础 smoke 不覆盖 S11 后台 runtime，也不能替代当前最终提交上的完整 API/RLS 回归。
+状态：**已完成原基线；新提交需回归**。真实 Drogon API、认证、RLS、财务与报表 smoke 已通过；Provider 修正返回后仍以同一 production binary 复跑完整 runtime target。
 
 - 在真实 Drogon + PostgreSQL 上覆盖 register/login/refresh/logout、JWT 拒绝、资源用户隔离和主要业务写读路径。
 - 验证 JSON number 拒绝、错误状态码、TraceId、异常脱敏、转账原子性和报表时区月边界。
 
 #### P1-S12-05 Outbox 与 Scheduler 真实运行验证
 
-状态：**待外部执行**。离线并发与恢复测试已通过；真实多连接、数据库时钟、Drogon timer、HTTPS、重启和长任务接管仍为阻断项。
+状态：**原后台基线已通过，Provider 定向复测待执行**。多连接、数据库时钟、Drogon timer、Outbox、重启与停止语义已有结果；新提交必须补真实 FreeCurrencyAPI 成功、主源失败后 exchangerate.fun 整批成功、实际入库 source 和双源失败历史降级。
 
 - 验证事件只在 commit 后被 claim，失败重试、dead letter、幂等 handler 和进程重启恢复均符合设计。
 - 验证真实汇率 HTTP Provider、历史降级、周期调度、token 清理和优雅停止。
@@ -622,14 +622,14 @@ P1-S12 Phase 1 测试收尾与文档回写
 
 #### P1-S12-06 Linux Debug/Release 与 Docker 门禁
 
-状态：**待外部执行**。当前 Compose 只提供 PostgreSQL/Flyway，应用 Dockerfile、应用 service、双角色初始化与容器 smoke 入口须在本步骤补齐并验证。
+状态：**原基线已完成；新提交复测待执行**。应用 Dockerfile、service、双角色初始化和 smoke 已落地；Provider 修正提交须重新通过 Linux production ON Debug/Release 预期 351 项与 Docker 冷构建、健康检查、Scheduler 和优雅停止。
 
 - 在目标 Linux 工具链分别完成 Debug/Release configure、build 和全量测试。
 - 构建并启动 Docker 运行环境，执行健康检查和关键 API smoke test；确认 `tzdata`、迁移和运行时配置齐全。
 
 #### P1-S12-07 文档定稿与分支交付
 
-状态：**等待外部结果返回**。Windows 侧接收后执行最终签名复核、本地回归、全量设计一致性 review 和 Phase 1 签署。
+状态：**等待 Provider 外部复测返回**。Windows 侧接收后验证签名与证据，执行最终本地回归、全量设计一致性 review 和 Phase 1 签署。
 
 - 回写 `Docs/Development/tasks.md`、测试基线、环境记录和 `Phase_1_S12_Delivery_Summary.md`。
 - 已验收的阶段交付总结按文档规范归档；未完成项继续留在 Tasks，不以说明文字代替验收。

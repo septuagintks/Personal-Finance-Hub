@@ -235,7 +235,7 @@ Do not export `PFH_DB_*` to the full CTest process. The runtime script parses th
 
 The Docker gate cold-built the repository `Dockerfile` from Ubuntu 24.04 base digest `sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90`. The final ARM64 image was `sha256:b2e161b3a551b06c50d8a31760397e2e15f49e70e8049e391692f4b6a5af9217`, 36,763,570 bytes, with tzdata 2026b. It ran as user `pfh`, reached `healthy`, published 11/11 Outbox rows, released both scheduled job leases, preserved FORCE RLS on all eight tenant tables, and stopped with exit code 0 without OOM.
 
-The real OpenExchangeRates HTTPS/API response remains `BLOCKED` because no external API key was supplied. Mock transport tests and a dummy-key Scheduler run are not evidence that the real provider passed.
+The original OpenExchangeRates blocker is superseded by the corrective Provider implementation. FreeCurrencyAPI is now primary and exchangerate.fun is the whole-batch fallback. Windows has completed sanitized public-contract probes, but the new commit still requires a real Drogon/Linux/Scheduler/Docker run on macOS/Colima before S12-07.
 
 All disposable S12 application/database containers and the dedicated network were removed after validation, and Colima was stopped. No test password, JWT, API key, token, response body, raw log or database dump was retained.
 
@@ -253,5 +253,5 @@ All disposable S12 application/database containers and the dedicated network wer
   The S10 preflight superseded that build/runtime baseline; the S12 run above now supersedes both for current Linux behavior.
 - Keep `build/` and `config/config.local.json` local.
 - Run Linux validation before phase delivery or before merging phase work back to `main`.
-- Windows S12-07 must verify the returned signed commit, review the new fixture/Docker changes, rerun its PostgreSQL OFF gate and decide how to handle the external Provider blocker.
+- Windows S12-07 must verify the returned signed commit, confirm the new Provider's real primary/fallback evidence, rerun its PostgreSQL OFF gate and complete the final consistency review.
 - Record the final returned commit hash and blocker decision before Phase 1 sign-off.

@@ -4,6 +4,8 @@
 **阶段**: P1-S11 Outbox、调度与后台任务基础
 **当前状态**: LOCAL COMPLETE - S11-01 至 S11-07 已完成实现、专项 review、Windows 全量回归与离线 production compile gate；真实 V6/PostgreSQL/Drogon/外部 HTTP runtime 保留到 P1-S12
 
+> **后续替代说明（2026-07-15）**：本记录中的 OpenExchangeRates 内容是 S11 当时的交付事实。当前实现已由 FreeCurrencyAPI 主源、exchangerate.fun 整批备用源和 `FailoverExchangeRateProvider` 替代；现行行为以 `08_Exchange_Rate_System_Design.md`、S12 交付记录和当前代码为准。
+
 ---
 
 ## 1. 交付范围

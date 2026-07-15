@@ -84,7 +84,7 @@ Docs/
 6. **全局异常拦截**：通过 Drogon 全局异常处理器捕获非预期异常，生成唯一 `TraceId`，在保障生产环境安全（不泄露敏感信息）的同时提供完整的服务端日志追溯。
 7. **受控后台运行时**：Drogon timer 只触发有界 worker 入队；Outbox 使用行级租约，汇率刷新和认证清理使用 PostgreSQL 任务租约，并统一由 `JobManager` 管理启动与优雅退出。
 
-当前进度（2026-07-15）：P1-S01 至 P1-S11 已完成实现与全量 review，P1-S12-01 Windows 独立 Debug/Release 均通过 341/341。下一步交接 macOS/Colima Linux 执行 S12-02 至 S12-06；V1-V6、真实 PostgreSQL/Drogon/OpenExchangeRates、Outbox/Scheduler 多连接与重启恢复、完整 PostgreSQL fixture、应用镜像和最终 Linux/Docker 签署仍未完成，不能据此视为 Phase 1 已交付。
+当前进度（2026-07-15）：P1-S12 原 Linux/PostgreSQL/Drogon/Docker 基线已完成，随后汇率外部源改为 FreeCurrencyAPI 主源与 exchangerate.fun 整批备用源。新实现已通过 Windows Debug/Release 349/349、主源真实成功和“主源 422 后备用源完整覆盖”脱敏契约探测；仍需在 macOS/Colima 对同一新提交复测真实 Drogon HTTPS、production ON Debug/Release、Scheduler 与 Docker。结果返回并完成 S12-07 前，Phase 1 仍未最终交付。
 
 ---
 

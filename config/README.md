@@ -54,11 +54,11 @@
 - `job_lease_duration_seconds`: Distributed lease duration; must exceed the soft deadline
 
 #### Exchange Rate Provider
-- `provider`: Production currently requires `openexchangerates`; tests may inject a mock port directly
-- `api_key`: OpenExchangeRates API key; prefer `PFH_EXCHANGE_RATE_API_KEY`
-- `request_timeout_seconds`: HTTPS request timeout, no greater than the job execution timeout
+- `provider`: Production requires `freecurrencyapi`; `exchangerate.fun` is the fixed no-key fallback
+- `api_key`: FreeCurrencyAPI key; prefer `PFH_FREECURRENCYAPI_API_KEY`
+- `request_timeout_seconds`: Per-provider HTTPS timeout; because failover is sequential, it must not exceed half the job execution timeout
 
-The scheduler's Drogon timer callbacks only enqueue work. HTTP, PostgreSQL and event-handler waits execute on the bounded background pool. `job_execution_timeout_seconds` is a soft deadline because C++ worker threads are not terminated unsafely; external HTTP has its own hard timeout. Both `outbox_processing_timeout_seconds` and `job_lease_duration_seconds` must be longer than the soft deadline, and `request_timeout_seconds` must not exceed it.
+The scheduler's Drogon timer callbacks only enqueue work. HTTP, PostgreSQL and event-handler waits execute on the bounded background pool. `job_execution_timeout_seconds` is a soft deadline because C++ worker threads are not terminated unsafely; external HTTP has its own hard timeout. Both `outbox_processing_timeout_seconds` and `job_lease_duration_seconds` must be longer than the soft deadline. FreeCurrencyAPI and exchangerate.fun may run sequentially, so twice `request_timeout_seconds` must fit within the soft deadline.
 
 The request-role database client performs Outbox transitions, exchange-rate appends, supplemental audit writes, token cleanup and job lease updates against non-RLS tables. The background BYPASSRLS/default-read-only client is reserved exclusively for the cross-tenant active-currency query.
 
@@ -81,9 +81,9 @@ Configuration is loaded in this order: environment variables, JSON file, then bu
 | Background database name | `PFH_BACKGROUND_DB_NAME` |
 | Background database user | `PFH_BACKGROUND_DB_USER` |
 | Background database password | `PFH_BACKGROUND_DB_PASSWORD` |
-| Exchange-rate API key | `PFH_EXCHANGE_RATE_API_KEY` |
+| FreeCurrencyAPI key | `PFH_FREECURRENCYAPI_API_KEY` |
 
-`PFH_DB_PORT` and `PFH_BACKGROUND_DB_PORT` must be integers from 1 through 65535. Invalid environment values fail configuration loading instead of silently falling back to JSON. Environment-provided secrets are subject to the same placeholder and strength validation as JSON values. `PFH_PASSWORD_PEPPER` is optional: leave it empty or provide a real secret; values beginning with `REPLACE_WITH_` are rejected. The request and background roles must be distinct; the background role is reserved for explicitly approved read-only cross-tenant jobs and is never injected into request handlers.
+`PFH_DB_PORT` and `PFH_BACKGROUND_DB_PORT` must be integers from 1 through 65535. Invalid environment values fail configuration loading instead of silently falling back to JSON. Environment-provided secrets are subject to the same placeholder and strength validation as JSON values. `PFH_FREECURRENCYAPI_API_KEY` takes precedence over the legacy `PFH_EXCHANGE_RATE_API_KEY` / `EXCHANGE_RATE_API_KEY` aliases. `PFH_PASSWORD_PEPPER` is optional: leave it empty or provide a real secret; values beginning with `REPLACE_WITH_` are rejected. The request and background roles must be distinct; the background role is reserved for explicitly approved read-only cross-tenant jobs and is never injected into request handlers.
 
 Server settings, logging settings, JWT expiry values, connection-pool sizes, and provider selection currently remain JSON-configured. `.env.example` lists only overlays implemented by `JsonConfigLoader`.
 

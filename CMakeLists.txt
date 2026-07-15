@@ -187,7 +187,7 @@ set(PFH_PRODUCTION_SECURITY_SOURCES
 
 set(PFH_INFRASTRUCTURE_SOURCES
     src/infrastructure/placeholder.cpp
-    src/infrastructure/external/open_exchange_rates_provider.cpp
+    src/infrastructure/external/exchange_rate_providers.cpp
     src/infrastructure/scheduler/bounded_thread_pool.cpp
     src/infrastructure/scheduler/recurring_job.cpp
     src/infrastructure/scheduler/job_manager.cpp

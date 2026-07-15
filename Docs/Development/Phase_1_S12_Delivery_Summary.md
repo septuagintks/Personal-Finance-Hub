@@ -2,7 +2,7 @@
 
 **更新日期**: 2026-07-15
 **阶段**: P1-S12 Phase 1 测试收尾与文档回写
-**当前状态**: S12-01 至 S12-06 已完成；真实 OpenExchangeRates API 因未提供外部 API key 保持 `BLOCKED`；等待 Windows 执行 S12-07 最终签署
+**当前状态**: S12-01 至 S12-06 原基线已完成；FreeCurrencyAPI/exchangerate.fun 修正已通过 Windows 349/349 与脱敏端点探测，等待 macOS/Colima 在新提交上复测后执行 S12-07
 
 ---
 
@@ -12,10 +12,11 @@
 - Windows S12-01 测试对象：`6cd41bc2c60af1298544d975c58819cc8c0600a9`。
 - macOS 接收基线：`297fe636c0b441aaf0807d0487cf9320b41c780e`。
 - macOS production ABI 修复：`ed0b10f4567232d5558914464092a24213958941`（`fix: support Drogon 1.8 shutdown lifecycle`）。
-- macOS 最终测试对象：`ed0b10f` 加本交付提交中的 PostgreSQL fixture、真实 Drogon smoke、Docker 编排与 Content-Type 修复；最终提交哈希由 `.codex/HandOff.md` 在推送后记录。
+- macOS 原最终测试对象：`d2549af142c92fa08bc15e2027e1163053e355ca`，包含 PostgreSQL fixture、真实 Drogon smoke、Docker 编排与 Content-Type 修复。
+- Provider 修正测试对象：本记录所在的新签名提交；精确哈希与 macOS 返回结果由 `.codex/HandOff.md` 固定。
 - 所有测试数据库、容器、网络和凭据均为一次性本地资源；未保存认证响应、Token、数据库转储或原始日志。
 
-本轮只完成 P1-S12-02 至 S12-06，不执行 S12-07，不合并 `main`，也不开始 Phase 2。
+原轮次完成 P1-S12-02 至 S12-06；当前 corrective round 只替换外部汇率 Provider 并复测受影响门禁。S12-07、`main` 合并和 Phase 2 仍不在本提交范围。
 
 ---
 
@@ -65,6 +66,17 @@ PostgreSQL ON 的 343 项由原有 341 项加两个强制外部 target 构成：
 
 CTest 外层只注入 `PFH_TEST_DB_ADMIN`、`PFH_TEST_DB_REQUEST`、`PFH_TEST_DB_BACKGROUND` 三条 libpq conninfo。runtime 脚本用 `shlex` 解析 request/background conninfo，仅向子进程注入 `PFH_DB_*`，避免污染配置加载单元测试；本地 HTTP client 显式禁用代理，避免 Colima 代理截获 `127.0.0.1` 请求。Release runtime 连续 10 次复跑均通过。
 
+### 3.3 Windows Provider 修正回归
+
+| 配置 | 结果 |
+| ---- | ---- |
+| Debug / PostgreSQL OFF | configure/build `PASS`，CTest 349/349 |
+| Release / PostgreSQL OFF | configure/build `PASS`，CTest 349/349 |
+
+349 项由 300 个 unit/use-case、17 个 In-Memory integration、28 个 framework-neutral API 和 4 个 static gate 构成；PostgreSQL adapter、production bootstrap 与 production security compile gate 均通过。新增覆盖包括两个响应 schema、外部 rate Half-Even 归一、完整集合校验、整批主备切换、双源失败脱敏、串行 timeout 约束和 key 环境变量优先级。
+
+Windows `PFH_BUILD_POSTGRESQL=ON` 真实依赖配置为 `BLOCKED`：本机未安装可供 CMake 解析的 Drogon package。该环境限制未被写成产品失败，也没有用 OFF 模式 stub 结果冒充真实 Drogon 编译；production ON 结果必须由 macOS/Colima 复测提供。
+
 ---
 
 ## 4. V1-V6 迁移矩阵
@@ -110,7 +122,7 @@ CTest 外层只注入 `PFH_TEST_DB_ADMIN`、`PFH_TEST_DB_REQUEST`、`PFH_TEST_DB
 
 Outbox/Scheduler runtime `PASS`：并发 claim、lease recovery、dead letter、receipt 幂等和数据库时钟由 fixture 验证；最终容器发布 11/11 Outbox，`exchange-rate-refresh` 与 `session-cleanup` 两个 lease 均创建并释放，三个 timer 在 SIGTERM 后停止。
 
-真实 OpenExchangeRates HTTPS/TLS/API 响应验证为 `BLOCKED`：维护者未提供外部 API key。mock transport、dummy key 错误路径和容器内 Scheduler 启动结果均未被当作真实 API `PASS`。
+原 `d2549af` 基线的 OpenExchangeRates 真实 API blocker 已被后续 Provider 替换取代，不再是当前决策项。Windows 已用仓库外 key 完成脱敏 HTTPS 契约探测，但该探测不等于真实 Drogon transport、Scheduler 或 Linux runtime `PASS`，这些必须在新提交上由 macOS/Colima 复测。
 
 ---
 
@@ -139,11 +151,41 @@ Outbox/Scheduler runtime `PASS`：并发 claim、lease recovery、dead letter、
 
 ## 9. 返回条件
 
-P1-S12-02 至 S12-06 除需要外部 key 的真实 Provider 调用外均已形成可追溯结果。Windows S12-07 应：
+P1-S12-02 至 S12-06 原基线已经形成可追溯结果。Provider corrective round 返回后，Windows S12-07 应：
 
-1. fast-forward 并验证 macOS 主项目提交的默认 GPG 签名。
-2. 重跑 Windows PostgreSQL OFF 本地门禁并 review 本轮 fixture、Docker 与 adapter 差异。
-3. 决定真实 OpenExchangeRates API blocker 是在签署前补测，还是以明确限制延期。
+1. fast-forward 并验证 macOS 返回提交的 GPG 签名与固定测试对象。
+2. 确认新提交上的 Linux production ON Debug/Release、真实主备 HTTPS、Scheduler 入库 source 和 Docker 均通过。
+3. 重跑 Windows PostgreSQL OFF 门禁并完成 Provider、配置、文档和全项目一致性 review。
 4. 定稿 Tasks 与交付文档，完成 Phase 1 最终签署和合并决策。
 
 在 S12-07 完成前，Phase 1 仍不得宣告最终完成或合并到 `main`。
+
+---
+
+## 10. Provider Corrective Round
+
+### 10.1 实现结论
+
+- 主源：FreeCurrencyAPI，base URL `https://api.freecurrencyapi.com`，key 只通过 `PFH_FREECURRENCYAPI_API_KEY` 注入；旧环境变量保留为兼容别名。
+- 备用源：exchangerate.fun，base URL `https://api.exchangerate.fun`，不需要 key。
+- `FailoverExchangeRateProvider` 先请求完整主源批次；任一 transport、timeout、HTTP 或响应校验失败后，完整原批次切换备用源，同一成功批次不混源。
+- 两个 adapter 通过 SAX 保留 JSON numeric token，外部 rate 显式 Half-Even 归一到 10 位后校验 `NUMERIC(20,10)`；用户输入 rate 的严格 scale 拒绝规则不变。
+- 成功快照保存实际 source `FreeCurrencyAPI` 或 `exchangerate.fun`；双源失败事件 identity 为 `FreeCurrencyAPI/exchangerate.fun`，错误不含 key、URL、响应 body 或底层异常。
+
+### 10.2 脱敏真实端点结果
+
+| 场景 | 结果 |
+| ---- | ---- |
+| FreeCurrencyAPI 支持币种批次 | `PASS`，HTTP 200，返回集合与请求集合精确相等 |
+| FreeCurrencyAPI 请求含 TWD | 预期 HTTP 422，触发整批备用路径 |
+| exchangerate.fun 请求 CNY + TWD | `PASS`，HTTP 200，USD base、整数 timestamp、两目标完整；额外 superset 被忽略 |
+| 精度 | 备用源 BTC 可返回超过 10 位小数；显式 Half-Even 归一测试已覆盖并通过 |
+
+能力快照只用于暴露当前限制，不是永久供应商承诺：FreeCurrencyAPI 当前覆盖 PFH 的 USD + 18 法币；exchangerate.fun 覆盖 20 法币 + BTC。其余 12 种加密货币需要后续专用定价源；当前整批失败后只能使用完整历史快照降级。
+
+### 10.3 待 macOS/Colima 复测
+
+- production ON Debug/Release 预计各 351 项（Windows 349 基线 + 两个真实 PostgreSQL/runtime target），数量变化必须解释。
+- 使用仓库外 key 验证真实 Drogon FreeCurrencyAPI 成功路径；不得记录 key、完整 URL、响应 body 或原始日志。
+- 通过受控目标币种或等价故障注入让主源失败，验证 exchangerate.fun 整批成功、实际 source 入库和事件 payload。
+- 验证双源失败时只进入历史快照降级，并复跑 Scheduler、Docker 冷构建/健康、Outbox、lease 和 SIGTERM 停止。

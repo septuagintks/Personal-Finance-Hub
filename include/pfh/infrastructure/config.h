@@ -83,7 +83,7 @@ struct SchedulerConfig {
     std::chrono::seconds job_lease_duration{120};
 };
 
-/// @brief Exchange rate provider configuration
+/// @brief FreeCurrencyAPI primary + exchangerate.fun fallback configuration.
 struct ExchangeRateConfig {
     std::string provider = "mock";
     std::string api_key;

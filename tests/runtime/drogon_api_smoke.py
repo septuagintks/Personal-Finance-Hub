@@ -449,7 +449,7 @@ def runtime_config(port: int) -> dict[str, Any]:
         "logging": {"level": "warning", "output": "console"},
         "scheduler": {"enabled": False},
         "exchange_rate": {
-            "provider": "openexchangerates",
+            "provider": "freecurrencyapi",
             "api_key": "",
             "request_timeout_seconds": 5,
         },

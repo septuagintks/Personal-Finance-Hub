@@ -50,7 +50,7 @@
     "job_lease_duration_seconds": 120
   },
   "exchange_rate": {
-    "provider": "openexchangerates",
+    "provider": "freecurrencyapi",
     "api_key": "REPLACE_WITH_ACTUAL_API_KEY",
     "request_timeout_seconds": 10
   }

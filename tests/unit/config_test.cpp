@@ -194,7 +194,7 @@ TEST(JsonConfigLoader, WhenSchedulerDurationsConflict_ReturnsError) {
         "\"job_execution_timeout_seconds\":10,"
         "\"job_lease_duration_seconds\":60",
         ",\"exchange_rate\":{\"provider\":\"mock\","
-        "\"request_timeout_seconds\":11}");
+        "\"request_timeout_seconds\":6}");
 }
 
 // ---- Log level / output parsing ----
@@ -398,6 +398,31 @@ TEST(JsonConfigLoader, WhenEnvironmentAndApiKeyEnvSet_Overrides) {
     _putenv_s("PFH_EXCHANGE_RATE_API_KEY", "");
     #else
     unsetenv("PFH_ENVIRONMENT");
+    unsetenv("PFH_EXCHANGE_RATE_API_KEY");
+    #endif
+}
+
+TEST(JsonConfigLoader, FreeCurrencyApiKeyEnvTakesPrecedenceOverLegacyAlias) {
+    TempConfig cfg(kValidConfig);
+
+    #ifdef _WIN32
+    _putenv_s("PFH_FREECURRENCYAPI_API_KEY", "primary-key");
+    _putenv_s("PFH_EXCHANGE_RATE_API_KEY", "legacy-key");
+    #else
+    setenv("PFH_FREECURRENCYAPI_API_KEY", "primary-key", 1);
+    setenv("PFH_EXCHANGE_RATE_API_KEY", "legacy-key", 1);
+    #endif
+
+    JsonConfigLoader loader(cfg.path());
+    auto result = loader.load();
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->exchange_rate.api_key, "primary-key");
+
+    #ifdef _WIN32
+    _putenv_s("PFH_FREECURRENCYAPI_API_KEY", "");
+    _putenv_s("PFH_EXCHANGE_RATE_API_KEY", "");
+    #else
+    unsetenv("PFH_FREECURRENCYAPI_API_KEY");
     unsetenv("PFH_EXCHANGE_RATE_API_KEY");
     #endif
 }

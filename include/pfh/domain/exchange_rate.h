@@ -28,7 +28,7 @@ public:
     /// @param target The target currency.
     /// @param rate   Positive conversion factor. Must be > 0.
     /// @param fetched_at When this rate was observed.
-    /// @param source Provider name ("ECB", "Manual", "OpenExchangeRates", ...).
+    /// @param source Provider name ("FreeCurrencyAPI", "exchangerate.fun", ...).
     [[nodiscard]] static DomainResult<ExchangeRate> create(
         Currency base, Currency target, Decimal rate,
         TimePoint fetched_at, std::string source);
