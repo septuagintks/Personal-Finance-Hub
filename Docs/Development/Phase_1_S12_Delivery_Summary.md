@@ -1,8 +1,8 @@
 # Phase 1 S12 测试收尾与文档回写 - 交付记录
 
-**更新日期**: 2026-07-15
+**更新日期**: 2026-07-16
 **阶段**: P1-S12 Phase 1 测试收尾与文档回写
-**当前状态**: S12-01 至 S12-06 原基线已完成；FreeCurrencyAPI/exchangerate.fun 修正已通过 Windows 349/349 与脱敏端点探测，等待 macOS/Colima 在新提交上复测后执行 S12-07
+**当前状态**: S12-01 至 S12-06 及 FreeCurrencyAPI/exchangerate.fun macOS/Colima corrective round 已完成；等待 Windows 执行 S12-07
 
 ---
 
@@ -13,7 +13,8 @@
 - macOS 接收基线：`297fe636c0b441aaf0807d0487cf9320b41c780e`。
 - macOS production ABI 修复：`ed0b10f4567232d5558914464092a24213958941`（`fix: support Drogon 1.8 shutdown lifecycle`）。
 - macOS 原最终测试对象：`d2549af142c92fa08bc15e2027e1163053e355ca`，包含 PostgreSQL fixture、真实 Drogon smoke、Docker 编排与 Content-Type 修复。
-- Provider 修正测试对象：本记录所在的新签名提交；精确哈希与 macOS 返回结果由 `.codex/HandOff.md` 固定。
+- Provider 初始实现：`16e169bd9f67d93898f96d971443a67044afb1e9`。
+- Provider TLS 修复与 macOS 测试对象：`ef66d995f0f9f51e7936f43af9ddc9d524fc6e56`（`fix: use TLS-capable exchange rate transport`）。
 - 所有测试数据库、容器、网络和凭据均为一次性本地资源；未保存认证响应、Token、数据库转储或原始日志。
 
 原轮次完成 P1-S12-02 至 S12-06；当前 corrective round 只替换外部汇率 Provider 并复测受影响门禁。S12-07、`main` 合并和 Phase 2 仍不在本提交范围。
@@ -33,6 +34,7 @@
 | PostgreSQL | `PFH_BUILD_POSTGRESQL=OFF` | client/server 16.14 |
 | Flyway | `NOT RUN` | OSS 10.22.0 |
 | OpenSSL / Argon2 | 离线 compile gate | 3.0.13 / 20190702 |
+| libcurl | 离线 compile gate | 8.5.0-2ubuntu10.11，OpenSSL 3.0.13 backend |
 | tzdata | N/A | Linux VM 2026a；最终镜像 2026b |
 | Docker | `NOT RUN` | client/server 29.5.2；Compose 插件不可用 |
 
@@ -75,7 +77,17 @@ CTest 外层只注入 `PFH_TEST_DB_ADMIN`、`PFH_TEST_DB_REQUEST`、`PFH_TEST_DB
 
 349 项由 300 个 unit/use-case、17 个 In-Memory integration、28 个 framework-neutral API 和 4 个 static gate 构成；PostgreSQL adapter、production bootstrap 与 production security compile gate 均通过。新增覆盖包括两个响应 schema、外部 rate Half-Even 归一、完整集合校验、整批主备切换、双源失败脱敏、串行 timeout 约束和 key 环境变量优先级。
 
-Windows `PFH_BUILD_POSTGRESQL=ON` 真实依赖配置为 `BLOCKED`：本机未安装可供 CMake 解析的 Drogon package。该环境限制未被写成产品失败，也没有用 OFF 模式 stub 结果冒充真实 Drogon 编译；production ON 结果必须由 macOS/Colima 复测提供。
+Windows `PFH_BUILD_POSTGRESQL=ON` 真实依赖配置为 `BLOCKED`：本机未安装可供 CMake 解析的 Drogon package。该环境限制未被写成产品失败，也没有用 OFF 模式 stub 结果冒充真实 Drogon 编译；对应 production ON 结果见下方 macOS/Colima 复测。
+
+### 3.4 macOS Provider 修正回归
+
+| 配置 | 结果 |
+| ---- | ---- |
+| Debug / PostgreSQL ON | configure/build `PASS`，CTest 351/351 |
+| Release / PostgreSQL ON | configure/build `PASS`，CTest 351/351 |
+| PostgreSQL OFF | configure/build `PASS`，CTest 349/349 |
+
+两个 production ON 配置均实际执行并通过 `postgresql_integration` 与 `drogon_runtime_integration`，没有 skip。Provider 定向 unit tests 为 13/13；临时诊断材料与 key/query 模式扫描为 absent。
 
 ---
 
@@ -122,7 +134,7 @@ Windows `PFH_BUILD_POSTGRESQL=ON` 真实依赖配置为 `BLOCKED`：本机未安
 
 Outbox/Scheduler runtime `PASS`：并发 claim、lease recovery、dead letter、receipt 幂等和数据库时钟由 fixture 验证；最终容器发布 11/11 Outbox，`exchange-rate-refresh` 与 `session-cleanup` 两个 lease 均创建并释放，三个 timer 在 SIGTERM 后停止。
 
-原 `d2549af` 基线的 OpenExchangeRates 真实 API blocker 已被后续 Provider 替换取代，不再是当前决策项。Windows 已用仓库外 key 完成脱敏 HTTPS 契约探测，但该探测不等于真实 Drogon transport、Scheduler 或 Linux runtime `PASS`，这些必须在新提交上由 macOS/Colima 复测。
+原 `d2549af` 基线的 OpenExchangeRates 真实 API blocker 已被后续 Provider 替换取代，不再是当前决策项。`ef66d99` 已在 macOS/Colima 使用仓库外 key 完成真实 libcurl HTTPS、Scheduler、PostgreSQL 与 Docker runtime 复测；具体主源、整批备用和双源失败结果见第 10.3 节。
 
 ---
 
@@ -137,6 +149,8 @@ Outbox/Scheduler runtime `PASS`：并发 claim、lease recovery、dead letter、
 
 当前机器没有 Docker Compose 插件，因此本轮使用与 Compose 定义等价的隔离 `docker run`/network 编排实跑；`docker-compose.yml` 保留可复现的 postgres -> flyway -> role-init -> app 顺序。
 
+Provider corrective round 再次从当前 `Dockerfile` 执行 `--no-cache --pull` 冷构建并通过。Ubuntu 24.04 base digest 仍为 `sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90`；最终 ARM64 image 为 `sha256:86d3ef5d0c29a26fc4a4d13548ba1969bf4302d0509aad27ae66ddf64c7fed1e`，36,770,560 bytes，包含 tzdata `2026b-0ubuntu0.24.04.1`、curl/libcurl `8.5.0-2ubuntu10.11` 和 OpenSSL backend。容器以 `pfh`/UID 1001 运行并进入 `healthy`，真实主源生成 1 条 CNY 快照与 1 条已发布事件，全部 11 条 Outbox 为 published，lease 为 0；双角色、8/8 FORCE RLS、唯一 JSON Content-Type、ETag、TraceId、日志脱敏、SIGTERM exit 0 和无 OOM 均通过。
+
 ---
 
 ## 8. 缺陷与修复
@@ -146,6 +160,7 @@ Outbox/Scheduler runtime `PASS`：并发 claim、lease recovery、dead letter、
 3. `to_drogon()` 对 Content-Type 使用 `addHeader`，与 Drogon 默认值形成重复单值头。改用 `setContentTypeString` 后真实响应只保留唯一 JSON Content-Type，并由 runtime smoke 回归。
 4. CTest 首轮把 `PFH_DB_*` 注入全部 343 项，污染 4 个配置测试；runtime 改为从 `PFH_TEST_DB_*` 为子进程构造环境后 Debug/Release 343/343。
 5. Colima 的 urllib 代理不绕过 localhost，导致快速 runtime 复跑间歇性空体 502/超时；测试 client 固定无代理 opener 后连续 10/10 通过。
+6. Ubuntu 24.04 的系统 Trantor 1.5.12 报告 TLS backend `None`，Drogon `supportsTls()` 为 false，原 transport 因而把明文 HTTP 发到 HTTPS 443 并稳定收到 Cloudflare 400。`ef66d99` 改用证书校验开启、只允许 HTTPS、无 redirect、带硬超时与响应大小上限的 libcurl transport；Drogon 继续只承载入站 runtime。修复后两端真实 HTTPS 与全部回归门禁均通过。
 
 ---
 
@@ -183,9 +198,13 @@ P1-S12-02 至 S12-06 原基线已经形成可追溯结果。Provider corrective 
 
 能力快照只用于暴露当前限制，不是永久供应商承诺：FreeCurrencyAPI 当前覆盖 PFH 的 USD + 18 法币；exchangerate.fun 覆盖 20 法币 + BTC。其余 12 种加密货币需要后续专用定价源；当前整批失败后只能使用完整历史快照降级。
 
-### 10.3 待 macOS/Colima 复测
+### 10.3 macOS/Colima 复测结果
 
-- production ON Debug/Release 预计各 351 项（Windows 349 基线 + 两个真实 PostgreSQL/runtime target），数量变化必须解释。
-- 使用仓库外 key 验证真实 Drogon FreeCurrencyAPI 成功路径；不得记录 key、完整 URL、响应 body 或原始日志。
-- 通过受控目标币种或等价故障注入让主源失败，验证 exchangerate.fun 整批成功、实际 source 入库和事件 payload。
-- 验证双源失败时只进入历史快照降级，并复跑 Scheduler、Docker 冷构建/健康、Outbox、lease 和 SIGTERM 停止。
+四个真实 Scheduler 场景均在隔离 PostgreSQL 16.14 fixture 上通过：
+
+1. CNY + EUR 主源：写入 2 条新快照，source 全为 `FreeCurrencyAPI`，2 条匹配 Outbox 事件 published，2 条 supplemental audit，活跃 lease 为 0。
+2. CNY + TWD 整批备用：写入 2 条新快照，source 全为 `exchangerate.fun`，主源写入为 0，2 条匹配 Outbox 事件 published，活跃 lease 为 0。
+3. EUR + ETH 双源失败且历史完整：无新快照，保留 2 条预置历史；失败事件 provider 为 `FreeCurrencyAPI/exchangerate.fun`、`historicalAvailable=true`，事件 published，活跃 lease 为 0。
+4. EUR + ETH 双源失败且历史不完整：无新快照，仅保留 1 条预置 EUR 历史；失败事件 provider 相同、`historicalAvailable=false`，事件 published，活跃 lease 为 0。
+
+所有场景与最终 Docker runtime 的日志扫描均未发现 key、Authorization、完整 query URL、response body 或临时诊断标记。API key 轮换状态：待轮换；维护者应在本轮验证后撤销或轮换测试 key，仓库中不得记录任何可关联材料。

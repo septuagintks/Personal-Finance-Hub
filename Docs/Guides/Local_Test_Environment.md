@@ -1,7 +1,7 @@
 # Personal Finance Hub - Local Test Environment
 
-**Version**: 1.3
-**Last Updated**: 2026-07-15
+**Version**: 1.4
+**Last Updated**: 2026-07-16
 **Scope**: Historical validation, S10 production preflight, and current S12 Linux/Docker gate
 
 ---
@@ -12,7 +12,7 @@ This document records the local test environment used to validate the PFH backen
 
 The project targets Linux deployment, so local feature work should periodically be checked with a Linux toolchain even when the primary development machine is macOS or Windows.
 
-The GCC 13 / 142-test result in Sections 2-7 is historical. Section 8 records the S10 production preflight at commit `db07d64`. Section 9 records the current combined S12 Linux/PostgreSQL/Docker result. Windows still owns the final S12-07 review and Phase 1 sign-off.
+The GCC 13 / 142-test result in Sections 2-7 is historical. Section 8 records the S10 production preflight at commit `db07d64`. Section 9 records the original combined S12 Linux/PostgreSQL/Docker result. Section 10 records the current Provider corrective round at `ef66d99`. Windows still owns the final S12-07 review and Phase 1 sign-off.
 
 ---
 
@@ -235,13 +235,38 @@ Do not export `PFH_DB_*` to the full CTest process. The runtime script parses th
 
 The Docker gate cold-built the repository `Dockerfile` from Ubuntu 24.04 base digest `sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90`. The final ARM64 image was `sha256:b2e161b3a551b06c50d8a31760397e2e15f49e70e8049e391692f4b6a5af9217`, 36,763,570 bytes, with tzdata 2026b. It ran as user `pfh`, reached `healthy`, published 11/11 Outbox rows, released both scheduled job leases, preserved FORCE RLS on all eight tenant tables, and stopped with exit code 0 without OOM.
 
-The original OpenExchangeRates blocker is superseded by the corrective Provider implementation. FreeCurrencyAPI is now primary and exchangerate.fun is the whole-batch fallback. Windows has completed sanitized public-contract probes, but the new commit still requires a real Drogon/Linux/Scheduler/Docker run on macOS/Colima before S12-07.
+The original OpenExchangeRates blocker is superseded by the corrective Provider implementation. FreeCurrencyAPI is now primary and exchangerate.fun is the whole-batch fallback. The required macOS/Colima rerun is recorded in the next section.
 
 All disposable S12 application/database containers and the dedicated network were removed after validation, and Colima was stopped. No test password, JWT, API key, token, response body, raw log or database dump was retained.
 
 ---
 
-## 10. Follow-Up Notes
+## 10. Provider Corrective Round
+
+The corrective validation ran on 2026-07-15 through 2026-07-16 against `ef66d995f0f9f51e7936f43af9ddc9d524fc6e56` in the same Colima Ubuntu 24.04 ARM64 VM. The VM remained limited to 2 GiB with no swap, so all builds used `--parallel 1`.
+
+Ubuntu's Trantor 1.5.12 reports no TLS backend, and Drogon reports outbound TLS unsupported. The initial transport therefore sent plain HTTP to HTTPS port 443 even though direct `curl` from the same VM completed TLS successfully. The corrected production adapter uses libcurl 8.5.0 with OpenSSL 3.0.13; peer and host verification remain enabled, protocols are HTTPS-only, redirects are disabled, and timeout/response bounds remain enforced.
+
+| Item | Result |
+| ---- | ------ |
+| Debug production ON | Configure/build PASS, CTest 351/351 |
+| Release production ON | Configure/build PASS, CTest 351/351 |
+| PostgreSQL OFF | Configure/build PASS, CTest 349/349 |
+| External CTest targets | `postgresql_integration` and `drogon_runtime_integration` executed in both ON builds |
+| Provider unit tests | 13/13 PASS |
+| Real Provider paths | Primary, whole-batch fallback, complete-history failure and incomplete-history failure PASS |
+
+The real Scheduler scenarios wrote only `FreeCurrencyAPI` snapshots for CNY/EUR, only `exchangerate.fun` snapshots for CNY/TWD with zero partial primary rows, and no new snapshots for the two EUR/ETH dual-failure fixtures. Their failure events used `FreeCurrencyAPI/exchangerate.fun` and correctly distinguished complete from incomplete history. Matching Outbox events were published and all active lease counts returned to zero.
+
+The cold Docker build used Ubuntu 24.04 base digest `sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90`. The final ARM64 image was `sha256:86d3ef5d0c29a26fc4a4d13548ba1969bf4302d0509aad27ae66ddf64c7fed1e`, 36,770,560 bytes, with tzdata `2026b-0ubuntu0.24.04.1` and curl/libcurl `8.5.0-2ubuntu10.11` using OpenSSL. It ran as `pfh`/UID 1001, reached `healthy`, performed a real FreeCurrencyAPI refresh, published 11/11 Outbox rows, released all leases, preserved the request/background role boundary and FORCE RLS on all eight tenant tables, returned exactly one JSON Content-Type, and exited 0 on SIGTERM without OOM.
+
+No API key, Authorization value, full query URL, response body, database credential, or raw log was retained. The test API key still needs to be revoked or rotated by the maintainer after validation.
+
+All `pfh-provider-*` containers and the dedicated network were removed after the run, and Colima was stopped. Unrelated Docker resources were not modified.
+
+---
+
+## 11. Follow-Up Notes
 
 - The recorded GCC 13 / 142-test run predates the timezone-aware reporting
   implementation. Current HEAD requires the CMake chrono-tzdb probe to pass and

@@ -30,10 +30,9 @@ Status: Active
 
 ### 2.1 近期顺序
 
-1. Windows 提交 FreeCurrencyAPI 主源 + exchangerate.fun 整批备用源修正及 349/349 本地证据，固定交接基线。
-2. macOS/Colima 在该提交上执行真实主源成功、主源失败后备用源整批成功、Linux production ON Debug/Release、Scheduler 与 Docker 定向复测。
-3. macOS 返回所有权后，Windows 验证签名、执行 S12-07 全量 review 与最终本地回归。
-4. 完成 Phase 1 文档定稿与分支交付；S12-07 签署前不合并 `main`。
+1. macOS 返回 Provider corrective round 的签名提交、Linux/HTTPS/Scheduler/Docker 证据与交接所有权。
+2. Windows 验证返回签名，执行 S12-07 全量 review 与最终本地回归。
+3. 完成 Phase 1 文档定稿与分支交付；S12-07 签署前不合并 `main`。
 
 ### 2.2 当前前置条件
 
@@ -46,8 +45,9 @@ Status: Active
 - P1-S11-01 至 S11-07 已完成本地实现与全量 review；Windows GCC 16 / PostgreSQL OFF 当前为 292 个 unit/use-case、17 个 In-Memory integration、28 个 framework-neutral API 和 4 个静态门禁，共 341/341。
 - S11 后台写任务只使用普通 request-role client 访问非 RLS 表；BYPASSRLS `background_db` 仅用于 `PostgresActiveCurrencyQuery`。该权限边界已在 P1-S12 fixture 与容器中通过真实角色验证。
 - P1-S12-01 已在两个全新构建目录完成 Windows GCC 16.1 / PostgreSQL OFF Debug 与 Release：两者均 104/104 build steps、341/341 CTest，三类 production compile gate 通过；详细结果见 `Docs/Development/Phase_1_S12_Delivery_Summary.md`。
-- S12-02 至 S12-06 原基线已在 macOS/Colima 完成 production ON 343/343、真实 PostgreSQL/Drogon/Outbox/Scheduler 和 Docker 验证；该证据仍覆盖未受影响范围，但不能替代新 Provider 提交上的 Linux/HTTPS/Docker 复测。
+- S12-02 至 S12-06 原基线已在 macOS/Colima 完成 production ON 343/343、真实 PostgreSQL/Drogon/Outbox/Scheduler 和 Docker 验证。
 - Provider 修正后的 Windows PostgreSQL OFF Debug/Release 均为 349/349；新增测试固定 FreeCurrencyAPI 严格响应、exchangerate.fun superset、外部 rate Half-Even 归一、整批切换、双源失败脱敏及新环境变量优先级。
+- Provider corrective round 已在 `ef66d99` 完成 Linux production ON Debug/Release 351/351、PostgreSQL OFF 349/349、四个真实 Scheduler 场景和新 Docker 冷构建/runtime；测试 key 仍待维护者轮换。
 
 ---
 
@@ -129,7 +129,7 @@ Status: Active
 - [x] 实现 `CreateTransactionUseCase` 与 `DeleteTransactionUseCase`，包含权限校验、事务边界和领域错误映射 <!-- id: 35 -->
 - [x] 实现 `CreateTransferUseCase`，串联账户读取、转账聚合构造、余额更新和 outbox 写入 <!-- id: 36 -->
 - [x] 实现 `RefreshExchangeRatesUseCase`，负责外部汇率拉取、降级、告警事件和非阻塞调度入口 <!-- id: 37 -->
-  - 当前 Provider 为 FreeCurrencyAPI 主源 + exchangerate.fun 整批备用源；Windows 已完成脱敏端点契约探测和 mock transport 回归，真实 Drogon/Scheduler 组合路径由 #57 的 macOS 复测关闭。
+  - 当前 Provider 为 FreeCurrencyAPI 主源 + exchangerate.fun 整批备用源；Windows 脱敏端点契约与 mock transport、macOS 真实 libcurl HTTPS/Scheduler 主源/整批备用/双源失败路径均已通过。
 - [x] 实现账户查询与余额查询用例，提供 API 所需 DTO，不暴露持久化模型 <!-- id: 38 -->
 - [x] 实现报表 QueryService，支持 net worth、cash flow 和 dashboard summary 的最小查询 <!-- id: 39 -->
   - 备注：cash flow 显式排除 Transfer；跨币种折算走汇率仓储（直接/反向/USD 三角），缺失汇率报错、DB 故障映射为 InfrastructureFailure（不吞错）。
@@ -211,7 +211,8 @@ Status: Active
 
 - [~] 在另一台机器执行 P1-S12：Linux Debug/Release 构建、Docker 服务启动、PostgreSQL 16+ 空库迁移、真实 Repository/UoW/RLS/并发/数值边界、API smoke、Outbox/Scheduler 测试，并记录 commit hash、环境版本、命令和结果 <!-- id: 57 -->
   - S12-02 至 S12-06：Colima Ubuntu ARM64 production ON Debug/Release 343/343、V1-V6 与 legacy 升级、12 个 PostgreSQL scenario、真实 Drogon API、Outbox/Scheduler、双角色和最终 Docker 镜像均 `PASS`；PostgreSQL OFF 341/341 回归通过。
-  - Provider 替换后剩余：在新签名提交上复测 production ON Debug/Release（预期 351 项）、真实 FreeCurrencyAPI 成功、强制主源失败后的 exchangerate.fun 整批成功、Scheduler 入库 source、Docker 冷构建/运行和优雅停止；Windows S12-07 尚未执行，因此任务保持部分完成。
+  - Provider corrective round：`ef66d99` 上 production ON Debug/Release 351/351、PostgreSQL OFF 349/349；真实 FreeCurrencyAPI 主源、exchangerate.fun 整批备用、双源失败完整/不完整历史四个场景均 `PASS`。
+  - 新 Docker 冷构建/runtime `PASS`：image `sha256:86d3ef5d0c29a26fc4a4d13548ba1969bf4302d0509aad27ae66ddf64c7fed1e`，healthy/non-root、双角色、8/8 FORCE RLS、Outbox/lease、唯一 JSON Content-Type、SIGTERM exit 0、无 OOM。仅 Windows S12-07 尚未执行，因此任务保持部分完成。
 
 - [x] V3 修复后在 PostgreSQL 16.14 + Flyway OSS 10.22.0 环境对 V1-V3 执行真实空库 `migrate` / `info` / `validate`、第二次 no-op、种子数据断言和完整 CTest，确认 28 处 enum cast 修复有效 <!-- id: 58 -->
   - 外部复测提交 `4621f69`：33 条币种、55 条分类模板、27 root + 28 child、40 expense + 15 income 全部符合预期，254/254 CTest 通过；该结论只关闭迁移缺陷，不替代 #46 的真实 Repository/UoW/RLS 验收。
@@ -358,3 +359,13 @@ S10 报告 §4.2 暴露：V3 中 7 段二级分类 `INSERT ... SELECT ... UNION 
 - 脱敏真实端点探测：FreeCurrencyAPI 支持批次返回 200 且集合精确；加入 TWD 后主源返回 422，exchangerate.fun 返回 200 并覆盖 CNY/TWD；未记录 key、URL 或响应正文。
 - Windows GCC 16.1 / PostgreSQL OFF Debug、Release configure/build 与 CTest 均 `PASS`，349/349；三类 production compile gate 和 4 个静态门禁通过。
 - 外部能力边界：主源覆盖 USD + 18 法币；备用源覆盖 20 法币 + BTC。其余 12 种加密货币定价由 #59 延期，不得伪装为本轮 Provider 已覆盖。
+
+---
+
+## 15. P1-S12 Provider macOS/Colima corrective round
+
+- 初始 Drogon outbound transport 在 Ubuntu 24.04 的 Trantor 1.5.12 上无 TLS backend，稳定把明文 HTTP 发到 HTTPS 443；`ef66d99` 改用系统 libcurl 8.5.0/OpenSSL 3.0.13，并保持证书校验、HTTPS-only、无 redirect、硬超时和有界响应。
+- Linux production ON Debug/Release 均 351/351，PostgreSQL OFF 349/349；两个 production ON 外部 target 均实际执行，Provider unit tests 13/13。
+- 真实 Scheduler：CNY/EUR 主源 2 条快照全部来自 `FreeCurrencyAPI`；CNY/TWD 整批备用 2 条全部来自 `exchangerate.fun` 且无主源部分写入；EUR/ETH 双源失败的完整与不完整历史语义均正确。
+- 新 Docker image `sha256:86d3ef5d0c29a26fc4a4d13548ba1969bf4302d0509aad27ae66ddf64c7fed1e`，36,770,560 bytes；真实主源刷新、11/11 Outbox、lease 释放、双角色、8/8 FORCE RLS、唯一 JSON Content-Type、non-root、healthy、SIGTERM exit 0 和无 OOM 均通过。
+- 所有日志与仓库扫描均无 key、Authorization、完整 query URL、response body 或临时诊断材料。测试 API key 状态为待轮换，Windows S12-07 仍是 Phase 1 最终签署前置条件。
