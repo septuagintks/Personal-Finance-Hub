@@ -119,6 +119,8 @@ Drogon timer callback 只执行本机防重入并把任务提交到有界 worker
 | Drogon runtime | 认证、RLS、财务、报表、响应头和 SIGTERM PASS |
 | Docker | 冷构建、healthy、non-root、双角色、Outbox/Scheduler PASS |
 
+最终结果合并后，macOS/Colima 在相同环境再次执行完整 Phase 1 验收，全部通过，测试对象无需修正。
+
 ### 5.1 真实 Provider 场景
 
 | 场景 | 结果 |
