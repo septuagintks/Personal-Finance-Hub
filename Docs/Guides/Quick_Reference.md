@@ -1,256 +1,126 @@
-# Personal Finance Hub - 开发者快速参考
+# Personal Finance Hub 开发者快速参考
 
-**版本**: 0.2.0-alpha
-**更新日期**: 2026-07-13
+Version: 1.0
+Status: Active
 
 ---
 
-## 快速开始
+## 1. 本地构建
 
-### 构建项目
+### 1.1 Windows 快速回归
 
 ```powershell
-# 配置
-mkdir build
-cd build
-cmake .. -DCMAKE_BUILD_TYPE=Debug
-
-# 编译
-cmake --build . --config Debug
-
-# 运行
-./pfh_server.exe
+cmake -S . -B build -G Ninja `
+  -DCMAKE_BUILD_TYPE=Debug `
+  -DPFH_BUILD_POSTGRESQL=OFF
+cmake --build build
+ctest --test-dir build --output-on-failure
 ```
 
-### 运行质量检查
+综合检查：
 
 ```powershell
-# 在项目根目录执行
 ./quality_check.ps1
 ```
 
-此脚本会自动执行：
+### 1.2 Linux Production Build
 
-- Git 空白符检查
-- CMake 配置验证
-- 完整构建
-- 单元测试与 In-Memory 集成测试
-- Markdown 文件检查
+```bash
+cmake -S . -B build/linux-release -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DPFH_BUILD_POSTGRESQL=ON
+cmake --build build/linux-release
+ctest --test-dir build/linux-release --output-on-failure
+```
+
+Production ON 需要 Drogon、PostgreSQL client、OpenSSL、Argon2、libcurl 和 `tzdata`。完整流程见 [Linux Development Workflow](Linux_Development_Workflow.md)。
 
 ---
 
-## 项目结构速览
+## 2. 配置
 
-```
-C++/PFH/
-├── src/                    # 实现文件
-│   ├── domain/             # 纯业务逻辑（无框架依赖）
-│   ├── application/        # 用例编排
-│   ├── infrastructure/     # 持久化与外部服务
-│   ├── presentation/       # REST API 控制器
-│   └── bootstrap/          # 应用入口 (main.cpp)
-├── include/pfh/            # 公共头文件（对应 src/ 结构）
-├── tests/
-│   ├── unit/               # 单元测试（无数据库）
-│   ├── integration/        # In-Memory 语义测试与 PostgreSQL 集成场景
-│   └── api/                # API 测试
-├── config/                 # 配置文件
-└── migrations/             # 数据库迁移脚本
-```
-
----
-
-## 配置管理
-
-### 创建本地配置
+创建本地配置：
 
 ```powershell
 Copy-Item config/config.example.json config/config.local.json
 ```
 
-### 配置文件优先级
+环境变量优先于 JSON。主要变量：
 
-1. `config.local.json` - 本地开发（不提交到 Git）
-2. `config.test.json` - 测试环境
-3. `config.example.json` - 配置模板
+- `PFH_ENVIRONMENT`
+- `PFH_JWT_SECRET`
+- `PFH_PASSWORD_PEPPER`
+- `PFH_DB_*`
+- `PFH_BACKGROUND_DB_*`
+- `PFH_FREECURRENCYAPI_API_KEY`
 
-⚠️ **绝不提交包含真实密码、JWT 密钥或 API 密钥的文件**
-
----
-
-## 测试命名规范
-
-遵循模式：`<ClassName>_When<Condition>_<ExpectedBehavior>`
-
-### 示例
-
-```cpp
-// 单元测试
-Money_WhenAddingSameCurrency_ReturnsCorrectSum
-Money_WhenAddingDifferentCurrency_ThrowsError
-
-// 集成测试
-AccountRepository_WhenSavingAccount_PersistsCorrectly
-TransactionRepository_WhenQueryingByUser_ReturnsOnlyUserTransactions
-
-// API 测试
-CreateTransfer_WhenValidInput_Returns201
-CreateTransfer_WhenUnauthorized_Returns401
-```
-
-详见：[tests/TEST_NAMING_CONVENTION.md](../../tests/TEST_NAMING_CONVENTION.md)
+真实 secret 只放在本地配置、环境变量或 secret store。完整说明见 [`config/README.md`](../../config/README.md)。
 
 ---
 
-## 编译选项
-
-### 当前启用的警告
-
-- `-Wall` - 大部分警告
-- `-Wextra` - 额外警告
-- `-Werror` - 警告视为错误
-- `-pedantic` - 严格 ISO C++ 遵从性
-- `-Wconversion` - 隐式类型转换警告
-- `-Wsign-conversion` - 符号转换警告
-
-### 构建类型
-
-- **Debug**: 包含调试信息，禁用优化 (`-g -O0`)
-- **Release**: 启用优化 (`-O3`)
-
----
-
-## 依赖项安装
-
-### 使用 vcpkg（推荐）
+## 3. 数据库
 
 ```powershell
-# 安装依赖
-vcpkg install drogon
-vcpkg install libpq
-vcpkg install spdlog
-vcpkg install gtest
-
-# 配置 CMake 使用 vcpkg
-cmake .. -DCMAKE_TOOLCHAIN_FILE=[vcpkg root]/scripts/buildsystems/vcpkg.cmake
+docker compose up -d postgres
+docker compose run --rm flyway migrate
+docker compose run --rm flyway validate
+docker compose run --rm flyway info
 ```
+
+迁移文件 append-only。已发布 migration 不改写 checksum；修正使用新版本。详细规则见 [Database Migration Guide](Database_Migration_Guide.md)。
 
 ---
 
-## Git 工作流
+## 4. 测试入口
 
-### 提交前检查
+| 类型 | 位置 | 目的 |
+| ---- | ---- | ---- |
+| Unit | `tests/unit/` | Domain、Application、配置、调度和 Provider |
+| Integration | `tests/integration/` | In-Memory 语义与 PostgreSQL scenarios |
+| API | `tests/api/` | HTTP 契约与资源流程 |
+| Static | `tests/sql/` 等 | migration、OpenAPI、币种和 adapter 契约 |
+
+测试命名遵循 `<Class>_When<Condition>_<Expected>`，详见 [`tests/TEST_NAMING_CONVENTION.md`](../../tests/TEST_NAMING_CONVENTION.md)。
+
+最终 Phase 1 基线：Windows PostgreSQL OFF 349/349，Linux production ON 351/351，PostgreSQL fixture 12/12 scenarios。
+
+---
+
+## 5. Git 工作流
 
 ```powershell
-# 运行质量检查
-./quality_check.ps1
-
-# 检查空白符错误
+git status --short --branch
 git diff --check
-
-# 查看变更
-git status
-git diff
+./quality_check.ps1
 ```
 
-### 分支策略
-
-- `main` - 稳定分支，只接收已完成完整验证的 Phase 交付
-- `feature/phase1-foundation` - 当前 Phase 1 长期开发分支
-- 后续 Phase 分支 - 从 `main` 单独创建，并在计划中记录实际名称
-
-Phase 内的代码、文档、测试和交付总结应先在对应 Phase 分支完成，再统一合并回 `main`。
+- 每个 Phase 使用独立分支。
+- 代码、测试、文档和交付摘要完成后再合并 `main`。
+- Codex 创建提交时必须遵循项目 `git-signing` Skill。
+- 不使用 force-push、reset 或 clean 处理未知改动。
 
 ---
 
-## 当前开发状态
+## 6. 架构速记
 
-### 已完成
+```text
+Presentation -> Application -> Domain <- Infrastructure
+```
 
-- 项目骨架和目录结构
-- CMake 构建系统
-- C++23 编译配置
-- 测试框架准备
-- 质量检查脚本
-- 配置管理机制
-- P1-S05 金融原语
-- P1-S06 领域模型与领域服务
-- P1-S07 数据库迁移脚本
-- P1-S08 Repository/UoW 接口与 In-Memory 语义实现
-- P1-S09 Application Use Case
-- P1-S10 REST API、认证、基础资源、流水、转账、报表与 OpenAPI 本地实现
-- P1-S11 Outbox、Scheduler、认证数据清理与后台 production 装配；汇率部分后续已替换为 FreeCurrencyAPI 主源 + exchangerate.fun 整批备用源
-- Windows GCC 16 / PostgreSQL OFF：300 unit/use-case + 17 In-Memory integration + 28 framework-neutral API + 4 static gates，Debug/Release 349/349 通过
-- S10 外部基础预检：真实依赖 Debug/Release 321/321、PostgreSQL 16.14 V1-V5、双角色启动和核心 API smoke 通过
-- S12 原外部基线：Linux production ON 343/343、真实 PostgreSQL/Drogon/Outbox/Scheduler 与 Docker 通过
-
-### 待办
-
-- P1-S12: 在新 Provider 提交上复测 Linux 351 项、真实主备 HTTPS、Scheduler 与 Docker，返回后完成文档定稿和分支交付
-
-详见：[tasks.md](../Development/tasks.md)
+- 金额与汇率不使用二进制浮点。
+- Domain Service 无 Repository/事务/事件副作用。
+- Application 管理事务和权限。
+- 业务事实与 Outbox 同事务。
+- 租户访问受 `user_id` 与 FORCE RLS 约束。
+- API 金额使用字符串，错误响应包含 TraceId 且不泄露内部细节。
 
 ---
 
-## 架构原则
+## 7. 文档入口
 
-### Clean Architecture 依赖方向
-
-```
-Presentation → Application → Domain ← Infrastructure
-```
-
-**关键规则**：
-
-- Domain 层不依赖任何框架
-- 所有依赖指向内层（Domain）
-- Infrastructure 实现 Domain 定义的接口
-
-### 金融正确性原则
-
-- ❌ 禁止使用 `float` 或 `double` 表示金额和汇率
-- ✅ 使用定点数 `Decimal` 类型
-- ✅ 跨币种操作必须显式提供汇率
-- ✅ Transfer 不计入收入/支出统计
-
----
-
-## 常用文档
-
+- [文档中心](../README.md)
+- [总体开发计划](../Development_Plans/Overall_Development_Plan.md)
+- [Phase 1 开发计划](../Development_Plans/Phase_1/Phase_1_Development_Plan.md)
+- [Phase 1 开发记录](../Archive/Phase_1_Development_Record.md)
 - [技术架构](../Architecture/01_Technical_Architecture.md)
-- [数据库设计](../Architecture/02_Database_Design.md)
-- [领域模型设计](../Architecture/03_Domain_Model_Design.md)
-- [测试策略](../Architecture/16_Testing_Strategy.md)
-- [Phase 1 开发计划](../Development_Plans/Phase_1_Development_Plan.md)
-- [Phase 1 详细计划](../Development_Plans/Phase_1/Phase_1_Detailed_Development_Plan.md)
-- [Linux 开发工作流](Linux_Development_Workflow.md)
-
----
-
-## 问题排查
-
-### 构建失败
-
-1. 检查编译器版本是否支持 C++23
-2. 确认 CMake 版本 >= 3.20
-3. 查看构建输出中的具体错误信息
-
-### 测试失败
-
-1. 确认 GoogleTest 已正确安装
-2. PostgreSQL 测试时检查测试数据库、迁移和 RLS 用户上下文；In-Memory 回归不需要数据库
-3. 查看测试输出定位失败的具体测试
-
-### 配置问题
-
-1. 确认 `config.local.json` 已创建
-2. 检查 JSON 格式是否正确
-3. 验证数据库连接参数
-
----
-
-## 联系与支持
-
-- 项目文档：`Docs/`
-- 任务跟踪：`Docs/Development/tasks.md`
-- Phase 1 交付归档：`Docs/Archive/Phase_1_S12_Delivery_Summary.md`
+- [REST API OpenAPI](../Architecture/10_REST_API_OpenAPI.json)

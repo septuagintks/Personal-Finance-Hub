@@ -1,74 +1,78 @@
-# Personal Finance Hub (PFH) 文档目录结构指南
+# Personal Finance Hub 文档目录指南
+
+Version: 2.0
+Status: Active
 
 ---
 
+## 1. 目录职责
+
+| 目录 | 内容 | 生命周期 |
+| ---- | ---- | -------- |
+| `Architecture/` | 当前系统设计与契约 | 随实现持续维护 |
+| `Development_Plans/` | 总路线和各 Phase 计划 | Phase 完成后保留最终范围 |
+| `Guides/` | 构建、配置、迁移和测试操作 | 只保留当前可执行方法 |
+| `Standards/` | 格式、命名和治理规则 | 稳定维护 |
+| `Archive/` | 已完成阶段的结果投影 | 不追加过程日志 |
+
+当前不设置长期 `Development/` 任务目录。进行中的任务优先由对应 Phase 计划跟踪；需要临时文档时可在 `Docs/Development/` 创建，并在完成后合并到正式文档或删除。
+
+---
+
+## 2. Development Plans
+
+每个 Phase 使用独立子目录：
+
 ```text
-Docs/
-├── README.md
-│
-├── Architecture/
-│   ├── 01_Technical_Architecture.md
-│   ├── 02_Database_Design.md
-│   ├── 03_Domain_Model_Design.md
-│   ├── 04_Money_Currency_System_Design.md
-│   ├── 05_Repository_and_Persistence_Design.md
-│   ├── 06_Service_and_Use_Case_Design.md
-│   ├── 07_Workflow_and_Lifecycle_Design.md
-│   ├── 08_Exchange_Rate_System_Design.md
-│   ├── 09_Reporting_and_Analytics_Design.md
-│   ├── 10_REST_API_Design.md
-│   ├── 10_REST_API_OpenAPI.json
-│   ├── 11_Sync_Framework_Design.md
-│   ├── 12_Scheduler_Design.md
-│   ├── 13_Frontend_Design.md
-│   ├── 14_Event_Design.md
-│   ├── 15_Error_Handling_Design.md
-│   └── 16_Testing_Strategy.md
-│
-├── Development/
-│   └── tasks.md
-│
-├── Development_Plans/
-│   ├── Overall_Development_Plan.md
-│   ├── Phase_1_Development_Plan.md
-│   ├── Phase_1/
-│   │   └── Phase_1_Detailed_Development_Plan.md
-│   ├── Phase_2_Development_Plan.md
-│   └── Phase_3_Development_Plan.md
-│
-├── Guides/
-│   ├── Directory_Guidance.md
-│   ├── Dependency_Installation_Guide.md
-│   ├── Database_Migration_Guide.md
-│   ├── Linux_Development_Workflow.md
-│   ├── Local_Test_Environment.md
-│   └── Quick_Reference.md
-│
-├── Standards/
-│   └── Documents_Format_Standard.md
-│
-└── Archive/
-    ├── Config_Env_Overlay_Design.md
-    ├── Documents_Optimize_1.md
-    ├── Documents_Optimize_2.md
-    ├── Documents_Optimize_3.md
-    ├── Phase_1_S01-S03_Delivery_Summary.md
-    ├── Phase_1_S04_Delivery_Summary.md
-    ├── Phase_1_S05_Delivery_Summary.md
-    ├── Phase_1_S06_Delivery_Summary.md
-    ├── Phase_1_S07_Delivery_Summary.md
-    ├── Phase_1_S08_Delivery_Summary.md
-    ├── Phase_1_S09_Delivery_Summary.md
-    ├── Phase_1_S10_Delivery_Summary.md
-    ├── Phase_1_S10_PostgreSQL_Persistence_Validation_Report.md
-    ├── Phase_1_S11_Delivery_Summary.md
-    └── Phase_1_S12_Delivery_Summary.md
+Development_Plans/
+├── Overall_Development_Plan.md
+├── Phase_1/Phase_1_Development_Plan.md
+├── Phase_2/Phase_2_Development_Plan.md
+└── Phase_3/Phase_3_Development_Plan.md
 ```
 
-说明：
+计划只描述目标、范围、执行顺序、质量门禁和能力边界。普通实现过程、临时 blocker 和逐次 review 不进入计划。
 
-1. 上述目录树只描述当前仓库中已经提交的文档。
-2. `Docs/Development/Documents_Optimize_Plan.md` 用于正在设计中的文档优化方案，按需创建。
-3. `Docs/Development/Phase_<N>_S<start>-S<end>_Delivery_Summary.md` 用于开发阶段交付记录，开发中存放在 `Docs/Development/`，验收完成后归档到 `Docs/Archive/`。
-4. `Docs/Development_Plans/` 用于总体与阶段性开发计划，当前包含三阶段总开发计划大纲、Phase 1 细化子计划和 Phase 1、Phase 2、Phase 3 开发计划。
-5. `Docs/Guides/` 用于当前开发过程中的实时指南、命令速查和操作说明；稳定的格式约束仍放在 `Docs/Standards/`。
+---
+
+## 3. Archive
+
+一个完成 Phase 默认保留：
+
+1. 一份 `Phase_N_Development_Record.md`。
+2. 按自然模块划分的少量 `Phase_N_Sxx-Syy_Delivery_Summary.md`。
+3. 必要的跨阶段治理总结。
+
+交付摘要应保持体量接近，并只记录：
+
+- 最终交付能力。
+- 持续有效的架构规则。
+- 最终验收矩阵。
+- 明确的能力边界。
+- 指向现行设计和指南的链接。
+
+不单独归档普通 bug、一次性测试报告、临时任务清单或已经被最终门禁覆盖的中间结果。完整历史由 Git 提供。
+
+---
+
+## 4. 命名
+
+- 架构文档：两位数字 + PascalCase 单词，例如 `08_Exchange_Rate_System_Design.md`。
+- 开发计划：`Phase_N_Development_Plan.md`。
+- 开发记录：`Phase_N_Development_Record.md`。
+- 交付摘要：`Phase_N_Sxx-Syy_Delivery_Summary.md`。
+- 指南和规范：PascalCase 单词以下划线连接。
+
+命名和目录树必须描述实际文件，不列规划中尚未创建的文档。
+
+---
+
+## 5. 更新检查
+
+目录或文件名变化时同步检查：
+
+- `Docs/README.md`。
+- 本文件。
+- 根 `README.md` 的文档入口。
+- Markdown 相对链接。
+- 计划、指南和归档中的单一事实来源。

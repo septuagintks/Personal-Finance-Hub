@@ -1,311 +1,215 @@
-# Personal Finance Hub - Linux Development Workflow
+# Personal Finance Hub Linux 开发与交付工作流
 
-Version: 1.1
-Backend: C++23
-Architecture: Clean Architecture + Lightweight DDD
+Version: 2.0
 Status: Active
 
 ---
 
 ## 1. 目标
 
-本指南用于约定 PFH 后端在 Linux 环境下的标准开发、构建、运行与测试工作流。
+PFH 的生产部署目标是 Linux。Windows/PostgreSQL OFF 用于快速回归，阶段交付必须在 Linux production ON、真实 PostgreSQL 和 Docker 环境验证。
 
-由于最终部署目标是 Linux，本项目在 PostgreSQL、Drogon、Repository 和 API 开发期间，应持续保证以下事实：
+推荐环境：
 
-- 代码可以在 Linux 工具链下完成配置与编译。
-- 单元测试和后续集成测试优先在 Linux 环境回归。
-- Phase 交付前，Linux 环境下的关键质量命令必须跑通。
-
----
-
-## 2. 推荐环境
-
-### 2.1 推荐发行版
-
-- Ubuntu 24.04 LTS
-- Ubuntu 22.04 LTS
-
-其他 Debian 系发行版通常也可使用，但默认以 Ubuntu 工作流为准。
-
-### 2.2 推荐开发方式
-
-按优先顺序推荐：
-
-1. **原生 Linux 开发机**
-2. **Windows + WSL2 (Ubuntu)**
-3. **Linux 虚拟机**
-
-如果主要开发机仍是 Windows，建议至少保留一套 WSL2 Linux 环境，用于：
-
-- Linux 工具链构建
-- Linux 单元测试回归
-- 后续 PostgreSQL / Drogon 集成验证
-
-### 2.3 基础工具
-
-- 支持 `std::chrono` IANA tzdb 的 C++23 工具链（以 GCC 14+ / 新版 libstdc++ 为基线，最终以 CMake 能力探测结果为准）
-- CMake 3.20+
-- Ninja
-- Git
-- pkg-config
-- curl / unzip / tar
-- PostgreSQL 16+（P1-S07 之后需要）
+- Ubuntu 24.04 LTS。
+- GCC 13+ 或兼容 Clang/libstdc++。
+- CMake 3.20+、Ninja。
+- PostgreSQL 16+。
+- Drogon、OpenSSL、Argon2、libcurl。
+- `tzdata`。
+- Docker。
 
 ---
 
-## 3. Phase 分支工作流
+## 2. 环境准备
 
-PFH 的阶段开发默认采用 **每个 Phase 一个长期分支** 的方式推进。
-
-当前 Phase 1 分支为 `feature/phase1-foundation`。后续 Phase 继续遵循“一阶段一长期分支”，实际名称在对应阶段计划中记录。
-
-标准流程：
-
-1. 从 `main` 切出对应 Phase 分支。
-2. 整个 Phase 的开发、测试、文档回写和交付记录都在该 Phase 分支内完成。
-3. 在该 Phase 分支上完成完整回归和交付验收后，再合并回 `main`。
-4. 未完成完整测试和交付总结前，不直接把该 Phase 的半成品合并到 `main`。
-
-示例：
+### 2.1 Ubuntu Packages
 
 ```bash
-git switch main
-git pull --ff-only origin main
-git switch -c feature/phase1-foundation
+sudo apt-get update
+sudo apt-get install -y \
+  build-essential cmake ninja-build git pkg-config tzdata \
+  libdrogon-dev libpq-dev libssl-dev libargon2-dev \
+  libcurl4-openssl-dev
 ```
 
-如果分支已存在：
+使用 vcpkg 时，以项目 `vcpkg.json` 为依赖清单，并把 toolchain 传给 CMake。
+
+### 2.2 工具检查
 
 ```bash
-git switch feature/phase1-foundation
-git pull --ff-only origin main
+uname -a
+cmake --version
+ninja --version
+g++ --version
+git --version
+docker version
 ```
+
+CMake configure 会探测 `std::chrono` IANA tzdb；探针失败时不得用 UTC fallback 绕过。
 
 ---
 
-## 4. Linux 环境初始化
-
-### 4.1 安装工具链
-
-以 Ubuntu 为例：
+## 3. 快速 PostgreSQL OFF 回归
 
 ```bash
-sudo apt update
-sudo apt install -y \
-  build-essential \
-  gcc-14 g++-14 \
-  clang-16 \
-  cmake \
-  ninja-build \
-  pkg-config \
-  git \
-  curl \
-  unzip \
-  tar \
-  tzdata
+cmake -S . -B build/linux-off -G Ninja \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DPFH_BUILD_POSTGRESQL=OFF
+cmake --build build/linux-off
+ctest --test-dir build/linux-off --output-on-failure
 ```
 
-如需 PostgreSQL 本地测试环境：
-
-```bash
-sudo apt install -y postgresql postgresql-client
-```
-
-### 4.2 选择编译器
-
-当前 Phase 1 的 `Decimal` 实现依赖 GCC/Clang 的原生 `__int128` 扩展，因此 Linux 环境推荐优先使用 GCC。
-
-```bash
-export CC=gcc-14
-export CXX=g++-14
-```
-
-如需改用 Clang：
-
-```bash
-export CC=clang-16
-export CXX=clang++-16
-```
-
-Clang 在 Linux 上通常仍使用系统 `libstdc++`；仅升级 Clang 本身不代表具备
-`std::chrono::locate_zone`。项目在 CMake configure 阶段会编译并链接一个 tzdb
-探针，不满足时直接报错。运行环境还必须安装 `tzdata`，否则 IANA 时区无法加载。
+OFF 模式运行 Domain、Application、In-Memory integration、framework-neutral API 和 static gates，并编译 production adapter stubs。它不能替代真实 ABI、SQL、RLS 或运行时测试。
 
 ---
 
-## 5. 获取代码与目录准备
+## 4. Production ON 构建
+
+### 4.1 Debug
 
 ```bash
-git clone <repo-url>
-cd PFH
-git switch feature/phase1-foundation
+cmake -S . -B build/linux-debug -G Ninja \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DPFH_BUILD_POSTGRESQL=ON
+cmake --build build/linux-debug --parallel
 ```
 
-建议为 Linux 构建单独使用专用目录，避免和 Windows 构建目录混用：
+### 4.2 Release
 
 ```bash
-mkdir -p build/linux-gcc-debug
+cmake -S . -B build/linux-release -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DPFH_BUILD_POSTGRESQL=ON
+cmake --build build/linux-release --parallel
 ```
+
+Production ON 必须真实解析并链接 Drogon、PostgreSQL、OpenSSL、Argon2 和 libcurl。缺依赖应明确失败，不得用 OFF stub 结果替代。
 
 ---
 
-## 6. 配置与编译
+## 5. 数据库与迁移
 
-### 6.1 配置
-
-```bash
-cmake -S . -B build/linux-gcc-debug \
-  -G Ninja \
-  -DCMAKE_BUILD_TYPE=Debug
-```
-
-### 6.2 编译
+### 5.1 一次性测试环境
 
 ```bash
-cmake --build build/linux-gcc-debug
+docker compose up -d postgres
+docker compose run --rm flyway migrate
+docker compose run --rm flyway info
+docker compose run --rm flyway validate
+docker compose run --rm flyway migrate
 ```
 
-### 6.3 Release 构建
+第二次 migrate 应为 no-op。只对可删除的测试数据库或 volume 执行初始化，不操作个人数据。
+
+### 5.2 双数据库角色
+
+Production runtime 要求：
+
+- request role：non-superuser、non-BYPASSRLS。
+- background role：独立、non-superuser、BYPASSRLS、`default_transaction_read_only=on`。
+- background role 只具有批准的跨租户只读权限。
+- 租户表保持 ENABLE/FORCE RLS。
+
+凭据通过环境变量、忽略的本地配置或 secret store 注入。
+
+### 5.3 CTest Connection Strings
 
 ```bash
-cmake -S . -B build/linux-gcc-release \
-  -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release
-
-cmake --build build/linux-gcc-release
+export PFH_TEST_DB_ADMIN='host=127.0.0.1 port=<port> dbname=<db> user=<admin> password=<secret>'
+export PFH_TEST_DB_REQUEST='host=127.0.0.1 port=<port> dbname=<db> user=<request> password=<secret>'
+export PFH_TEST_DB_BACKGROUND='host=127.0.0.1 port=<port> dbname=<db> user=<background> password=<secret>'
 ```
+
+不要把 `PFH_DB_*` 注入整个 CTest 进程。Runtime integration 会只向子 `pfh_server` 传入应用配置，避免污染配置单元测试。
 
 ---
 
-## 7. 配置文件工作流
-
-首次运行前复制本地配置：
+## 6. 全量测试
 
 ```bash
-cp config/config.example.json config/config.local.json
+ctest --test-dir build/linux-debug --output-on-failure
+ctest --test-dir build/linux-release --output-on-failure
 ```
 
-当前阶段：
+Production ON 必须实际执行：
 
-- `config.example.json` 用于提供结构模板。
-- `config.local.json` 用于本地 Linux 开发。
-- 敏感信息不应提交到 Git。
+- `postgresql_integration`。
+- `drogon_runtime_integration`。
 
-`JsonConfigLoader` 已支持环境变量 overlay，应优先使用环境变量覆盖敏感项，例如：
+验收范围：
 
-- `PFH_JWT_SECRET`
-- `PFH_DB_PASSWORD`
-- `PFH_DB_HOST`
+- V1-V6、legacy upgrade 和种子数据。
+- Unit of Work commit/rollback 与 Outbox 原子性。
+- FORCE RLS、两用户隔离和连接池复用。
+- Repository、并发锁、缓存和 NUMERIC 边界。
+- 认证、核心财务 API、报表、响应头和脱敏。
+- Outbox claim/retry/dead letter、Scheduler lease 和优雅停止。
 
 ---
 
-## 8. 运行测试
+## 7. Provider 验证
 
-### 8.1 单元测试
-
-```bash
-ctest --test-dir build/linux-gcc-debug --output-on-failure
-```
-
-### 8.2 指定测试
+真实 Provider 测试从仓库外设置：
 
 ```bash
-ctest --test-dir build/linux-gcc-debug -R Decimal --output-on-failure
+export PFH_FREECURRENCYAPI_API_KEY='<secret>'
 ```
 
-### 8.3 当前阶段测试约定
+至少验证：
 
-- P1-S01 至 P1-S09：单元测试与 In-Memory integration scenarios 已建立快速回归基线。
-- P1-S10：加入 Drogon API 测试和 PostgreSQL 适配器测试场景。
-- P1-S11：加入 Outbox、Scheduler、汇率 HTTP Provider 和清理任务测试。
-- P1-S12：在另一台机器执行 Linux、Docker、真实 PostgreSQL 和 Debug/Release 阻断门禁。
+1. FreeCurrencyAPI 支持批次写入实际主源 source。
+2. 主源失败后 exchangerate.fun 对原批次整体成功。
+3. 两个 Provider 失败时无新快照。
+4. 完整与不完整历史正确设置 `historicalAvailable`。
+5. Event、Outbox、lease 和日志脱敏正确。
+
+不记录 key、完整 URL query、响应正文或原始日志。
 
 ---
 
-## 9. Linux 下的质量检查工作流
-
-当前仓库已有 `quality_check.ps1`，更适合 PowerShell 环境。
-
-Linux 下建议先执行等价命令链：
+## 8. Docker 门禁
 
 ```bash
-git diff --check
-cmake -S . -B build/linux-gcc-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug
-cmake --build build/linux-gcc-debug
-ctest --test-dir build/linux-gcc-debug --output-on-failure
+docker build --pull --no-cache -t pfh:validation .
+docker compose up -d
+docker compose ps
 ```
 
-如果本机已安装 PowerShell，也可以直接运行：
+验收：
 
-```bash
-pwsh ./quality_check.ps1
-```
+- 容器以 non-root 用户运行并进入 healthy。
+- `tzdata`、CA 和生产共享库完整。
+- request/background 角色与 FORCE RLS 正确。
+- 公共 currencies、认证和核心财务 API 可用。
+- Outbox/Scheduler 运行并释放 lease。
+- JSON Content-Type 唯一，ETag 与 TraceId 存在。
+- SIGTERM 后优雅停止并 exit 0，无 OOM。
+
+测试后只删除本轮创建的容器、network、volume 和本地 secret 文件。
 
 ---
 
-## 10. 运行服务
+## 9. 阶段交付检查
 
-```bash
-./build/linux-gcc-debug/pfh_server
-```
+合并 Phase 分支前至少确认：
 
-当前 `main.cpp` 仍处于启动占位阶段，主要用于验证：
+- `git diff --check` 通过。
+- Linux Debug/Release production ON 构建通过。
+- 两个 production CTest target 实际执行。
+- Flyway migrate/info/validate/no-op 通过。
+- PostgreSQL、Drogon runtime 和 Docker 门禁通过。
+- 文档、OpenAPI、migration 与代码一致。
+- Secret scan 无真实凭据。
+- 交付摘要记录固定 commit、环境、测试数量和能力边界。
 
-- 配置文件可读取
-- 日志可初始化
-- Linux 可执行文件可正常启动
-
----
-
-## 11. PostgreSQL 与 Docker 外部验收
-
-P1-S12 的 Linux、Docker 和真实 PostgreSQL 验收在另一台具备对应环境的机器执行。该机器必须验证：
-
-1. PostgreSQL 本地实例可连接
-2. 迁移脚本可在空库执行
-3. Repository 集成测试可重复运行
-4. 事务回滚与 outbox 路径在 Linux 下行为一致
-5. RLS fail-closed 与连接池用户上下文复用不串租户
-6. `NUMERIC(20,8/10)` 边界、舍入和超界拒绝与 Domain 一致
-7. Docker 服务可启动并通过健康检查与关键 API smoke test
-
-建议为本地测试数据库单独创建用户和库，避免污染日常开发数据库。
-
-结果必须回写 `Docs/Guides/Local_Test_Environment.md` 或 P1-S12 交付总结，至少记录 commit hash、Linux/编译器/Drogon/PostgreSQL/Docker 版本、迁移命令、测试命令、通过数量和失败详情。未取得这些记录前，不得将历史 Linux 测试或 Windows/In-Memory 结果当作当前 HEAD 的目标环境签署。
+结果写入对应 Phase 的 `Docs/Archive/Phase_N_Sxx-Syy_Delivery_Summary.md`，不另建逐轮环境日志。
 
 ---
 
-## 12. Phase 交付前检查清单
+## 10. 相关文档
 
-在对应 Phase 分支准备合并回 `main` 之前，至少完成以下检查：
-
-- `git diff --check` 通过
-- Linux Debug 与 Release 构建均通过
-- Linux Debug 与 Release 对应测试集均通过
-- PostgreSQL 空库迁移、真实 Repository/UoW/RLS 与 API 测试通过
-- Docker 服务启动、健康检查和关键 API smoke test 通过
-- 该 Phase 的交付总结文档已回写
-- `Docs/Development/tasks.md` 已同步任务状态
-- 与设计不一致的地方已先回写架构文档
-
----
-
-## 13. 常用命令速查
-
-```bash
-# 进入 Phase 分支
-git switch feature/phase1-foundation
-
-# Debug 配置
-cmake -S . -B build/linux-gcc-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug
-
-# 编译
-cmake --build build/linux-gcc-debug
-
-# 测试
-ctest --test-dir build/linux-gcc-debug --output-on-failure
-
-# 运行
-./build/linux-gcc-debug/pfh_server
-```
+- [Dependency Installation Guide](Dependency_Installation_Guide.md)
+- [Database Migration Guide](Database_Migration_Guide.md)
+- [Quick Reference](Quick_Reference.md)
+- [Testing Strategy](../Architecture/16_Testing_Strategy.md)

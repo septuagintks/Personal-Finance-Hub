@@ -1,412 +1,165 @@
-# Personal Finance Hub - Database Migration Guide
+# Personal Finance Hub 数据库迁移指南
 
-Version: 1.1
-Backend: C++23
+Version: 2.0
 Database: PostgreSQL 16+
-Migration Tool: Flyway
+Migration Tool: Flyway 10.22.0
+Status: Active
 
 ---
 
-## 1. Overview
+## 1. 运行边界
 
-This project uses **Flyway** for versioned database schema evolution. All schema changes must be expressed as **versioned SQL migration scripts** in the `migrations/` directory, never as manual SQL edits in production.
+PFH 只使用 `migrations/` 下的 Flyway versioned SQL 演进 schema。迁移由部署流程、Flyway CLI 或独立容器在应用启动前执行，`pfh_server` 不调用 shell 或嵌入 Flyway。
 
----
+规则：
 
-## 2. Migration File Naming Convention
-
-Flyway enforces strict naming:
-
-- **Versioned migrations**: `V<VERSION>__<description>.sql`
-  - Example: `V1__initial_schema.sql`, `V2__seed_initial_currencies.sql`
-  - Version must be numeric; dots allowed (e.g., `V2.1__add_user_email.sql`)
-  - Description uses double underscore `__` separator
-- **Repeatable migrations**: `R__<description>.sql`
-  - Re-executed when checksum changes
-  - Suitable for views, stored procedures, or reference data that may evolve
-- **Undo migrations** (Flyway Teams/Enterprise only): `U<VERSION>__<description>.sql`
+- 文件名为 `V<version>__<description>.sql`。
+- 已发布 migration append-only，禁止修改文件内容或 checksum。
+- Schema 修正使用下一个版本，不用手工 SQL 绕过 `flyway_schema_history`。
+- 凭据从环境变量或 secret store 注入，不写入命令历史、文档或 Git。
+- `clean` 只允许用于明确可删除的测试数据库，项目配置默认禁用。
 
 ---
 
-## 3. Current Migration Scripts
+## 2. 当前迁移
 
-| Version | File                                   | Description                            |
-| ------- | -------------------------------------- | -------------------------------------- |
-| V1      | `V1__initial_schema.sql`               | Phase 1 core schema (all tables)       |
-| V2      | `V2__seed_initial_currencies.sql`      | Seed fiat + controlled crypto metadata |
-| V3      | `V3__seed_system_category_templates.sql` | Seed global category template pool     |
-| V4      | `V4__authentication_session_security.sql` | Revoked sessions and authentication audit actions |
-| V5      | `V5__align_transfer_rate_precision.sql` | Align transfer snapshot rate to `NUMERIC(20,10)` |
+| 版本 | 文件 | 结果 |
+| ---- | ---- | ---- |
+| V1 | `V1__initial_schema.sql` | 核心 schema、约束、索引与 FORCE RLS |
+| V2 | `V2__seed_initial_currencies.sql` | 20 种法币与 13 种加密货币 |
+| V3 | `V3__seed_system_category_templates.sql` | 55 个 `zh-CN` 分类模板 |
+| V4 | `V4__authentication_session_security.sql` | revoked session 与认证审计 |
+| V5 | `V5__align_transfer_rate_precision.sql` | Transfer 汇率对齐 `NUMERIC(20,10)` |
+| V6 | `V6__outbox_scheduler_foundation.sql` | Outbox lease、Handler receipt、system audit 与 Job lease |
 
-Validation status as of 2026-07-14: V1-V3 passed external PostgreSQL 16.14 / Flyway 10.22.0 empty-schema `migrate`, `info`, `validate`, second-run no-op, and seed assertions. V4/V5 pass local static and compile gates but have not yet run on the target PostgreSQL environment; P1-S12 keeps them as blocking checks.
-
-> **Pre-release note on V1:** `V1__initial_schema.sql` was revised in place
-> during Phase 1 development (multi-tenant `user_id` constraints and Row Level
-> Security hardening) after an earlier version had already been authored. Flyway
-> treats applied migrations as immutable and validates them by checksum, so any
-> database that applied the earlier V1 will fail startup with a **checksum
-> mismatch** on the current file. Because Phase 1 has not shipped, the intended
-> resolution is to **drop and recreate** the affected development database (all
-> V1-V5 re-run cleanly on an empty DB), or, if the data must be kept, run
-> `flyway repair` to re-baseline the checksum after confirming the schema
-> already matches the current V1. From the first released environment onward,
-> V1-V5 are frozen: all further schema changes must be additive `V6+` migrations
-> (see §6, §7.1).
+V1-V6 已通过 PostgreSQL 16.14 / Flyway 10.22.0 空库、重复执行与 V1-V5 legacy upgrade 门禁。
 
 ---
 
-## 4. Local Development Setup
+## 3. Docker 工作流
 
-### 4.1 Prerequisites
+### 3.1 配置 Secret
 
-- Docker + Docker Compose (recommended), or native PostgreSQL 16+
-- Flyway CLI 10+ (optional; can also use Docker image)
+使用本地 `.env`、shell 环境或 secret store 设置：
 
-### 4.2 Start Local PostgreSQL
+- `PFH_POSTGRES_ADMIN_PASSWORD`。
+- `PFH_DB_PASSWORD`。
+- `PFH_BACKGROUND_DB_PASSWORD`。
+
+不要使用文档中的占位值作为真实凭据。
+
+### 3.2 空库迁移
 
 ```bash
-# Start PostgreSQL container
-docker-compose up -d postgres
-
-# Wait for health check
-docker-compose ps postgres
+docker compose up -d postgres
+docker compose run --rm flyway migrate
+docker compose run --rm flyway info
+docker compose run --rm flyway validate
+docker compose run --rm flyway migrate
 ```
 
-Default connection:
-- **Host**: `localhost`
-- **Port**: `5432`
-- **Database**: `pfh_dev`
-- **User**: `pfh_user`
-- **Password**: `pfh_dev_password_REPLACE_ME` (override via `PFH_DB_PASSWORD` env var)
-
-### 4.3 Run Migrations
-
-**Option A: Docker Compose (recommended)**
+第二次 `migrate` 必须为 no-op。随后初始化运行角色：
 
 ```bash
-# Run Flyway migration service
-docker-compose up flyway
-
-# Or run one-off migration command
-docker-compose run --rm flyway migrate
+docker compose run --rm role-init
 ```
 
-**Option B: Local Flyway CLI**
+完整应用启动可使用：
 
 ```bash
-# Set password via environment variable
-export FLYWAY_PASSWORD=pfh_dev_password_REPLACE_ME
+docker compose up -d
+docker compose ps
+```
 
-# Run migration
+`app` 只有在 Flyway 与 role-init 成功后才启动。
+
+---
+
+## 4. 本地 Flyway CLI
+
+仓库根目录的 `flyway.conf` 读取 `FLYWAY_PASSWORD`：
+
+```bash
+export FLYWAY_PASSWORD='<secret>'
 flyway migrate
-
-# Check status
 flyway info
-```
-
-**Option C: Manual psql (not recommended; bypasses Flyway tracking)**
-
-```bash
-psql -U pfh_user -d pfh_dev -h localhost -f migrations/V1__initial_schema.sql
-```
-
----
-
-## 5. Verifying Migration Status
-
-```bash
-flyway info
-```
-
-Target output after the P1-S12 empty-schema run (illustrative; this is not
-evidence that V4/V5 have already run):
-
-```text
-+-----------+---------+------------------------------+------+---------------------+---------+
-| Category  | Version | Description                  | Type | Installed On        | State   |
-+-----------+---------+------------------------------+------+---------------------+---------+
-|           | 1       | initial schema               | SQL  | 2026-07-09 12:00:00 | Success |
-|           | 2       | seed initial currencies      | SQL  | 2026-07-09 12:00:05 | Success |
-|           | 3       | seed system category templates | SQL | 2026-07-09 12:00:08 | Success |
-|           | 4       | authentication session security | SQL | 2026-07-14 12:00:00 | Success |
-|           | 5       | align transfer rate precision | SQL | 2026-07-14 12:00:02 | Success |
-+-----------+---------+------------------------------+------+---------------------+---------+
-```
-
----
-
-## 6. Adding New Migrations
-
-### 6.1 Create New Migration Script
-
-```bash
-# Example: add user email field
-touch migrations/V6__add_user_email.sql
-```
-
-```sql
--- V6__add_user_email.sql
-ALTER TABLE users ADD COLUMN email VARCHAR(255);
-CREATE UNIQUE INDEX idx_users_email ON users(email) WHERE email IS NOT NULL;
-```
-
-### 6.2 Apply Migration
-
-```bash
+flyway validate
 flyway migrate
 ```
 
-Flyway automatically detects new scripts and applies them in version order.
+连接 URL、用户和 location 可通过 Flyway 环境变量覆盖。不要在共享配置文件中写真实密码。
 
 ---
 
-## 7. Migration Best Practices
+## 5. 新增 Migration
 
-### 7.1 Backward Compatibility
+1. 从当前最大版本递增，例如 V6 之后创建 `V7__<description>.sql`。
+2. 设计向后兼容的 schema 变化。
+3. 在文件头说明目的、数据影响和运行前提。
+4. 在空库执行全部 migration。
+5. 从上一发布 schema 执行 upgrade。
+6. 运行 `info`、`validate` 和第二次 no-op。
+7. 更新数据库设计、静态契约测试和交付摘要。
 
-New migrations must be **backward compatible** with the currently deployed application:
-
-- **Adding columns**: must have `DEFAULT` or allow `NULL`
-- **Renaming columns**: use multi-phase migration:
-  1. Add new column
-  2. Dual-write to both (application change)
-  3. Backfill old → new
-  4. Drop old column (next release)
-- **Removing columns**: mark as unused in code first, drop in next migration after deploy
-
-### 7.2 Idempotency
-
-Use defensive checks:
+示例：
 
 ```sql
--- Good: safe to re-run
-ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(255);
-
--- Avoid: fails on second run
-ALTER TABLE users ADD COLUMN email VARCHAR(255);
+-- Version: 7
+-- Description: Add an optional account display field
+ALTER TABLE accounts
+    ADD COLUMN display_note VARCHAR(128);
 ```
 
-### 7.3 Transaction Safety
-
-Each Flyway migration runs in a **single transaction** by default. Avoid:
-
-- Long-running data migrations that lock tables for minutes
-- DDL operations unsupported in PostgreSQL transactions (e.g., `CREATE INDEX CONCURRENTLY`)
-
-For large data migrations:
-- Split into smaller batches
-- Use `CONCURRENTLY` with manual `--nontransactional` flag (Flyway Teams)
-- Or run as separate background job, not in migration
-
-### 7.4 Testing
-
-Test migrations on a copy of production data:
-
-```bash
-# Restore production snapshot to local
-pg_restore -U pfh_user -d pfh_test production_dump.sql
-
-# Apply pending migrations
-FLYWAY_URL=jdbc:postgresql://localhost:5432/pfh_test flyway migrate
-
-# Run application tests
-ctest
-```
+不得在已发布 migration 中追加“顺手修正”。
 
 ---
 
-## 8. Rollback Strategy
+## 6. 兼容性规则
 
-### 8.1 Automatic Rollback (Failed Migration)
-
-Flyway automatically rolls back the failed migration transaction:
-
-```text
-ERROR: Failed to execute migration V6__add_user_email.sql
-Database state: unchanged (V3 still current)
-```
-
-### 8.2 Manual Rollback (Post-Deployment Issue)
-
-**Scenario**: V6 deployed successfully but application breaks.
-
-**Option 1: Forward fix** (preferred)
-
-Create V7 to repair issue:
-
-```sql
--- V7__fix_user_email_constraint.sql
-ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
-```
-
-**Option 2: Undo migration** (Flyway Teams/Enterprise only)
-
-```bash
-flyway undo
-```
-
-Executes `U6__remove_user_email.sql`:
-
-```sql
--- U6__remove_user_email.sql
-ALTER TABLE users DROP COLUMN email;
-DROP INDEX idx_users_email;
-```
-
-**Option 3: Manual repair + `flyway repair`**
-
-If migration partially applied:
-
-```bash
-# Manually fix database
-psql -U pfh_user -d pfh_dev -c "DROP TABLE broken_table;"
-
-# Mark migration as resolved
-flyway repair
-```
+- 新增列应允许 NULL 或提供安全默认值。
+- 删除列采用 expand/contract：先停止读取，再在后续版本删除。
+- 重命名采用新增、回填、双读/双写切换、删除旧列的多版本流程。
+- 新约束上线前先检查并修复现有数据。
+- 大表索引、回填和锁表操作必须在接近生产规模的数据副本上评估。
+- Migration 不调用外部网络，不依赖应用进程或用户交互。
+- 每个脚本应保持 PostgreSQL 事务语义；无法事务化的操作必须单独评审。
 
 ---
 
-## 9. Production Deployment
+## 7. 失败与恢复
 
-### 9.1 CI/CD Pipeline Integration
+### 7.1 Migration 执行失败
 
-Recommended flow:
+PostgreSQL 事务内失败会回滚该 migration。先修复尚未发布的脚本，再在可删除测试库重跑完整链路。不要通过手工修改 `flyway_schema_history` 掩盖失败。
 
-1. **Build application** → run unit tests
-2. **Run Flyway migrate** on staging database
-3. **Run integration tests** on staging
-4. **Deploy application** to staging
-5. **Run smoke tests**
-6. **Promote to production**: repeat steps 2-5
+### 7.2 已发布变更有缺陷
 
-Example GitHub Actions:
+创建新的向前修复 migration。应用回滚要求 schema 对上一应用版本仍兼容；不要依赖 Flyway Undo 或删除已应用 migration。
 
-```yaml
-jobs:
-  deploy:
-    steps:
-      - name: Run database migrations
-        env:
-          FLYWAY_URL: ${{ secrets.PROD_DB_URL }}
-          FLYWAY_USER: ${{ secrets.PROD_DB_USER }}
-          FLYWAY_PASSWORD: ${{ secrets.PROD_DB_PASSWORD }}
-        run: |
-          flyway migrate
+### 7.3 Checksum mismatch
 
-      - name: Deploy application
-        run: |
-          kubectl apply -f k8s/deployment.yml
+先确认 migration 是否被意外修改：
+
+```bash
+git diff -- migrations/
+flyway validate
 ```
 
-### 9.2 Blue-Green Deployment
-
-1. Apply **forward-compatible** migration to production DB
-2. Deploy new application version (green)
-3. Gradually shift traffic from blue → green
-4. Shut down blue once green is stable
-
-### 9.3 Kubernetes Init Container
-
-Run migration before starting application:
-
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: pfh-api
-spec:
-  template:
-    spec:
-      initContainers:
-      - name: db-migration
-        image: flyway/flyway:10
-        command: ["flyway", "migrate"]
-        env:
-        - name: FLYWAY_URL
-          value: "jdbc:postgresql://postgres:5432/pfh"
-        - name: FLYWAY_USER
-          valueFrom:
-            secretKeyRef:
-              name: db-credentials
-              key: username
-        - name: FLYWAY_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: db-credentials
-              key: password
-        volumeMounts:
-        - name: migrations
-          mountPath: /flyway/sql
-      containers:
-      - name: app
-        image: pfh-api:latest
-      volumes:
-      - name: migrations
-        configMap:
-          name: flyway-migrations
-```
+恢复已发布文件的原始内容，并用新版本表达修正。`flyway repair` 只用于已经人工确认 schema 与仓库完全一致的本地/测试元数据修复，不能作为生产常规流程。
 
 ---
 
-## 10. Troubleshooting
+## 8. 验收清单
 
-### 10.1 Migration Checksum Mismatch
+每次数据库变更至少验证：
 
-**Error**:
+1. PostgreSQL 16+ 空库 `migrate`。
+2. 从上一发布版本 upgrade。
+3. `info`、`validate` 与第二次 no-op。
+4. 种子数量、父子关系、enum cast、CHECK、FK 和索引。
+5. FORCE RLS、两用户隔离与未绑定 tenant fail closed。
+6. request/background 角色权限。
+7. `NUMERIC`、事务、Repository 和 Outbox fixture。
+8. Docker cold start 与应用 runtime smoke。
 
-```text
-Migration checksum mismatch for V2__seed_initial_currencies.sql
-Expected: 1234567890
-Found:    9876543210
-```
-
-**Cause**: Migration file was edited after being applied.
-
-**Fix**:
-
-```bash
-# If edit was intentional and safe, update checksum
-flyway repair
-
-# Otherwise, revert file to original content
-git checkout migrations/V2__seed_initial_currencies.sql
-```
-
-### 10.2 Failed Migration Stuck in `flyway_schema_history`
-
-**Error**:
-
-```text
-Migration V6__add_user_email.sql failed
-Status: Failed
-```
-
-**Fix**:
-
-```bash
-# Manually inspect and fix database
-psql -U pfh_user -d pfh_dev
-
-# Mark migration as resolved
-flyway repair
-```
-
-### 10.3 Baseline Existing Database
-
-If database already has tables before Flyway adoption:
-
-```bash
-flyway baseline -baselineVersion=1
-```
-
-This marks V1 as already applied without executing it.
-
----
-
-## 11. References
-
-- [Flyway Documentation](https://flywaydb.org/documentation/)
-- [PostgreSQL 16 Release Notes](https://www.postgresql.org/docs/16/release-16.html)
-- [PFH Database Design](../Architecture/02_Database_Design.md)
-- [Phase 1 Detailed Plan](../Development_Plans/Phase_1/Phase_1_Detailed_Development_Plan.md)
+完整 Linux/PostgreSQL 流程见 [Linux Development Workflow](Linux_Development_Workflow.md)，schema 契约见 [Database Design](../Architecture/02_Database_Design.md)，测试规则见 [Testing Strategy](../Architecture/16_Testing_Strategy.md)。

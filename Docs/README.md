@@ -1,108 +1,116 @@
-# Personal Finance Hub (PFH) - 开发者文档中心
+# Personal Finance Hub 开发者文档中心
 
-欢迎来到 **Personal Finance Hub (PFH)** 的开发者文档中心。本目录用于维护项目的架构设计、开发计划、规范标准与阶段性修改记录，当前内容围绕一个基于现代 C++23 构建的个人财务聚合平台展开，采用 **Clean Architecture（清洁架构）** 与 **轻量级 DDD（领域驱动设计）** 思想，目标是提供高内聚、低耦合、强类型、高精度的财务管理后端。
+PFH 文档按“当前设计、开发计划、操作指南、稳定规范、完成归档”组织。工作树只保留当前实现和后续开发仍需读取的信息；过程讨论和中间状态通过 Git 历史追溯。
 
 ---
 
-## 1. 目录结构指南
-
-根据 [`Docs/Guides/Directory_Guidance.md`](Guides/Directory_Guidance.md) 规范，当前仓库中已提交的文档结构如下：
+## 1. 文档结构
 
 ```text
 Docs/
-├── README.md                           # 本文档（文档中心入口与现状综述）
-├── Architecture/                       # 核心技术架构与详细设计规约
-│   ├── 01_Technical_Architecture.md    # 技术架构总览 (Clean Architecture)
-│   ├── 02_Database_Design.md           # 数据库设计（PostgreSQL 16+，包含 Flyway 迁移）
-│   ├── 03_Domain_Model_Design.md       # 领域模型设计 (Domain Entities & Aggregates)
-│   ├── 04_Money_Currency_System_Design.md # 核心金融原语设计（Decimal、Money、多币种）
-│   ├── 05_Repository_and_Persistence_Design.md # 仓储与持久化设计（Repository、Unit of Work）
-│   ├── 06_Service_and_Use_Case_Design.md # 领域服务与应用层用例设计 (TransferDomainService)
-│   ├── 07_Workflow_and_Lifecycle_Design.md # 核心工作流与生命周期（时序、I18n 初始化）
-│   ├── 08_Exchange_Rate_System_Design.md # 汇率系统设计（三角折算、降级策略）
-│   ├── 09_Reporting_and_Analytics_Design.md # 报表与分析设计（轻量级 CQRS、大数据折算优化）
-│   ├── 10_REST_API_Design.md           # REST API 接口规约 (JWT 认证、黑名单)
-│   ├── 10_REST_API_OpenAPI.json        # Phase 1 OpenAPI 3.1 可执行契约
-│   ├── 11_Sync_Framework_Design.md     # 外部平台同步框架设计
-│   ├── 12_Scheduler_Design.md          # 调度器与后台任务设计
-│   ├── 13_Frontend_Design.md           # 前端设计规约（Vue 3 + ECharts）
-│   ├── 14_Event_Design.md              # 领域事件设计（Post-Commit Dispatch 机制）
-│   ├── 15_Error_Handling_Design.md     # 全局异常与错误处理规约（Drogon Exception Boundary）
-│   └── 16_Testing_Strategy.md          # 测试策略与规范
-│
-├── Development/                        # 开发过程管理
-│   └── tasks.md                        # Phase 1 最终任务与签署记录
-│
-├── Development_Plans/                  # 阶段性开发计划
-│   ├── Overall_Development_Plan.md     # 三阶段总开发计划大纲
-│   ├── Phase_1_Development_Plan.md     # Phase 1 后端最小闭环开发计划
-│   ├── Phase_1/                        # Phase 1 细化子计划
-│   │   └── Phase_1_Detailed_Development_Plan.md # Phase 1 具体开发顺序与测试收尾
-│   ├── Phase_2_Development_Plan.md     # Phase 2 产品体验与稳定性计划
-│   └── Phase_3_Development_Plan.md     # Phase 3 外部接入与预留扩展计划
-│
-├── Guides/                             # 实时指南与操作说明
-│   ├── Directory_Guidance.md           # 当前文档目录结构指南
-│   ├── Dependency_Installation_Guide.md # 依赖安装说明
-│   ├── Database_Migration_Guide.md     # 数据库迁移操作指南（Flyway）
-│   ├── Linux_Development_Workflow.md   # Linux 编译、运行与测试工作流
-│   ├── Local_Test_Environment.md       # 历史 Linux 测试环境与当前复核状态
-│   └── Quick_Reference.md              # 开发者快速参考（构建、测试、命令速查）
-│
-├── Standards/                          # 团队与文档规范
-│   └── Documents_Format_Standard.md    # 文档格式与排版标准
-│
-└── Archive/                            # 已完成的优化记录与交付归档
-    ├── Config_Env_Overlay_Design.md    # 配置环境变量覆盖设计与实现记录
-    ├── Documents_Optimize_1.md         # 优化记录 1 (安全、多币种、I18n、异常、迁移)
-    ├── Documents_Optimize_2.md         # 优化记录 2 (偏好存储、服务命名、手续费、事件、报表)
-    ├── Documents_Optimize_3.md         # 优化记录 3 (文档治理、任务清单、计划归档)
-    ├── Phase_1_S01-S03_Delivery_Summary.md # Phase 1 S01-S03 交付归档
-    ├── Phase_1_S04_Delivery_Summary.md # Phase 1 S04 交付归档
-    ├── Phase_1_S05_Delivery_Summary.md # Phase 1 S05 交付归档
-    ├── Phase_1_S06_Delivery_Summary.md # Phase 1 S06 交付归档
-    ├── Phase_1_S07_Delivery_Summary.md # Phase 1 S07 交付归档
-    ├── Phase_1_S08_Delivery_Summary.md # Phase 1 S08 交付归档
-    ├── Phase_1_S09_Delivery_Summary.md # Phase 1 S09 交付归档
-    ├── Phase_1_S10_Delivery_Summary.md # Phase 1 S10 交付归档
-    ├── Phase_1_S10_PostgreSQL_Persistence_Validation_Report.md # V3 外部复测归档
-    ├── Phase_1_S11_Delivery_Summary.md # Phase 1 S11 交付归档
-    └── Phase_1_S12_Delivery_Summary.md # Phase 1 最终签署归档
+├── README.md
+├── Architecture/
+│   ├── 01_Technical_Architecture.md
+│   ├── 02_Database_Design.md
+│   ├── 03_Domain_Model_Design.md
+│   ├── 04_Money_Currency_System_Design.md
+│   ├── 05_Repository_and_Persistence_Design.md
+│   ├── 06_Service_and_Use_Case_Design.md
+│   ├── 07_Workflow_and_Lifecycle_Design.md
+│   ├── 08_Exchange_Rate_System_Design.md
+│   ├── 09_Reporting_and_Analytics_Design.md
+│   ├── 10_REST_API_Design.md
+│   ├── 10_REST_API_OpenAPI.json
+│   ├── 11_Sync_Framework_Design.md
+│   ├── 12_Scheduler_Design.md
+│   ├── 13_Frontend_Design.md
+│   ├── 14_Event_Design.md
+│   ├── 15_Error_Handling_Design.md
+│   └── 16_Testing_Strategy.md
+├── Development_Plans/
+│   ├── Overall_Development_Plan.md
+│   ├── Phase_1/Phase_1_Development_Plan.md
+│   ├── Phase_2/Phase_2_Development_Plan.md
+│   └── Phase_3/Phase_3_Development_Plan.md
+├── Guides/
+│   ├── Database_Migration_Guide.md
+│   ├── Dependency_Installation_Guide.md
+│   ├── Directory_Guidance.md
+│   ├── Linux_Development_Workflow.md
+│   └── Quick_Reference.md
+├── Standards/
+│   └── Documents_Format_Standard.md
+└── Archive/
+    ├── Documents_Optimization_Summary.md
+    ├── Phase_1_Development_Record.md
+    ├── Phase_1_S01-S04_Delivery_Summary.md
+    ├── Phase_1_S05-S08_Delivery_Summary.md
+    └── Phase_1_S09-S12_Delivery_Summary.md
 ```
 
-计划类文档按需创建并跟随任务推进维护：`Docs/Development/Documents_Optimize_Plan.md` 仅在有正在设计中的文档优化方案时创建；当前文档优化事项已归档到 `Docs/Archive/Documents_Optimize_3.md`。开发阶段交付记录在开发中存放于 `Docs/Development/`，推荐命名为 `Phase_<N>_S<start>-S<end>_Delivery_Summary.md`，验收完成后归档到 `Docs/Archive/`。总体路线以 [Development_Plans/Overall_Development_Plan.md](Development_Plans/Overall_Development_Plan.md) 为准，阶段性开发计划以 `Docs/Development_Plans/Phase_N_Development_Plan.md` 为准，开发任务跟踪以 [Development/tasks.md](Development/tasks.md) 为准。
+---
+
+## 2. 阅读入口
+
+### 2.1 开始开发
+
+1. [总体开发计划](Development_Plans/Overall_Development_Plan.md)
+2. 对应 Phase 的开发计划
+3. [技术架构](Architecture/01_Technical_Architecture.md)
+4. 相关领域设计与 OpenAPI
+5. [快速参考](Guides/Quick_Reference.md)
+
+### 2.2 Phase 1 结果
+
+- [开发路线与最终边界](Archive/Phase_1_Development_Record.md)
+- [S01-S04 工程基础](Archive/Phase_1_S01-S04_Delivery_Summary.md)
+- [S05-S08 金融与持久化](Archive/Phase_1_S05-S08_Delivery_Summary.md)
+- [S09-S12 应用、API 与最终签署](Archive/Phase_1_S09-S12_Delivery_Summary.md)
+
+### 2.3 日常操作
+
+- 配置变量：[`config/README.md`](../config/README.md)
+- 依赖安装：[Dependency Installation](Guides/Dependency_Installation_Guide.md)
+- Linux 构建与测试：[Linux Development Workflow](Guides/Linux_Development_Workflow.md)
+- 数据库迁移：[Database Migration Guide](Guides/Database_Migration_Guide.md)
 
 ---
 
-## 2. 项目核心技术特性
+## 3. 当前项目状态
 
-1. **后端技术栈**：C++23 + Drogon 框架 + CMake + PostgreSQL 16+ + spdlog。
-2. **金融原语**：绝不使用浮点数表示金额，统一采用高精度定点数 `Decimal`（`NUMERIC(20,8)`）与强类型 `Money`。
-3. **多币种与三角折算**：以 USD 为固定枢纽货币，非 USD 货币对通过 `CurrencyConversionService` 在纯内存中进行三角折算，数据库仅存储 N-1 条 USD 汇率对。
-4. **轻量级 CQRS**：写路径通过 Domain 实体和 Repository 保证强一致性；Phase 1 报表由 Application `ReportQueryService` 通过 request-scoped Repository 读取并在 C++ 内完成精确折算，后续可在不改变 DTO 语义的前提下引入 SQL 聚合端口。
-5. **事务后事件派发 (Post-Commit Dispatch)**：`DrogonUnitOfWork` 将事件与业务事实同事务写入 outbox；物理 Commit 成功后再由 `OutboxPublisherJob` claim 并派发，防止回滚事务产生错误事件。
-6. **全局异常拦截**：通过 Drogon 全局异常处理器捕获非预期异常，生成唯一 `TraceId`，在保障生产环境安全（不泄露敏感信息）的同时提供完整的服务端日志追溯。
-7. **受控后台运行时**：Drogon timer 只触发有界 worker 入队；Outbox 使用行级租约，汇率刷新和认证清理使用 PostgreSQL 任务租约，并统一由 `JobManager` 管理启动与优雅退出。
+Phase 1 后端已经完成并通过：
 
-当前进度（2026-07-16）：P1-S01 至 P1-S12 已全部完成。最终提交链通过 Windows PostgreSQL OFF Debug/Release 349/349、Linux production ON Debug/Release 351/351、真实 PostgreSQL/Drogon/Scheduler/Outbox、FreeCurrencyAPI 主源、exchangerate.fun 整批备用、双源失败历史降级和 Docker 冷构建/runtime 门禁。S12-07 全项目一致性 review 与文档归档已完成，Phase 1 分支满足合并到 `main` 的条件。
+- Windows Debug/Release PostgreSQL OFF 349/349。
+- Linux Debug/Release production ON 351/351。
+- PostgreSQL 16.14、Flyway V1-V6、真实 Drogon API 与 12 个数据库 scenarios。
+- FreeCurrencyAPI 主源、exchangerate.fun 整批备用和历史降级。
+- Ubuntu 24.04 Docker 冷构建、non-root、双角色、FORCE RLS、Outbox/Scheduler 与优雅停止。
 
----
+Phase 2 处于 Draft，目标是 Vue 3 产品体验、报表增强、维护与可观测性。Phase 3 保留给账单导入与支付平台生态。
 
-## 3. 文档一致性与修正说明
-
-最近的文档审查已经修正了多处跨文档冲突。当前入口文档按以下状态理解：
-
-- **UserPreference 存储设计**：`02_Database_Design.md`、`03_Domain_Model_Design.md`、`04_Money_Currency_System_Design.md` 与 `05_Repository_and_Persistence_Design.md` 已统一为“领域对象由 `users.base_currency_code` 默认值与 `user_preferences` 扩展偏好组合映射”。
-- **服务命名与职责边界**：应用层统一使用 `RefreshExchangeRatesUseCase` 负责调度和 I/O 编排，领域层统一使用 `CurrencyConversionService` 负责纯内存汇率折算。
-- **手续费扣除灵活性**：`TransferDomainService` 三种构造模式均支持可选 `TransferFee`，覆盖源账户、目标账户与第三方账户扣费，并落为独立负 Adjustment。
-- **事务与事件一致性**：`DrogonUnitOfWork` 的事务闭包必须绑定同一个数据库事务上下文，业务写入和 outbox 写入同事务提交，提交前不直接派发事件。
-- **报表大数据折算优化**：`09_Reporting_and_Analytics_Design.md` 已补充 SQL 端提前折算方案；缺失汇率时返回明确错误，不使用 `0` 或 `1` 等默认值参与财务计算。
+汇率实时能力当前覆盖 20 种法币与 BTC。其他 12 种加密货币没有实时保证，系统会返回完整历史降级或明确不可用；完整加密货币定价不在当前计划内。
 
 ---
 
-## 4. 开发者快速上手
+## 4. 核心规则
 
-1. **阅读顺序推荐**：先看 [Architecture/01_Technical_Architecture.md](Architecture/01_Technical_Architecture.md) 和 [Architecture/07_Workflow_and_Lifecycle_Design.md](Architecture/07_Workflow_and_Lifecycle_Design.md)，再看 [Architecture/04_Money_Currency_System_Design.md](Architecture/04_Money_Currency_System_Design.md)、[Architecture/06_Service_and_Use_Case_Design.md](Architecture/06_Service_and_Use_Case_Design.md)、[Architecture/08_Exchange_Rate_System_Design.md](Architecture/08_Exchange_Rate_System_Design.md)，最后补齐 [Architecture/02_Database_Design.md](Architecture/02_Database_Design.md) 与 [Architecture/05_Repository_and_Persistence_Design.md](Architecture/05_Repository_and_Persistence_Design.md)。
-2. **阶段计划**：进入代码实现前，先阅读 [Development_Plans/Overall_Development_Plan.md](Development_Plans/Overall_Development_Plan.md) 与对应 Phase 开发计划，并以 [Development/tasks.md](Development/tasks.md) 跟踪进度。
-3. **开发规范**：新文档或修改文档时，请遵守 [Standards/Documents_Format_Standard.md](Standards/Documents_Format_Standard.md)；目录树变更时，请同步更新 [Guides/Directory_Guidance.md](Guides/Directory_Guidance.md)。
-4. **Linux 工作流**：最终部署目标为 Linux；按 [Guides/Linux_Development_Workflow.md](Guides/Linux_Development_Workflow.md) 保持可复现命令。Phase 1 的 Linux、Docker 与真实 PostgreSQL 阻断门禁结果见 [Archive/Phase_1_S12_Delivery_Summary.md](Archive/Phase_1_S12_Delivery_Summary.md)。
+- 金额和汇率不经二进制浮点。
+- Domain Service 不访问 Repository、不打开事务、不发布事件。
+- Application 负责权限、事务和用例编排。
+- 业务事实与 Outbox 在同一数据库事务提交。
+- 租户表使用 `user_id`、复合约束与 FORCE RLS。
+- request/background 数据库角色分离。
+- API 金额使用十进制字符串，错误响应稳定且脱敏。
+- Drogon Event Loop 不执行阻塞网络、数据库或长任务。
+
+---
+
+## 5. 维护原则
+
+- 架构行为只在 `Architecture/` 维护。
+- Phase 范围和顺序只在 `Development_Plans/` 维护。
+- 构建、配置和运行命令只在 `Guides/` 或 `config/README.md` 维护。
+- 完成阶段只保留一份开发记录和少量交付摘要。
+- 不为普通已修复缺陷保留单独文档。
+- 目录变化同步更新本文件与 `Directory_Guidance.md`。
+- 文档格式遵循 [Documents Format Standard](Standards/Documents_Format_Standard.md)。

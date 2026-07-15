@@ -1,450 +1,148 @@
-# Personal Finance Hub - Workflow & Lifecycle Design
+# Personal Finance Hub 工作流与生命周期设计
 
-Version: 1.0
-
+Version: 2.0
 Backend: C++23
-
 Architecture: Clean Architecture + Lightweight DDD
+Status: Approved
 
 ---
 
-## 1. 架构生命周期总览 (The Grand Lifecycle)
-
-在 Clean Architecture 中，一个完整的写操作（Command）或读操作（Query）必须遵循严格的洋葱圈穿越顺序：`Presentation -> Application -> Domain -> Infrastructure`。
-
-### 1.1 标准写操作（Write/Command）流转规范
+## 1. 标准请求生命周期
 
 ```text
-[1. 客户端请求] POST /api/v1/transfers (JSON)
-      │
-      ▼
-[2. Presentation 层] (Controller)
-  - 反序列化 JSON 到 InputDTO
-  - 基础类型校验（必填项、字符串长度）
-  - 调用 UseCase
-      │
-      ▼
-[3. Application 层] (Use Case)
-  - 通过 IRepository 读取 Domain Entities (I/O)
-  - 检查应用层权限（如账户归属权）
-  - 调用 Domain Service 进行纯业务推导
-      │
-      ▼
-[4. Domain 层] (Domain Service & Entities) - 纯 C++23, 无 I/O
-  - 执行核心金融规则（如金额匹配、汇率推导）
-  - 实例化并组装 Aggregate / Entity (例如 TransferAggregate)
-  - 返回 std::expected<Aggregate, Error> 给 Use Case
-      │
-      ▼
-[5. Application 层] (Use Case + Unit of Work)
-  - 收到成功的 Aggregate
-  - 开启 IUnitOfWork 事务闭包
-  - 调用 IRepository 执行持久化 (I/O)
-      │
-      ▼
-[6. Infrastructure 层] (Repository Impl)
-  - 将 Aggregate 拆解为 Database Rows (如转账拆为 2笔 transactions + 1笔 transfer_groups)
-  - 执行 SQL，更新 PostgreSQL 及 account_balance_cache
-  - 事务提交 (Commit) 或 遇到异常回滚 (Rollback)
-      │
-      ▼
-[7. Presentation 层] (Controller)
-  - 将 Use Case 的结果映射为 HTTP 状态码 (201 Created 或 4xx/5xx)
-  - 序列化 OutputDTO 返回给客户端
-
+HTTP Request
+    -> Presentation validation + authenticated UserId
+        -> FinanceApplicationService / AuthService
+            -> request-scoped Repository + Unit of Work
+                -> Domain rule evaluation
+                -> PostgreSQL business writes + AuditLog + Outbox
+            -> commit
+        -> stable DTO / Error
+    -> HTTP Response
 ```
+
+持续规则：
+
+1. Presentation 只解析 DTO、认证上下文和 HTTP 语义。
+2. Application 负责用户归属、事务、Repository 编排和错误映射。
+3. Domain Service 只执行纯业务规则，不访问 Repository、事务、事件或 I/O。
+4. 同一用例的读取、锁定、业务写入、同步审计和 Outbox 使用同一个 Unit of Work。
+5. Repository 失败或 Domain 规则失败会回滚整个事务。
+6. Outbox 只在事务提交后由后台 Publisher 投递。
 
 ---
 
-## 2. 核心工作流一：跨币种转账 (Cross-Currency Transfer Workflow)
+## 2. 跨账户转账
 
-这是系统中最复杂的写入流转，涉及多货币计算、调整项（手续费）、以及强一致性事务。
+`CreateTransferUseCase` 支持三种输入模式：
 
-### 2.1 场景设定
+- Outgoing + Rate -> Incoming。
+- Outgoing + Incoming -> Rate。
+- Incoming + Rate -> Outgoing。
 
-- **用户输入**：从 USD 账户（ID: 1）转出，到 CNY 账户（ID: 2）接收。
-- **参数提供**：出账 1000 USD，入账 7180 CNY，附带 10 USD 的中转手续费。
-- **推导模式**：`TransferMode::OutgoingAndIncoming`（系统需自动推导汇率为 7.18）。
+手续费可来自 Source、Target 或 ThirdParty 账户，并保存为独立 signed Adjustment。
 
-### 2.2 时序与状态流转编排
+执行顺序：
 
-```text
-1. [Use Case] 接收 TransferInputDTO(Source=1000 USD, Target=7180 CNY, Fee=10 USD).
-2. [Use Case] 调用 accountRepo->findById(1) 和 findById(2).
-   -> 如果任一账户不存在，中断并返回 AccountNotFound.
+1. 校验用户、账户、模式、金额、汇率、手续费和描述。
+2. 将 source、target 与可选 fee account 去重后按 Account ID 升序锁定，避免并发锁环。
+3. 在事务内验证账户归属、归档状态和币种。
+4. `TransferDomainService` 构造出账、入账和 Adjustment，保证聚合平衡。
+5. Repository 原子写入 `transfer_groups`、双腿和 Adjustment，并取得数据库分配的 ID。
+6. 受影响账户的余额缓存失效。
+7. 登记 `TransferCompletedEvent`，由 Unit of Work 写入 Outbox。
+8. 提交后返回转账组、双腿、金额、汇率与手续费 DTO。
 
-3. [Use Case] 将两个 Account 实体和金额传入 TransferDomainService::buildTransfer().
-
-4. [Domain Service] 执行纯逻辑推导：
-   a. 校验：检查两个账户是否被冻结/归档。
-   b. 推导：计算汇率 7180 / 1000 = 7.18。
-   c. 组装：创建 TransferAggregate 实例。
-   d. 构建出账：Transaction(Type=Transfer, Amount=-1000 USD).
-   e. 构建入账：Transaction(Type=Transfer, Amount=+7180 CNY).
-   f. 构建手续费：Transaction(Type=Adjustment, Amount=-10 USD, Category="FEE").
-   g. 返回组装好的 TransferAggregate。
-
-5. [Use Case] 获得合法的 TransferAggregate，准备落盘。
-6. [Use Case] 开启 uow->executeInTransaction():
-
-7.   [Repository/Infra] (事务内)
-     a. INSERT INTO transfer_groups (user_id, mode, rate) —— id 由 BIGSERIAL 序列分配为 gid。
-     b. INSERT INTO transactions (..., type='transfer', amount=-1000, transfer_group_id=gid).
-     c. INSERT INTO transactions (..., type='transfer', amount=7180, transfer_group_id=gid).
-     d. INSERT INTO transactions (..., type='adjustment', amount=-10, category='FEE').
-   f. 将 TransferCompletedEvent 写入 `domain_events_outbox`（同一事务）。
-   g. 更新 account_balance_cache (USD 扣 1010，CNY 增 7180) 或登记缓存失效事件。
-
-8. [Use Case] 事务成功提交，返回 Void 或 Success DTO。
-9. [Scheduler/OutboxPublisherJob] 后台扫描 outbox，并把 TransferCompletedEvent 交给已注册处理器；Phase 1 尚未注册转账缓存/通知 handler，余额缓存一致性已由 Repository 写路径同步维护。业务同步审计在步骤 7 的同一事务完成，不由 handler 重复补写。
-
-```
+Transfer 双腿永不计入收入或支出；手续费和汇兑损益只通过 Adjustment 进入现金流。
 
 ---
 
-## 3. 核心工作流二：危险删除编排 (Dangerous Delete Workflow)
+## 3. 危险账户删除
 
-在 Patch v1.1 中明确，底层数据库严禁使用 `ON DELETE CASCADE`。这意味着复杂的清理逻辑必须在应用层（Use Case）中显式编排。
+危险删除是不可逆的物理清理，`confirmations` 必须精确等于 `3`。
 
-### 3.1 场景设定
+同一事务内按以下顺序执行：
 
-用户要求彻底删除一个闲置的、包含数百条流水的旧银行账户。
+1. 使用 `FOR UPDATE` 锁定账户并验证用户归属。
+2. 写入包含删除前快照的同步 `DangerousDelete` AuditLog；审计失败则终止。
+3. 删除所有触及该账户的完整 Transfer 聚合，包括另一侧双腿、Adjustment 与 group。
+4. 删除该账户剩余流水。
+5. 删除 `account_balance_cache`。
+6. 删除账户。
+7. 登记 `AccountDangerouslyDeletedEvent`。
 
-### 3.2 编排流转控制
-
-```text
-1. [Use Case] 接收请求 DeleteAccountDTO(AccountId=5, Confirmations=3).
-2. [Use Case] 校验 Confirmations >= 3，否则拒绝。
-3. [Use Case] 校验 Account 归属权（UserId）。
-
-4. [Use Case] 开启 uow->executeInTransaction():
-
-5.   [Repository - Step A] accountRepo->findByIdForUpdate(5, userId)，锁定并取得删除前快照；auditRepo->append(... dangerous_delete ...)。
-     - AuditLog 与删除事实必须同事务；审计失败时不得继续删除。
-
-6.   [Repository - Step B] txRepo->physicalDeleteTransfersTouchingAccount(5)，再执行 txRepo->physicalDeleteByAccount(5)
-     - 基础设施层执行: DELETE FROM transactions WHERE account_id = 5;
-     - Transfer 必须先按完整聚合删除双边、Adjustment 和 group，不能只删当前账户一侧。
-
-7.   [Repository - Step C] cacheRepo->deleteCache(5)
-     - 基础设施层执行: DELETE FROM account_balance_cache WHERE account_id = 5;
-     - 必须清理缓存，否则后续会出现脏数据。
-
-8.   [Repository - Step D] accountRepo->physicalDelete(5)
-     - 基础设施层执行: DELETE FROM accounts WHERE id = 5;
-
-9.   [Use Case] `uow_->registerEvent(std::make_shared<AccountDangerouslyDeletedEvent>(accountId, userId))`。
-     - outbox 事件是提交后缓存、安全通知等非关键副作用的扩展点；Phase 1 尚未注册这些 handler。
-
-10. [Use Case] 事务提交。由于没有级联删除，顺序 A -> B -> C -> D 保证审计可取快照且不会触发外键约束报错。
-11. [Scheduler/OutboxPublisherJob] 后台消费危险删除事件；Phase 1 未注册外部安全通知 handler，因此当前为成功 no-op 投递。后续接入通知时必须幂等，且不得重复写危险删除 AuditLog。
-
-```
+数据库不依赖 `ON DELETE CASCADE` 隐式完成该流程。当前没有邮件或外部通知 Handler；业务 AuditLog 已在删除事务内完成，Outbox 事件不得重复写同一业务审计。
 
 ---
 
-## 4. 核心工作流三：缓存穿透与重构 (Balance Cache Rebuild Workflow)
+## 4. 余额缓存读取与重建
 
-领域层（Domain）只认识 `BalanceSnapshot` 这个值对象，完全不关心它是从缓存读出来的，还是现场算出来的。这个复杂的工作流完全封装在基础设施层（Infrastructure）内部。
+余额缓存完全封装在 `AccountRepository` 内，Domain 与 Application 只接收 `BalanceSnapshot`。
 
-### 4.1 场景设定
+读取流程：
 
-请求获取 Dashboard，需要展示各个账户的实时余额。
+1. 在租户事务内锁定目标账户。
+2. 查询未删除流水的 `MAX(version)` 与 `MAX(id)`。
+3. 仅当缓存的 `source_version` 与 `last_transaction_id` 同时匹配时命中。
+4. 未命中时按 `transaction_time, id` 读取流水并调用 `BalanceCalculationService`。
+5. 使用 `NUMERIC(20,8)` 原子 UPSERT 新快照，并递增 `cache_version`。
 
-### 4.2 缓存击穿与自愈机制
-
-```text
-1. [Use Case] 调用 accountRepo->balanceOf(AccountId=1).
-
-2. [Infra Repo] 查询 PG 缓存表：SELECT * FROM account_balance_cache WHERE account_id = 1.
-
-   【分支 1：命中缓存 (Cache Hit)】
-   -> 直接将 row 映射为 BalanceSnapshot 返回。工作流结束。
-
-   【分支 2：未命中/缓存失效 (Cache Miss)】
-   a. 执行聚合统计查询：
-      SELECT SUM(CASE
-        WHEN type = 'income' THEN amount
-        WHEN type = 'transfer' AND amount > 0 THEN amount
-        ELSE -amount
-      END) FROM transactions WHERE account_id = 1 AND deleted_at IS NULL;
-
-   b. 得到计算结果（例如: 1250.00）。
-
-   c. 写入缓存表：
-      INSERT INTO account_balance_cache (account_id, balance, updated_at)
-      VALUES (1, 1250.00, NOW())
-      ON CONFLICT DO UPDATE ...
-
-   d. 将计算出的 1250.00 映射为 BalanceSnapshot 返回。
-
-```
-
-**边界隔离优势：**
-即便未来在 PG 之前引入了 Redis 集群，也只需要修改 `AccountRepositoryImpl` 的内部流转，Use Case 和 Domain 不需要修改哪怕一行代码。
-
-### 4.3 缓存并发竞争与自愈机制（高并发优化）
-
-在高并发写入（如批量同步导入或多线程记账）时，多个线程同时更新同一个账户的余额缓存，可能会导致**死锁（Deadlock）**或**脏写（Dirty Write）**。为此，系统引入以下并发控制与自愈机制：
-
-1. **行级锁（SELECT FOR UPDATE）**：
-   - 在应用层 Use Case 开启事务后，凡是涉及资金变动的操作，必须显式对 `accounts` 表对应行加锁：
-     ```sql
-     SELECT * FROM accounts WHERE id = 1 FOR UPDATE;
-     ```
-   - 这确保了同一账户的资金变动和缓存更新在数据库层面被强制串行化，彻底杜绝并发死锁。
-2. **乐观锁与版本号（Optimistic Locking）**：
-   - 在 `account_balance_cache` 表中引入 `version INT NOT NULL DEFAULT 0` 字段。
-   - 每次更新缓存时，校验版本号：
-     ```sql
-     UPDATE account_balance_cache
-     SET balance = 1250.00, version = version + 1, updated_at = NOW()
-     WHERE account_id = 1 AND version = $current_version;
-     ```
-   - 若更新受影响行数为 0，说明存在并发冲突，系统将自动触发“缓存失效并重新计算”的自愈逻辑。
-3. **定时对账自愈任务（Reconciliation Job）**：
-   - 调度器中注册每日定时任务 `ReconciliationJob`。
-   - 该任务在后台现场计算所有账户的流水总和，并与 `account_balance_cache` 中的缓存值进行比对。
-   - 若发现不一致，自动以现场计算的真实值为准重构缓存，并记录 `Warning` 级别审计日志，实现缓存的自动对账与自愈。
+流水新增、软删除、Transfer 聚合删除和危险账户删除必须在各自写事务中删除受影响缓存。In-Memory adapter 不得用“流水数量”替代 PostgreSQL 的 `MAX(version)` 语义。
 
 ---
 
-## 5. 异常流与数据一致性保障 (Exception Handling Workflow)
+## 5. 用户注册与默认数据
 
-使用 C++23 的 `std::expected` 让异常工作流变得显式且安全。
+注册接口接受 `username`、`password`、可选 `baseCurrency` 与可选 `preferredLocale`。未提供 locale 时使用 `zh-CN`；系统不通过 IP 或请求头推断 locale。
 
-### 5.1 遇到领域错误（如余额不足、汇率非正数）
+注册使用 bootstrap Unit of Work：
 
-- `TransferDomainService` 直接返回 `std::unexpected(TransferRuleError::NegativeAmount)`。
-- Use Case 收到错误，**不开启**数据库事务，直接向 Controller 返回 `std::unexpected(UseCaseError::DomainRuleViolation)`。
-- 零 I/O 损耗，无脏数据产生。
+1. 事务以无租户状态创建用户并取得数据库 ID。
+2. 将同一事务一次性绑定到新 `UserId`，绑定后不可切换租户。
+3. locale 按 `preferredLocale -> primary language -> en-US -> zh-CN` 查找可用系统模板。
+4. 创建 `UserPreference`，并根据最终 locale 设置默认时区。
+5. 先复制 root 分类，再复制 child 分类；唯一约束和 UPSERT 保证结构幂等。
+6. 将 `users.categories_initialized` 设为 true。
+7. 保存 refresh token hash，写 Register AuditLog，登记 `UserRegisteredEvent`。
+8. 业务数据与 Outbox 一起提交并返回 Token Pair。
 
-### 5.2 遇到基础设施错误（如数据库死锁、网络断开）
+当前 migration 只内置 `zh-CN` 分类模板，因此其他 locale 会按上述顺序降级。增加语言包只需写入完整、父子关系一致的 locale 模板数据，不改变注册流程。
 
-- Drogon 的 `execSqlSync` 抛出异常或返回空。
-- Repository 捕获异常，包装为 `std::unexpected(RepositoryError::DatabaseError)` 返回给 Use Case。
-- Use Case 所在的 `IUnitOfWork` 闭包检测到内部返回了 unexpected。
-- **UoW 自动触发 DB Rollback**，确保部分写入的流水和 outbox 记录（例如转账只写了出账没写入账）被撤销。
-
----
-
-## 6. 后台作业工作流 (Background Job Workflow)
-
-有别于 HTTP Request 触发的工作流，Scheduler 触发的工作流生命周期如下：
-
-```text
-[1. Event Loop Timer] (例如每 12 小时触发)
-      │
-      ▼
-[2. Job Class] (Application 层包装)
-  - 实例化 RefreshExchangeRatesUseCase
-  - 注入 ExternalGateway 和 DbRepository
-      │
-      ▼
-[3. Use Case]
-  - 调用 Gateway (HTTP GET 外部 API)
-  - 接收 JSON 并在 Infra 层转为 ExchangeRate 值对象
-  - 若成功，调用 Repo 执行批量 INSERT (Append Only)
-      │
-      ▼
-[4. Logging]
-  - 将结果状态写入 spdlog (成功/失败、拉取条数)
-
-```
-
-此工作流无需 Controller 参与，直接以 Application 层作为入口点。
+任一步失败都会回滚用户、偏好、分类、Token、审计和 Outbox，不保留半初始化账户。重复初始化返回冲突。
 
 ---
 
-## 7. 用户注册后默认数据初始化与国际化
+## 6. 认证生命周期
 
-注册成功后，系统必须立即初始化可用的基础数据，避免用户进入首页后分类、偏好和货币展示为空。
-
-### 7.1 国际化初始化策略
-
-由于 `user_preferences` 中存在 `locale` 偏好（如 `zh-CN` 或 `en-US`），初始化分类时应根据用户注册时的语言偏好，拉取对应语言的分类模板，避免非中文用户注册后得到的分类全为中文。
-
-**语言检测优先级**
-
-1. **前端显式传递**：注册请求 DTO 包含 `preferredLocale` 字段（推荐）
-2. **Accept-Language Header**：从 HTTP 请求头解析
-3. **IP 地理位置推断**：根据用户 IP 地址推断区域
-4. **系统默认**：回退到 `zh-CN`
-
-**分类模板多语言存储**
-
-`system_category_templates` 表增加 `locale` 字段，支持同一分类的多语言版本：
-
-```sql
--- 修改后的表结构
-CREATE TABLE system_category_templates (
-    id BIGSERIAL PRIMARY KEY,
-    name VARCHAR(128) NOT NULL,
-    locale VARCHAR(16) NOT NULL DEFAULT 'zh-CN',  -- 新增语言字段
-    group_name VARCHAR(64) NOT NULL,
-    parent_id BIGINT REFERENCES system_category_templates(id),
-    default_board category_board,
-    sort_order INT NOT NULL DEFAULT 0,
-    is_selectable BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE NULLS NOT DISTINCT (locale, group_name, parent_id, name)  -- 修改唯一约束
-);
-
--- 示例数据
-INSERT INTO system_category_templates (name, locale, group_name, default_board, sort_order) VALUES
-    -- 中文
-    ('餐饮', 'zh-CN', 'daily_expenses', 'expense', 1),
-    ('交通', 'zh-CN', 'daily_expenses', 'expense', 2),
-    ('工资', 'zh-CN', 'income_sources', 'income', 1),
-
-    -- 英文
-    ('Food & Dining', 'en-US', 'daily_expenses', 'expense', 1),
-    ('Transportation', 'en-US', 'daily_expenses', 'expense', 2),
-    ('Salary', 'en-US', 'income_sources', 'income', 1),
-
-    -- 日文
-    ('食費', 'ja-JP', 'daily_expenses', 'expense', 1),
-    ('交通費', 'ja-JP', 'daily_expenses', 'expense', 2),
-    ('給料', 'ja-JP', 'income_sources', 'income', 1);
-```
-
-### 7.2 注册流程时序
-
-```text
-1. [RegisterUserUseCase] 接收 RegisterInputDTO {
-     username, password, baseCurrency, preferredLocale
-   }
-
-2. [Use Case] 从 DTO 或 HTTP Header 解析用户首选语言
-   - 优先使用 preferredLocale (如 "en-US")
-   - 其次解析 Accept-Language Header
-   - 回退到 "zh-CN"
-
-3. [Use Case] 校验注册输入并生成 password_hash。
-
-4. [Use Case] 开启未绑定租户的 bootstrap uow->executeInTransaction()：
-
-5.   [UserRepository]
-     - INSERT User 并取得数据库分配的 userId
-     - 在当前事务上将 tenant scope 一次性绑定为该 userId
-     - 绑定后执行 SET LOCAL app.current_user_id，禁止再次切换租户
-
-6.   [PreferenceRepository]
-     - INSERT INTO user_preferences
-     - baseCurrency 来自注册 DTO 或地区默认值
-     - locale 使用步骤 2 确定的语言
-     - timezone 根据 locale 推断（如 en-US → America/New_York, zh-CN → Asia/Shanghai）
-     - theme 默认 'system'
-
-7.   [CategoryRepository]
-     a. 查询系统模板：
-        SELECT * FROM system_category_templates
-        WHERE locale = $1 AND default_board = 'income'
-        ORDER BY sort_order;
-
-     b. 如果查询结果为空（不支持该语言），回退到 'zh-CN' 或 'en-US'
-
-     c. 复制为用户自己的分类（利用 ON CONFLICT DO UPDATE 保证幂等性）：
-        INSERT INTO categories (user_id, name, board, source, template_id)
-        SELECT $userId, name, default_board, 'system', id
-        FROM system_category_templates
-        WHERE locale = $locale AND default_board IN ('income', 'expense')
-        ON CONFLICT (user_id, board, parent_id, name)
-        DO UPDATE SET updated_at = NOW();
-
-8.   [UserRepository / AuditLogRepository / UnitOfWork]
-     - 将 users.categories_initialized 更新为 TRUE
-     - 写入 Action=Register, Resource=User
-     - metadata 包含 locale 和初始化的分类数量
-     - 在提交前登记 UserRegistered 事件，由同一事务写入 outbox
-
-9. [Use Case] 业务数据与 outbox 一起 Commit；任一步失败则全部回滚。
-```
-
-bootstrap UoW 的“无租户”状态只允许访问 `users`、系统模板等非 RLS 数据。取得新 `userId` 后必须在首条租户表 SQL 前完成一次性绑定；普通已认证请求仍在事务开始前预绑定 JWT 中的 `userId`。禁止为了初始化默认数据拆成多个独立提交，也禁止用后台特权连接绕过该流程。
-
-### 7.3 注册初始化幂等性与并发冲突防御
-
-如果用户在注册过程中，由于网络抖动导致前端重复提交，或者初始化分类事务执行缓慢，可能会导致产生重复的分类数据或唯一约束冲突。为此，系统采用三层防御机制：
-
-1. **第一层（应用层）**：在 `users` 表或 `user_preferences` 表中引入 `categories_initialized` 状态标志。这是防止重复初始化的主要手段。
-2. **第二层（数据库层）**：`categories` 使用 V1 schema 的 `UNIQUE NULLS NOT DISTINCT (user_id, board, parent_id, name)`，并以相同四列执行 `ON CONFLICT DO UPDATE`（非 `DO NOTHING`，以便触发 `updated_at` 刷新，保留可观测性）。`NULLS NOT DISTINCT` 确保两个根分类的 `parent_id = NULL` 仍会发生唯一冲突：
-   ```sql
-   UNIQUE NULLS NOT DISTINCT (user_id, board, parent_id, name)
-   ```
-3. **第三层（监控层）**：对数据库的 `ON CONFLICT` 触发次数进行监控告警，以便及时发现前端防抖失效或恶意重放攻击。
-
-### 7.4 语言回退机制
-
-当用户选择的语言在系统中没有对应模板时，按以下优先级回退：
-
-1. **用户请求语言**（如 `fr-FR`）
-2. **语言主类别**（如 `fr-FR` → `fr`）
-3. **英语** (`en-US`)
-4. **中文** (`zh-CN`)
-
-```cpp
-// application/use_cases/RegisterUserUseCase.cpp
-std::string determineInitializationLocale(const std::string& preferredLocale) {
-    // 1. 尝试用户首选语言
-    if (categoryRepo_->hasTemplatesForLocale(preferredLocale)) {
-        return preferredLocale;
-    }
-
-    // 2. 尝试语言主类别（en-US → en）
-    std::string primaryLang = extractPrimaryLanguage(preferredLocale);
-    if (categoryRepo_->hasTemplatesForLocale(primaryLang)) {
-        return primaryLang;
-    }
-
-    // 3. 回退到英语
-    if (categoryRepo_->hasTemplatesForLocale("en-US")) {
-        return "en-US";
-    }
-
-    // 4. 最终回退到中文
-    return "zh-CN";
-}
-```
-
-### 7.5 约束与规约
-
-1. **系统模板只读**：用户不能直接修改 `system_category_templates`
-2. **用户可删除预设分类**：复制后的分类可以被用户删除或重命名
-3. **默认账户 subtype 只是选项**：不自动创建账户
-4. **初始化幂等性**：
-   - 检查 `user_preferences` 是否已存在
-   - 检查该用户是否已有分类
-   - 重复调用不能产生重复分类
-5. **初始化失败处理**：
-   - 注册 bootstrap 事务必须整体回滚，不能留下已提交但默认数据不完整的用户
-   - 若未来改用后台补偿模型，必须先单独设计可恢复状态机、幂等重试与登录门禁，不能在 Phase 1 静默拆分事务
-
-### 7.6 前端国际化配合
-
-前端应在注册表单中：
-
-1. **自动检测浏览器语言**：`navigator.language`
-2. **提供语言选择器**：让用户手动选择首选语言
-3. **显示回退提示**：如果用户语言不支持，提示"将使用英语作为默认分类语言"
-
-### 7.7 支持的语言与扩展
-
-**Phase 1（MVP）**
-
-- 中文简体 (`zh-CN`)
-- 英语 (`en-US`)
-
-**Phase 2（扩展）**
-
-- 日语 (`ja-JP`)
-- 繁体中文 (`zh-TW`)
-- 韩语 (`ko-KR`)
-- 西班牙语 (`es-ES`)
-
-新增语言支持只需：
-
-1. 在 `system_category_templates` 插入对应语言的分类数据
-2. 无需修改代码逻辑
+- 注册和登录签发短期 Access Token 与只返回一次的 Refresh Token。
+- Refresh Token 只存 hash；刷新成功后执行 rotation。
+- 已使用 Refresh Token 再次出现时，撤销整个 session 并登记 `RefreshTokenReuseDetectedEvent`。
+- Logout 同事务撤销 session 与当前 Access Token，并登记 `UserLoggedOutEvent`。
+- `UserLoggedInEvent` 与 `TokenRefreshedEvent` 同样通过 Outbox 保存。
+- 未知用户和错误密码使用相同 401 语义，避免账户枚举。
 
 ---
+
+## 7. 后台生命周期
+
+后台只运行三类 Job：Outbox Publisher、Exchange Rate Refresh 和 Session Cleanup。timer callback 只向有界线程池提交工作；网络、数据库和 Handler 均在 worker 中执行。
+
+汇率刷新与 Session cleanup 使用 PostgreSQL 租约，Outbox 使用逐行 `SKIP LOCKED` claim。启动、停止、软超时、角色边界和 SIGTERM 顺序见 [调度设计](12_Scheduler_Design.md)。
+
+---
+
+## 8. 错误与验收
+
+可预期失败使用 `std::expected` 逐层映射；基础设施异常在 Repository 或 Job 边界收束。事务提交前的任何失败都必须撤销业务事实与待写 Outbox。
+
+测试至少覆盖：
+
+1. 转账三种模式、三种手续费来源、锁顺序、回滚和缓存失效。
+2. 危险删除确认、同步审计、完整 Transfer 清理和失败回滚。
+3. 缓存命中、自愈、并发读取和 `MAX(version)`。
+4. 注册 locale 降级、父子分类、重复初始化和 bootstrap 租户绑定。
+5. Refresh rotation、reuse detection、logout 与过期清理。
+6. 业务写入、AuditLog 与 Outbox 的事务原子性。
+7. 两用户隔离、连接池复用与 RLS fail closed。
+
+事件状态机见 [事件设计](14_Event_Design.md)，测试层次见 [测试策略](16_Testing_Strategy.md)。

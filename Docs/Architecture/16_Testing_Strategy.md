@@ -1,269 +1,143 @@
-# Personal Finance Hub - Testing Strategy
+# Personal Finance Hub 测试策略
 
-Version: 1.3
+Version: 2.0
 Backend: C++23
 Architecture: Clean Architecture + GoogleTest
+Status: Approved
 
 ---
 
 ## 1. 目标
 
-测试策略必须优先覆盖金融正确性、事务一致性和跨层错误映射。
+PFH 测试优先证明金融正确性、事务一致性、租户隔离、API 契约和后台任务可恢复性。测试层次应同时提供快速反馈与真实运行环境证据，任何 In-Memory 或静态门禁都不能替代 PostgreSQL、Drogon 和 Linux production ON 验收。
 
-核心目标：
-
-- Money、Currency、ExchangeRate 的计算稳定
-- TransferAggregate 的三种推导模式正确
-- Repository 与 PostgreSQL 行为一致
-- REST API 的错误码和 JSON 格式稳定
-- 同步导入保持幂等
-- 报表显式排除 Transfer
-
-### 1.1 Phase 1 当前基线与最终门禁
-
-- 截至 2026-07-15，P1-S12-01 已在 Windows GCC 16 / PostgreSQL OFF 的两个全新构建目录分别完成 Debug 与 Release；每个配置均通过 292 个 unit/use-case、17 个 In-Memory integration scenarios、28 个 framework-neutral API tests 和 4 个静态契约门禁，共 341/341。PostgreSQL、production bootstrap 与 security 翻译单元另由窄 API stub compile gate 覆盖。
-- S10 基础提交已在外部 PostgreSQL 16.14 + 真实 Drogon/OpenSSL/Argon2 环境完成 Debug/Release 321/321、V1-V5、双角色启动和核心 API smoke。S11 的 V6、Outbox/Scheduler runtime 与完整 PostgreSQL Repository fixture 尚未在真实环境执行。
-- In-Memory scenarios 用于快速固定 Repository/UoW 语义，不是 PostgreSQL Repository Integration Test 的替代品。
-- P1-S12 必须在另一台机器完成 Linux、Docker、PostgreSQL 16+、Debug/Release、真实 Repository/UoW/RLS、API 和后台任务测试；取得可追溯结果前，Phase 1 不得签署完成或合并到 `main`。
+Phase 1 的固定测试数量、环境和最终结果归档在 [S09-S12 交付摘要](../Archive/Phase_1_S09-S12_Delivery_Summary.md)，本文件只维护持续有效的测试规则。
 
 ---
 
-## 2. Test Pyramid
+## 2. 测试层次
 
-推荐测试层级：
+| 层次 | 目的 | 外部依赖 |
+| ---- | ---- | -------- |
+| Unit | 验证值对象、实体、纯领域服务、解析器与调度状态机 | 无数据库、无网络、无 Drogon runtime |
+| Use Case | 验证权限、事务编排、错误传播和事件登记 | 使用受控测试替身 |
+| In-Memory Integration | 快速固定 Repository 与 Unit of Work 的业务语义 | In-Memory adapter |
+| PostgreSQL Integration | 验证 SQL、事务、RLS、精度、锁与真实 Repository | PostgreSQL 16+ |
+| API | 验证 DTO、路由、认证、状态码、响应头和 OpenAPI | framework-neutral 与真实 Drogon 两类 |
+| Runtime | 验证 Provider、Scheduler、Outbox、迁移、Docker 和进程生命周期 | Linux production ON |
 
-```text
-Unit Tests
-  ↑ 数量最多，速度最快
-
-Integration Tests
-  ↑ 覆盖 PostgreSQL、Repository、事务
-
-API Tests
-  ↑ 覆盖 Controller、DTO、HTTP 映射
-
-End-to-End Smoke Tests
-  ↑ 少量关键用户路径
-```
+同一业务场景应尽量在 In-Memory 与 PostgreSQL adapter 间复用。前者用于快速定位，后者才是持久化语义的最终证据。
 
 ---
 
-## 3. Unit Tests
-
-Unit Test 不访问数据库、不启动 Drogon、不依赖网络。
+## 3. 金融与领域测试
 
 必须覆盖：
 
-- Decimal
-- Currency
-- Money
-- ExchangeRate
-- CurrencyConversionService
-- TransferDomainService
-- BalanceCalculationService
-- Category board rule
-- AccountType / AccountCategory behavior
-- Outbox claim token、租约恢复、退避、dead letter 与 handler 幂等
-- FreeCurrencyAPI/exchangerate.fun 严格响应解析、Decimal 数值 token 与主备切换
-- 有界 worker、任务防重入、分布式 lease、认证数据清理和优雅退出
+1. `Decimal` 解析、Half-Even 舍入、溢出与 `NUMERIC(20,8/10)` 边界。
+2. `Money` 仅允许同币种加减，跨币种计算必须显式使用汇率。
+3. `ExchangeRate` 的直接、反向、USD 枢纽与历史时间点选择。
+4. Transfer 的三种输入模式、双腿平衡和 Source、Target、ThirdParty 手续费。
+5. Transfer 不计入收入或支出；signed Adjustment 正数计流入、负数计流出。
+6. Income 与 Expense 分类 board 约束、root 分类回溯和软删除分类显示。
+7. 账户余额允许负数，乐观锁与余额缓存重建保持一致。
+8. Dashboard 按用户 IANA 时区计算自然月半开窗口。
 
-重点用例：
-
-1. 同币种 Money 可加减，不同币种 Money 不能直接加减
-2. 汇率方向明确，反向汇率可重现
-3. 同币种转账出入金额必须一致
-4. 跨币种转账支持三种模式：
-   - Outgoing + Rate => Incoming
-   - Outgoing + Incoming => Rate
-   - Incoming + Rate => Outgoing
-5. 手续费、汇兑损耗必须作为 Adjustment
-6. Transfer 不计入收入/支出统计
-7. 分类板块校验：Income 不能使用 Expense 分类
-8. 账户余额允许负数
+Domain 测试不得访问 Repository、数据库、网络或系统时钟；时间与随机性通过接口注入。
 
 ---
 
-## 4. Repository Integration Tests
+## 4. PostgreSQL 与租户隔离
 
-Repository Integration Test 必须使用真实 PostgreSQL 16+ 测试库。Phase 1 的最终连库验证固定在另一台具备 Linux/Docker 环境的机器执行；可以使用容器或独立测试实例，但必须从空库执行迁移并记录 commit hash、数据库版本、命令与结果。
+PostgreSQL Integration Test 必须从空库执行当前全部 Flyway migration，并验证 `migrate`、`info`、`validate` 和第二次 no-op。测试库不得含个人数据。
 
-本地 In-Memory integration scenarios 必须与 PostgreSQL 测试尽量共享场景定义，但只能作为快速回归，任务状态应保持 `[~]` 直到真实数据库测试通过。
+Repository fixture 至少覆盖：
 
-必须覆盖：
+- User、Preference、Account、Transaction、ExchangeRate、Category、Tag 和 AuditLog。
+- Unit of Work、业务写入与 Outbox 同事务提交、失败回滚。
+- `exchange_rates` append-only 与 `fetched_at <= target_time` 的历史查询。
+- Account optimistic lock 和余额缓存 `source_version = MAX(version)` 语义。
+- Dangerous Delete 的锁定、同步 AuditLog、完整关联清理与 Outbox。
+- Outbox claim token、`SKIP LOCKED`、租约恢复、退避、dead letter 和 Handler receipt。
+- `NUMERIC` round-trip、边界舍入和超界拒绝。
 
-- UserRepository
-- AccountRepository
-- TransactionRepository
-- ExchangeRateRepository
-- CategoryRepository
-- TagRepository
-- AuditLogRepository
-- UnitOfWork
-- OutboxPublisherJob
-- RefreshToken / RevokedAccessToken persistence
+租户隔离测试必须使用 request/background 两个独立非 superuser 角色，并验证：
 
-重点用例：
-
-1. `account_balance_cache` 命中和失效重建
-2. `exchange_rates` append-only，不允许覆盖历史
-3. 历史汇率查询使用 `fetched_at <= target_time` 的最新记录
-4. Dangerous Delete 在同一事务中清理 transactions、balance cache、account，并写 outbox 事件
-5. 重复分类名触发 Conflict
-6. Tag 同用户唯一，跨用户可同名
-7. RLS 未设置用户上下文时 fail closed，连接池复用不残留前一用户上下文
-8. `NUMERIC(20,8/10)` 边界、Half-Even 舍入和超界拒绝与 Domain 一致
-9. 事务提交后 outbox 记录与业务事实同事务落盘
-10. outbox 失败重试不会重复破坏业务事实
-11. 余额缓存 `source_version` 与 schema 的账户版本语义一致
+1. request role 无 `BYPASSRLS`。
+2. background role 默认只读，只获得明确授权的跨租户查询。
+3. 未设置用户上下文时 RLS fail closed。
+4. 连接池复用不残留前一用户上下文。
+5. 访问其他用户私有资源返回 404，避免资源枚举。
 
 ---
 
-## 5. API Tests
+## 5. API 与安全
 
-S10 本地快速 API Test 直接驱动 framework-neutral `ApiApplication`，覆盖 Controller、JWT filter、DTO、路由分派和错误映射；同时用 OpenAPI/route 静态门禁及 Drogon stub compile gate 校验生产 adapter 形状。P1-S12 必须再启动真实 Drogon App 并连接 PostgreSQL 测试库，执行同一批核心场景与 smoke test，前者不能替代后者。
+API 测试同时覆盖 framework-neutral 应用边界与真实 Drogon runtime。OpenAPI、路由表和 DTO 必须由静态门禁保持一致。
 
-必须覆盖：
+核心路径包括：
 
-- `POST /api/v1/auth/register`
-- `POST /api/v1/auth/login`
-- `POST /api/v1/auth/refresh`
-- `POST /api/v1/auth/logout`
-- `POST /api/v1/transactions`
-- `POST /api/v1/transfers`
-- `GET /api/v1/accounts`
-- `GET /api/v1/accounts/{id}/balance`
-- `GET /api/v1/reports/net-worth`
-- `GET /api/v1/reports/cash-flow`
-- `GET /api/v1/reports/dashboard-summary`
-- outbox 投递后的幂等副作用，以及系统事件/dead-letter 补充审计；不得重复已有同步业务审计
-- 事件重试不重复写坏业务事实
-- TraceId、统一错误结构与生产异常脱敏
+- 注册、登录、Refresh Token rotation/reuse detection 和登出。
+- 账户、分类、标签、偏好、流水和转账。
+- Balance、Net Worth、Cash Flow 与 Dashboard Summary。
+- 币种目录、ETag、TraceId 和统一错误响应。
 
-错误映射必须覆盖：
+持续规则：
 
-| 场景                 | 期望状态码 |
-| -------------------- | ---------- |
-| JSON 非法            | 400        |
-| 未登录               | 401        |
-| 访问其他用户私有资源 | 404（防枚举） |
-| 缺少全局角色权限     | 403        |
-| 账户不存在           | 404        |
-| 重复分类名或版本冲突 | 409        |
-| 转账金额不平衡       | 422        |
-| 数据库故障           | 500        |
-
-金额字段规则：
-
-1. 请求中的金额必须是字符串
-2. 响应中的金额必须是字符串
-3. API Test 必须拒绝 JSON number 金额输入
+- 金额和汇率只以十进制字符串进入或离开 API，JSON number 必须被拒绝。
+- RFC 3339 时间必须带时区并规范化为 UTC。
+- 未知字段、错误类型、越界 ID、非法枚举和超长字符串必须返回稳定错误。
+- 401、403、404、409、422、500 与 502 的映射保持稳定。
+- 生产响应和日志不得暴露 SQL、文件路径、Token、密码、Provider key 或底层异常正文。
+- Refresh Token 只存 hash；旧 Token 复用撤销整个 session；Logout 后当前 Access Token 立即失效。
 
 ---
 
-## 6. Business Rule Tests
+## 6. Provider、Outbox 与 Scheduler
 
-业务规则测试应以场景命名。
+汇率测试必须覆盖 FreeCurrencyAPI 主源、exchangerate.fun 整批备用、双源失败和历史降级：
 
-重点场景：
+- 主源成功时不调用备用源。
+- 主源 transport、HTTP 或响应校验失败时，原批次整体切换备用源。
+- 成功批次不拆分、不混用 source。
+- 数字 token 不经 `float` 或 `double`。
+- 未覆盖币种只有在完整历史快照存在时才声明降级可用。
+- 测试凭据从仓库外注入，结果只记录脱敏断言。
 
-- 跨币种转账
-- 手续费
-- 汇兑损耗
-- 历史汇率
-- 余额重建
-- 重复导入
-- 默认分类初始化
-- 删除预设分类后历史流水展示
-- 信用账户负余额
-- 报表排除 Transfer
-- DashboardSummaryDTO 聚合正确
-- Dangerous Delete 的同步 AuditLog 与删除事实同事务，提交后 outbox 只触发幂等通知等副作用
-- OutboxPublisherJob 对并发 claim、旧 token、租约恢复、退避、dead letter 和 handler receipt 的行为
+后台运行时测试必须覆盖：
 
-示例：
-
-```text
-CreateTransfer_WhenBothAmountsProvided_CalculatesRate
-CashFlowReport_WhenTransferExists_ExcludesTransferFromIncomeAndExpense
-ImportSync_WhenExternalTransactionRepeated_SkipsDuplicate
-DangerousDeleteAccount_WhenConfirmed_CleansDataAndEmitsOutboxEvent
-```
-
-其中同步导入属于 Phase 3 预留能力，不作为 Phase 1 合并门禁；对应测试在实现 Provider/Import Use Case 时启用。
+- Event Loop callback 只做本机防重入与有界入队。
+- worker 队列满、停止中、异常和软超时不会卡死后续调度。
+- scheduled lease 使用数据库时钟和 token-guarded release。
+- Outbox 多 worker claim、失败重试、dead letter 与幂等副作用。
+- 认证清理只删除已过期记录。
+- SIGTERM 依次停止 timer、drain 已接收任务并正常退出。
 
 ---
 
-## 7. Frontend Test Scope
+## 7. 平台与交付门禁
 
-前端测试以关键数据协同为主：
+Phase 分支合并前，根据改动范围执行以下门禁：
 
-- 金额输入组件只提交字符串
-- 转账表单三种模式联动正确
-- DashboardSummaryDTO 能一次渲染首页
-- 401 自动退出登录
-- 422 展示业务规则错误
-- 用户偏好切换主题、日期格式、默认报表周期后持久化
+1. Windows 或开发机 PostgreSQL OFF 的 Debug/Release 快速回归。
+2. Linux Debug/Release production ON 构建与完整 CTest。
+3. PostgreSQL 空库迁移、Repository fixture、RLS 与真实 API smoke。
+4. Docker 冷构建、healthcheck、non-root、双角色、后台任务与优雅停止。
+5. Markdown 链接、格式、旧路径和秘密模式扫描。
 
----
-
-## 8. Coverage Target
-
-建议覆盖率目标：
-
-| Layer                | Target |
-| -------------------- | ------ |
-| Domain Layer         | >= 90% |
-| Application Layer    | >= 80% |
-| Infrastructure Layer | >= 60% |
-| Presentation Layer   | >= 60% |
-
-覆盖率不是唯一目标。
-金融核心规则、错误路径、事务回滚路径必须优先于机械覆盖率。
+代码改动至少运行仓库根目录的 `quality_check.ps1` 或平台等价命令。涉及 migration、PostgreSQL adapter、Drogon、Provider、Scheduler、Outbox、Docker 或生产装配的改动，必须补对应真实环境门禁，不能只依赖 PostgreSQL OFF 结果。
 
 ---
 
-## 9. CI Rules
+## 8. 证据与合并规则
 
-CI 至少执行：
+交付摘要只记录有决策价值的证据：commit、操作系统与关键依赖版本、命令类别、测试数量和 PASS/FAIL 结论。原始日志、认证材料、完整外部响应和本机私有路径不得提交。
 
-```text
-cmake configure
-cmake build
-unit tests
-repository integration tests
-api smoke tests
-format/lint check
-markdownlint check
-```
+以下情况阻断合并：
 
-P1-S12 的外部机器门禁还必须执行：
-
-```text
-Linux Debug configure/build/test
-Linux Release configure/build/test
-PostgreSQL empty-schema migration and repository tests
-Docker service startup and API smoke tests
-Outbox/Scheduler real-runtime tests
-```
-
-合并阻断规则：
-
-1. Unit Test 失败禁止合并
-2. Domain Layer 覆盖率低于目标禁止合并
-3. Dangerous Delete、Transfer、ExchangeRate 相关测试失败禁止合并
-4. 新增 API 必须包含成功路径和至少一个错误路径测试
-5. 文档必须通过 Markdown 校验；每个 Phase 交付总结记录对应 Git Commit Hash，设计文档用 `Version` 跟踪内容版本，避免在提交前写入尚不存在的 hash。
-6. Linux/Docker/PostgreSQL 外部门禁缺少 commit hash、环境版本、命令或结果时，禁止合并 Phase 分支。
-
----
-
-## 10. Final Rules
-
-1. Domain 测试不依赖数据库
-2. Repository 测试必须使用真实 PostgreSQL 行为
-3. API 测试必须校验 HTTP 状态码和 JSON 格式
-4. 所有金额测试避免 float/double
-5. 所有转账测试必须验证 Transfer 不进入收入/支出
-6. 同步测试必须验证幂等
-7. 审计测试必须验证关键操作写入 AuditLog
-8. In-Memory integration scenarios 通过不能替代真实 PostgreSQL 验收
+1. 任一必需门禁失败或未执行且无明确豁免。
+2. 测试数量意外减少且没有说明。
+3. 金融、事务、RLS、认证、Dangerous Delete、Transfer、ExchangeRate 或 Outbox 的回归。
+4. 新增 API 缺少成功路径、至少一个错误路径或 OpenAPI 更新。
+5. 真实环境证据与待合并 commit 不一致。
+6. 文档链接失效、能力声明与代码不一致或秘密扫描失败。

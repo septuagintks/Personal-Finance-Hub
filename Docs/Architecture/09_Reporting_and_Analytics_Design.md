@@ -1,478 +1,172 @@
-# Personal Finance Hub - Reporting & Analytics Design
+# Personal Finance Hub 报表与分析设计
 
-Version: 1.2
-
+Version: 2.0
 Backend: C++23
-
-Architecture: Clean Architecture (Lightweight CQRS)
+Architecture: Clean Architecture + Lightweight CQRS
+Status: Approved
 
 ---
 
-## 1. 架构定位：引入轻量级 CQRS
+## 1. 架构定位
 
-在 Clean Architecture 中，读操作与写操作的诉求是完全相反的：
-
-- **写操作（Command）**：需要强一致性、业务规则校验、保护聚合根不被破坏（通过 Repository 加载 Entity）。
-- **读操作（Query）**：需要极致的性能、多表联合、直接输出给前端展示（无需经过 Entity 转换）。
-
-Phase 1 的最小报表读路径统一由 Application 层 `ReportQueryService` 承载，覆盖 net worth、cash flow trend 和 dashboard summary；不再另设 `GenerateMonthlyReportUseCase`。当前实现通过 request-scoped Repository 读取 Domain 对象，并复用 `Money`、`Decimal` 与 `CurrencyConversionService` 完成一致的金融计算。后续扩展为 PostgreSQL 聚合查询端口时，不得改变 Controller 所依赖的 Application DTO 和金额语义。
-
-### 1.1 报表查询的流转路径与多租户安全隔离
-
-报表由 `FinanceApplicationService` 先按 JWT `UserId` 创建 `IRequestScope`，再调用 `ReportQueryService`。Application 不包含 PostgreSQL/Drogon 类型；Repository 实现负责固定 Drogon Transaction、设置事务级 RLS tenant，并把中性 RepositoryError 返回给 Application。为了防止**越权数据泄露（Horizontal Privilege Escalation）**，系统强制实施以下多租户安全隔离规约：
-
-1. **API 接口强制绑定 UserId**：
-   - `ReportQueryService` 的所有查询接口，其首个参数必须强制为 `UserId userId`。
-   - 表现层 `ReportController` 必须从 JWT 校验通过的请求上下文中提取 `UserId` 并传入，严禁由前端参数传入 `userId`。
-2. **SQL 模板参数化绑定**：
-   - 基础设施层的所有 SQL 语句必须显式且强制绑定 `user_id = $1` 过滤条件，绝不允许拼接 SQL 字符串。
-3. **数据库行级安全（Row-Level Security, RLS）**：
-   - 在 PostgreSQL 数据库层面，针对 `transactions`、`accounts`、`categories` 等表开启 RLS。
-   - 强制限制当前数据库连接只能读取属于当前 `user_id` 的行，作为底层数据安全的终极防线。
+Phase 1 的报表读路径由 Application 层 `ReportQueryService` 统一承载。`FinanceApplicationService` 从认证上下文取得 `UserId`，创建 request-scoped `IRequestScope`，再使用 Account、Transaction、UserPreference、ExchangeRate 与 Category Repository 读取事实并组装 DTO。
 
 ```text
-[Frontend / Vue3 ECharts]
-          │
-[Presentation Layer] (ReportController) - 从 JWT 提取 UserId
-          │
-[Application Layer] FinanceApplicationService + ReportQueryService
-  - 强制传递 UserId
-  - 复用 Money/Decimal/CurrencyConversionService
-  - 组装 Report DTO
-          │
-[Domain Repository Ports] Account / Transaction / Preference / Rate / Category
-          │
-[Infrastructure Layer] request-scoped PostgreSQL Repository
-  - tenant 参数与 RLS 上下文双重约束
-  - 所有租户读取固定在设置过 SET LOCAL 的短事务
-          │
-[PostgreSQL Database] - 开启 Row-Level Security (RLS) 终极防御
-
+ReportController
+    -> FinanceApplicationService
+        -> IRequestScope
+            -> ReportQueryService
+                -> Repository ports
+                    -> PostgreSQL adapters + RLS
 ```
+
+持续边界：
+
+- Controller 只处理查询参数、认证上下文和 HTTP 映射。
+- Application 不依赖 Drogon、PostgreSQL 或 SQL 类型。
+- Domain Service 不访问 Repository；跨仓储读取和汇率选择由 Application 编排。
+- 报表金额使用 `Money` 与 `Decimal` 计算，并以十进制字符串离开 API。
+- 所有查询由 JWT 中的用户身份限定，不接受客户端传入 `userId`。
 
 ---
 
-## 2. 核心报表业务场景与 DTO 设计
+## 2. 现行报表接口
 
-报表服务提供给前端（Vue3 + ECharts）直接可用的数据结构。所有最终金额**必须**统一折算为用户的**基准货币（Base Currency）**。
+### 2.1 净资产
 
-### 2.1 净资产看板 (Net Worth Summary)
+`GET /api/v1/reports/net-worth` 返回：
 
-**场景**：仪表盘首页，展示当前所有未归档账户的总资产、总负债与净资产。
-
-```cpp
-// application/dto/reports/NetWorthDTO.hpp
-#pragma once
-#include <string>
-
-struct NetWorthDTO {
-    std::string baseCurrency;    // 例如: "CNY"
-    std::string totalAssets;     // 定点数转换的字符串，避免前端精度丢失
-    std::string totalLiabilities;
-    std::string netWorth;
-    std::string generatedAt;
-};
-
-```
-
-### 2.2 月度收支趋势图 (Cash Flow Trend)
-
-**场景**：按月（或按日）展示收入与支出的柱状图。
-**关键约束**：必须严格排除 `type = 'transfer'` 以及手续费作为独立 `adjustment` 以外的内部流转。
-
-```cpp
-// application/dto/reports/CashFlowDTO.hpp
-#pragma once
-#include <string>
-#include <vector>
-
-struct DataPoint {
-    std::string period;  // "2026-01", "2026-02"
-    std::string income;
-    std::string expense;
-};
-
-struct CashFlowTrendDTO {
-    std::string baseCurrency;
-    std::vector<DataPoint> trends;
-};
-
-```
-
-### 2.3 分类支出饼图 (Category Expense Breakdown)
-
-**场景**：分析某个月份钱花在哪里了，支持下钻。
-
-```cpp
-// application/dto/reports/CategoryBreakdownDTO.hpp
-#pragma once
-#include <string>
-#include <vector>
-
-struct CategoryItem {
-    std::string categoryId;
-    std::string categoryName;
-    std::string amount;
-    std::string percentage; // 例如 "45.2%"
-};
-
-struct CategoryBreakdownDTO {
-    std::string baseCurrency;
-    std::string totalExpense;
-    std::vector<CategoryItem> items;
-};
-
-```
-
-### 2.4 首页聚合看板 (Dashboard Summary)
-
-**场景**：前端首页需要一次请求拿到净值、当月收入、当月支出、资产分布和 Top 支出分类，避免进入首页后连续请求多个报表接口。
-
-```cpp
-// application/dto/reports/DashboardSummaryDTO.hpp
-#pragma once
-#include <string>
-#include <vector>
-#include "application/dto/reports/NetWorthDTO.hpp"
-
-struct DistributionItem {
-    std::string label;
-    std::string amount;
-    std::string percentage;
-};
-
-struct TopExpenseCategoryItem {
-    std::string categoryId;
-    std::string categoryName;
-    std::string amount;
-    std::string percentage;
-};
-
-struct DashboardSummaryDTO {
-    std::string baseCurrency;
-    NetWorthDTO netWorth;
-    std::string monthlyIncome;
-    std::string monthlyExpense;
-    std::vector<DistributionItem> assetDistribution;
-    std::vector<TopExpenseCategoryItem> topExpenseCategories;
-    std::string reportPeriodStart;
-    std::string reportPeriodEnd;
-    std::string generatedAt;
-};
+```json
+{
+  "baseCurrency": "CNY",
+  "totalAssets": "12000.00000000",
+  "totalLiabilities": "-3000.00000000",
+  "netWorth": "9000.00000000",
+  "generatedAt": "2026-07-16T00:00:00Z"
+}
 ```
 
 计算规则：
 
-1. `baseCurrency` 必须来自 `UserPreference.baseCurrency`
-2. `netWorth` 使用所有未归档账户余额折算后汇总
-3. Dashboard 月窗来自 `UserPreference.timezone` 中的当前自然月，并转换为 UTC 半开区间 `[month_start, next_month_start)`
-4. `monthlyIncome` 统计 Income 与正数 Adjustment；`monthlyExpense` 统计 Expense 与负数 Adjustment 的绝对值
-5. 收入/支出统计必须显式排除 `transfer`；零额 Adjustment 在写入边界拒绝
-6. Adjustment 使用 signed 语义：正数是返利/补贴/FX Gain，负数是手续费/更正/FX Loss
-7. `assetDistribution` 按 `AccountType` 聚合，百分比使用 Half-Even 舍入到一位小数
-8. `topExpenseCategories` 将子分类回溯到一级 root，历史软删除分类仍用于解析名称；只有真正物理缺失的分类回退为未分类
-9. `generatedAt` 与 Dashboard 当前月计算使用同一个由 `IClock` 注入的时刻，不得直接依赖测试机墙上时间
+1. 基准币种来自 `UserPreference.base_currency`。
+2. 只读取当前用户未归档账户。
+3. 每个账户余额按 `generatedAt` 可用汇率折算。
+4. 折算后正数进入资产，负数进入负债；`netWorth = totalAssets + totalLiabilities`。
+5. 空账户和同币种零金额不要求汇率。
 
-### 2.4.1 时间与汇率边界
+### 2.2 月度现金流
 
-- Controller 的 `startDate`/`endDate` 使用 `YYYY-MM`，首尾月份均包含；每个月在用户 IANA 时区中计算本地月初，再转换成 UTC 半开区间。
-- 未知或空时区返回配置错误，不得静默回退 UTC。
-- 现金流按每条流水的 `occurredAt` 选择 `fetched_at <= occurredAt` 的历史汇率；净资产按注入的当前时刻选择汇率。
-- 跨币种金额为零时直接构造基准币种零值，不查询汇率；零的折算不应让空账户因缺失汇率导致整份报表失败。
-- 缺失汇率返回明确业务错误；不得使用未来汇率、最新汇率猜测、0 或 1 代替。
+`GET /api/v1/reports/cash-flow` 接受：
 
----
+- `startDate=YYYY-MM`。
+- `endDate=YYYY-MM`，首尾月份均包含。
+- `periodType=MONTH`。
 
-### 2.5 更丰富的报表 DTO
+范围最长 120 个月。响应按月返回 `income` 与 `expense`，全部使用用户基准币种。
 
-首页和基础图表之外，报表模块还需要支持账户、趋势、分类和标签维度的组合分析。
-这些 DTO 仍属于 Read Model，不进入 Domain Entity。
+计算规则：
 
-```cpp
-// application/dto/reports/AccountBalanceDTO.hpp
-#pragma once
-#include <string>
-#include <vector>
+1. 每个月按用户 IANA 时区转换为 UTC 半开窗口 `[month_start, next_month_start)`。
+2. Income 和正数 Adjustment 计入收入。
+3. Expense 和负数 Adjustment 的绝对值计入支出。
+4. Transfer 双腿不计入收入或支出。
+5. 每笔流水使用 `fetched_at <= occurred_at` 的历史汇率，不使用未来或最新汇率猜测。
+6. 未知时区、非法月份、倒置范围或缺失汇率返回明确错误。
 
-struct AccountBalanceItem {
-    std::string accountId;
-    std::string accountName;
-    std::string accountType;
-    std::string subtype;
-    std::string accountCategory;
-    std::string nativeCurrency;
-    std::string nativeBalance;
-    std::string baseCurrency;
-    std::string convertedBalance;
-};
+### 2.3 Dashboard Summary
 
-struct AccountBalanceDTO {
-    std::string baseCurrency;
-    std::vector<AccountBalanceItem> accounts;
-    std::string generatedAt;
-};
-```
+`GET /api/v1/reports/dashboard-summary` 不接受自定义日期。它以用户时区中的当前自然月返回：
 
-```cpp
-// application/dto/reports/NetWorthTrendDTO.hpp
-#pragma once
-#include <string>
-#include <vector>
+- 净资产、总资产与总负债。
+- 当月收入与支出。
+- 活跃账户数量。
+- 按 `AccountType` 聚合的资产分布。
+- 按一级 root 分类聚合的 Top 支出分类。
+- UTC 表示的报表窗口与生成时间。
 
-struct NetWorthPoint {
-    std::string date;
-    std::string netWorth;
-    std::string totalAssets;
-    std::string totalLiabilities;
-};
-
-struct NetWorthTrendDTO {
-    std::string baseCurrency;
-    std::vector<NetWorthPoint> points;
-};
-```
-
-```cpp
-// application/dto/reports/TagExpenseBreakdownDTO.hpp
-#pragma once
-#include <string>
-#include <vector>
-
-struct TagExpenseItem {
-    std::string tagId;
-    std::string tagName;
-    std::string amount;
-    std::string percentage;
-};
-
-struct TagExpenseBreakdownDTO {
-    std::string baseCurrency;
-    std::string totalExpense;
-    std::vector<TagExpenseItem> items;
-};
-```
-
-```cpp
-// application/dto/reports/ReportFilterDTO.hpp
-#pragma once
-#include <optional>
-#include <string>
-#include <vector>
-
-struct ReportFilterDTO {
-    std::string startDate;
-    std::string endDate;
-    std::optional<std::string> periodType; // DAY, WEEK, MONTH, YEAR
-    std::vector<std::string> accountIds;
-    std::vector<std::string> categoryIds;
-    std::vector<std::string> tagIds;
-    bool includeArchivedAccounts = false;
-};
-```
-
-查询服务扩展：
-
-```cpp
-virtual std::expected<AccountBalanceDTO, RepositoryError> getAccountBalances(
-    UserId userId,
-    const ReportFilterDTO& filter
-) = 0;
-
-virtual std::expected<NetWorthTrendDTO, RepositoryError> getNetWorthTrend(
-    UserId userId,
-    const ReportFilterDTO& filter
-) = 0;
-
-virtual std::expected<TagExpenseBreakdownDTO, RepositoryError> getTagExpenseBreakdown(
-    UserId userId,
-    const ReportFilterDTO& filter
-) = 0;
-```
-
-规则：
-
-1. 所有金额仍使用字符串
-2. 筛选条件中的账户、分类、标签必须属于当前用户
-3. 趋势类报表使用历史汇率
-4. 当前余额类报表默认使用最新汇率
-5. `includeArchivedAccounts` 只影响账户范围，不改变历史流水事实
+Dashboard 使用同一个注入时刻计算净资产、月份窗口和 `generatedAt`，避免跨月边界产生不一致结果。百分比使用 Half-Even 舍入并以字符串表示。
 
 ---
 
-## 3. 后续聚合查询端口草案（非 Phase 1 当前实现）
+## 3. 分类与交易语义
 
-以下接口只描述数据量增长后的可选优化方向，当前代码中不存在该端口，也不得把它当作 Phase 1 验收依据。Phase 1 的事实实现是 `pfh::application::ReportQueryService`，由 `FinanceApplicationService` 通过 `IRequestScope` 装配 request-scoped Repository。未来若引入 PostgreSQL 聚合查询端口，应保持现有 REST DTO、用户时区月窗、历史汇率、signed Adjustment 和错误语义不变。
+### 3.1 signed Adjustment
 
-```cpp
-// Future draft only: application/queries/IReportAggregateQuery.hpp
-#pragma once
-#include <expected>
-#include "application/dto/reports/NetWorthDTO.hpp"
-#include "application/dto/reports/CashFlowDTO.hpp"
-#include "application/dto/reports/CategoryBreakdownDTO.hpp"
-#include "application/dto/reports/DashboardSummaryDTO.hpp"
-#include "domain/repositories/RepositoryError.hpp"
+Adjustment 的符号是报表事实：
 
-class IReportAggregateQuery {
-public:
-    virtual ~IReportAggregateQuery() = default;
+| 符号 | 业务含义 | 现金流 | 支出分类 |
+| ---- | -------- | ------ | -------- |
+| 正数 | 返利、补贴、FX Gain | 收入 | 不计入 |
+| 负数 | 手续费、更正、FX Loss | 支出 | 计入 |
 
-    // 获取当前净资产
-    virtual std::expected<NetWorthDTO, RepositoryError> getNetWorthSummary(UserId userId) = 0;
+零额 Adjustment 在写入边界拒绝。
 
-    // 获取时间段内的收支趋势
-    virtual std::expected<CashFlowTrendDTO, RepositoryError> getCashFlowTrend(
-        UserId userId, const std::string& startDate, const std::string& endDate, const std::string& periodType // "MONTH" 或 "DAY"
-    ) = 0;
+### 3.2 分类回溯
 
-    // 获取特定时间段的支出分类占比
-    virtual std::expected<CategoryBreakdownDTO, RepositoryError> getExpenseCategoryBreakdown(
-        UserId userId, const std::string& startDate, const std::string& endDate
-    ) = 0;
+Top 支出分类通过 `ICategoryRepository` 将流水分类回溯到当前用户的一级 root：
 
-    // 获取首页聚合摘要
-    virtual std::expected<DashboardSummaryDTO, RepositoryError> getDashboardSummary(
-        UserId userId,
-        const std::string& startDate,
-        const std::string& endDate
-    ) = 0;
-};
+- 软删除分类仍可用于历史名称解析。
+- 物理缺失的历史分类归入未分类。
+- 无分类流水归入未分类。
+- 分类读取必须同时验证用户归属。
 
-```
+结果按金额降序返回；相同金额保持稳定顺序。
 
 ---
 
-## 4. 多币种聚合计算策略（后续优化草案）
+## 4. 汇率转换
 
-**痛点**：数据库中存储着 USD、CNY、JPY 的流水。如果在 SQL 里面做 `JOIN exchange_rates` 并在数据库层做乘法，由于历史汇率的查找极为复杂，不仅 SQL 难以维护，性能也很差。
+报表转换按以下顺序查找，并始终使用十进制定点运算：
 
-**最佳实践策略（分离计算与大数量级优化）**：
+1. 同币种直接返回。
+2. 零金额直接构造基准币种零值。
+3. 使用直接历史汇率 `source -> base`。
+4. 使用反向历史汇率 `base -> source` 并做除法。
+5. 使用同一时间点的 USD 枢纽汇率推导交叉汇率。
+6. 无完整路径时返回汇率不可用。
 
-1. **小数量级（单用户几万条流水以内）**：
-   - **DB 层只做同币种聚合**：使用 SQL 的 `GROUP BY currency_code` 查出各个币种的原始总和。
-   - **C++ 层做汇率转换**：将结果拉到 C++ 内存中，按需查询汇率并在 C++ 中用 `Decimal` 进行高精度转换和统一相加。
-2. **大数量级（流水达到百万级或高维报表）**：
-   - **SQL 端提前折算**：对于日/月度聚合报表，直接在 SQL 中通过 `GROUP BY` 和 `JOIN exchange_rates` 在数据库端完成折算，避免在内存中对每条流水进行三角折算导致 CPU 密集型计算，阻塞 Drogon 的 Event Loop。
-   - **单笔流水明细报表**：采用延迟加载（Lazy Translation）或前端实时折算。
-
-### 4.1 未来基础设施聚合适配器示意
-
-以下代码是非编译性示意，不对应当前类名或目录。若后续实现，必须通过新的 Application 查询端口接入，不能让 Controller 直接持有 `DbClient`，也不能替换 Phase 1 已固定的 `ReportQueryService` 契约。
-
-```cpp
-// Future draft only: infrastructure/queries/PostgresReportAggregateQuery.cpp
-#include "application/queries/IReportAggregateQuery.hpp"
-#include "domain/repositories/IUserRepository.hpp"
-#include "domain/repositories/IExchangeRateRepository.hpp"
-#include <drogon/drogon.h>
-
-class PostgresReportAggregateQuery : public IReportAggregateQuery {
-private:
-    drogon::orm::DbClientPtr dbClient_;
-    std::shared_ptr<IUserRepository> userRepo_;
-    std::shared_ptr<IExchangeRateRepository> rateRepo_;
-
-public:
-    PostgresReportAggregateQuery(
-        drogon::orm::DbClientPtr dbClient,
-        std::shared_ptr<IUserRepository> userRepo,
-        std::shared_ptr<IExchangeRateRepository> rateRepo)
-        : dbClient_(dbClient), userRepo_(userRepo), rateRepo_(rateRepo) {}
-
-    std::expected<NetWorthDTO, RepositoryError> getNetWorthSummary(UserId userId) override {
-        // 1. 获取用户的 Base Currency (例如 CNY)
-        auto userOpt = userRepo_->findById(userId);
-        if (!userOpt) return std::unexpected(RepositoryError{RepositoryStatus::NotFound, "User not found"});
-        Currency baseCurrency = userOpt->getPreference().getBaseCurrency();
-
-        // 2. 利用 SQL 进行初步聚合：按币种查出所有活跃账户的余额总和
-        // 由于余额缓存表 account_balance_cache 与 accounts 关联，我们直接查缓存以求极速
-        auto result = dbClient_->execSqlSync(
-            "SELECT a.currency_code, "
-            "SUM(CASE WHEN b.balance > 0 THEN b.balance ELSE 0 END) as raw_assets, "
-            "SUM(CASE WHEN b.balance < 0 THEN b.balance ELSE 0 END) as raw_liabilities "
-            "FROM accounts a "
-            "JOIN account_balance_cache b ON a.id = b.account_id "
-            "WHERE a.user_id = $1 AND a.is_archived = false "
-            "GROUP BY a.currency_code",
-            userId.value()
-        );
-
-        Decimal totalAssets(0);
-        Decimal totalLiabilities(0);
-
-        // 3. 在 C++ 内存中执行精确的汇率折算
-        for (const auto& row : result) {
-            Currency rowCurrency(row["currency_code"].as<std::string>());
-            Decimal rawAssets(row["raw_assets"].as<std::string>());
-            Decimal rawLiabilities(row["raw_liabilities"].as<std::string>());
-
-            if (rowCurrency == baseCurrency) {
-                totalAssets = totalAssets + rawAssets;
-                totalLiabilities = totalLiabilities + rawLiabilities;
-            } else {
-                // 查询实时汇率 (最新)
-                auto rateOpt = rateRepo_->getLatest(rowCurrency, baseCurrency);
-                if (rateOpt) {
-                    Decimal rate = rateOpt->getRate();
-                    totalAssets = totalAssets + (rawAssets * rate);
-                    totalLiabilities = totalLiabilities + (rawLiabilities * rate);
-                } else {
-                    LOG_ERROR << "Missing exchange rate: " << rowCurrency.getCode() << " to " << baseCurrency.getCode();
-                    return std::unexpected(RepositoryError{
-                        RepositoryStatus::ValidationError,
-                        "Exchange rate not available for report currency conversion"
-                    });
-                }
-            }
-        }
-
-        // 4. 组装并返回 DTO (保留两位小数呈现)
-        NetWorthDTO dto;
-        dto.baseCurrency = baseCurrency.getCode();
-        dto.totalAssets = totalAssets.round(2).to_string(); // 假设 Decimal 支持 round 方法
-        dto.totalLiabilities = totalLiabilities.round(2).to_string();
-        dto.netWorth = (totalAssets + totalLiabilities).round(2).to_string(); // Liabilities 是负数
-        dto.generatedAt = drogon::trantor::Date::now().toCustomedFormattedString("%Y-%m-%d %H:%M:%S");
-
-        return dto;
-    }
-};
-
-```
-
-### 4.2 SQL 排除转账的规范 (Cash Flow SQL)
-
-在实现 `getCashFlowTrend` 时，底层查询必须严格按照 [Patch v1.1] 的约定，隔离 `Transfer`。
-
-```sql
--- 基础设施层中执行的 SQL 范例
-SELECT
-    TO_CHAR(transaction_time, 'YYYY-MM') as month,
-    currency_code,
-    SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END) as total_income,
-    -- 支出通常存储为负数，此处取绝对值或相反数以方便前端展示
-    SUM(CASE WHEN type = 'expense' THEN -amount ELSE 0 END) as total_expense
-FROM transactions
-WHERE user_id = $1
-  AND deleted_at IS NULL
-  AND type NOT IN ('transfer') -- 核心防御：完全排除转账流水
-  AND transaction_time >= $2
-  AND transaction_time < $3
-GROUP BY TO_CHAR(transaction_time, 'YYYY-MM'), currency_code;
-
-```
-
-随后，依然是在 C++ 中遍历这些按月、按币种打散的数据，根据**发生月份的历史汇率**（调用 `IExchangeRateRepository::getHistorical`）将其折算为 Base Currency。
+现金流使用流水发生时刻，净资产使用注入的当前时刻。数据库缺失汇率时不得使用 `0`、`1`、未来快照或前端默认值。
 
 ---
 
-## 5. 性能预留与扩展思考
+## 5. 多租户与错误边界
 
-对于目前阶段（单用户几万条流水以内），PostgreSQL 的索引配合按币种 `GROUP BY` 是完全足够的，延迟通常在几毫秒到几十毫秒。
+- Presentation 从已验证 JWT 提取 `UserId`。
+- request-scoped Repository 在同一短事务中设置 RLS tenant。
+- SQL 参数化并显式约束用户归属；FORCE RLS 提供数据库防线。
+- 其他用户资源按 404 处理，避免资源枚举。
+- Repository、汇率、时区和输入错误映射为稳定、脱敏的 Application 错误。
+- 报表失败不返回部分聚合值，不在日志中输出用户财务明细。
 
-但为了架构的可扩展性，我们预留了以下性能优化空间：
+---
 
-1. **报表缓存**：如果历史月份的流水不再变动，计算出的 `CashFlowTrendDTO` 可以序列化为 JSON 并存入预留的 Redis 中，Key 为 `report:cashflow:user_1:2025`。
-2. **审计与触发器失效**：如果用户发生了“ 危险删除”或“新增了历史日期的流水”，业务层的 Use Case 应该发出一个进程内事件（后 续 `14_Event_Design.md` 会讲到），将关联的报表缓存标记为失效（Invalidate）。
-3. **物化视图预留**：当流水达到百万级时，可以在 PostgreSQL 中建立物化视图（Materialized Views），每天夜间由 Scheduler 刷新昨日以前的分类汇总统计。
+## 6. 性能与扩展边界
+
+当前实现通过 request-scoped Repository 读取领域事实并在 Application 层折算，优先保证与写模型一致的金融语义。性能优化必须由实际数据量和测量结果驱动。
+
+若 Phase 2 引入数据库聚合、缓存或物化视图，必须保持：
+
+- 现有 REST DTO 与错误语义。
+- 用户时区月份窗口。
+- 历史汇率时间点选择。
+- Transfer 排除与 signed Adjustment 语义。
+- root 分类回溯和用户隔离。
+
+账户维度、标签维度、净资产趋势和可配置图表属于 Phase 2 增强范围，不是当前后端接口。
+
+---
+
+## 7. 验收规则
+
+测试至少覆盖：
+
+1. 正负余额的资产、负债与净资产恒等式。
+2. Transfer 排除和 signed Adjustment 分流。
+3. 用户时区月初、月末、夏令时与未知时区。
+4. 直接、反向、USD 枢纽、历史汇率和缺失汇率。
+5. root 分类聚合、软删除分类与物理缺失分类。
+6. 两用户隔离、连接池复用与 RLS fail closed。
+7. 金额字符串、月份参数、120 个月上限和稳定错误映射。
+8. Dashboard 的单时刻一致性与百分比舍入。
+
+API 契约以 [REST API 设计](10_REST_API_Design.md) 和 [OpenAPI 3.1](10_REST_API_OpenAPI.json) 为准。
