@@ -11,6 +11,7 @@
 #include "pfh/infrastructure/persistence/category_repository_impl.h"
 #include "pfh/infrastructure/persistence/drogon_unit_of_work.h"
 #include "pfh/infrastructure/persistence/exchange_rate_repository_impl.h"
+#include "pfh/infrastructure/persistence/idempotency_repository_impl.h"
 #include "pfh/infrastructure/persistence/tag_repository_impl.h"
 #include "pfh/infrastructure/persistence/transaction_repository_impl.h"
 #include "pfh/infrastructure/persistence/user_preference_repository_impl.h"
@@ -32,6 +33,7 @@ public:
           tags_(db, user_id),
           preferences_(db, user_id),
           exchange_rates_(db),
+          idempotency_(user_id),
           uow_(std::move(db), user_id) {}
 
     [[nodiscard]] domain::UserId user_id() const noexcept override { return user_id_; }
@@ -54,6 +56,9 @@ public:
     [[nodiscard]] domain::IAuditLogRepository& audit_logs() noexcept override {
         return audit_logs_;
     }
+    [[nodiscard]] application::IIdempotencyRepository& idempotency() noexcept override {
+        return idempotency_;
+    }
     [[nodiscard]] application::IUnitOfWork& unit_of_work() noexcept override {
         return uow_;
     }
@@ -67,6 +72,7 @@ private:
     UserPreferenceRepositoryImpl preferences_;
     ExchangeRateRepositoryImpl exchange_rates_;
     AuditLogRepositoryImpl audit_logs_;
+    IdempotencyRepositoryImpl idempotency_;
     DrogonUnitOfWork uow_;
 };
 

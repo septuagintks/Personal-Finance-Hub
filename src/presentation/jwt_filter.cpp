@@ -14,7 +14,10 @@ bool JwtFilter::is_public_route(
     if (method == HttpMethod::Post &&
         (path == "/api/v1/auth/register" ||
          path == "/api/v1/auth/login" ||
-         path == "/api/v1/auth/refresh")) {
+         path == "/api/v1/auth/refresh" ||
+         path == "/api/v1/web/auth/register" ||
+         path == "/api/v1/web/auth/login" ||
+         path == "/api/v1/web/auth/refresh")) {
         return true;
     }
     return method == HttpMethod::Get && path == "/api/v1/currencies";

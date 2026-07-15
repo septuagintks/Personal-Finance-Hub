@@ -2,206 +2,2282 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Personal Finance Hub API",
-    "version": "1.1.0",
-    "description": "Phase 1 REST contract. Monetary values and exchange rates are decimal strings."
+    "version": "2.0.0",
+    "description": "Phase 2 REST contract. Monetary values and exchange rates are decimal strings. Web sessions keep access tokens in memory and refresh tokens in secure HttpOnly cookies."
   },
   "servers": [
-    {"url": "/"}
+    {
+      "url": "/"
+    }
   ],
   "security": [
-    {"bearerAuth": []}
+    {
+      "bearerAuth": []
+    }
   ],
   "paths": {
     "/api/v1/auth/register": {
       "post": {
         "security": [],
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RegisterRequest"}}}},
-        "responses": {"201": {"description": "Registered", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RegisterResponse"}}}}, "400": {"$ref": "#/components/responses/BadRequest"}, "409": {"$ref": "#/components/responses/Conflict"}}
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegisterResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        },
+        "operationId": "registerTokenUser"
       }
     },
     "/api/v1/auth/login": {
       "post": {
         "security": [],
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/LoginRequest"}}}},
-        "responses": {"200": {"description": "Authenticated", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TokenPair"}}}}, "400": {"$ref": "#/components/responses/BadRequest"}, "401": {"$ref": "#/components/responses/Unauthorized"}}
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenPair"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "operationId": "loginTokenUser"
       }
     },
     "/api/v1/auth/refresh": {
       "post": {
         "security": [],
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RefreshRequest"}}}},
-        "responses": {"200": {"description": "Rotated token pair", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TokenPair"}}}}, "400": {"$ref": "#/components/responses/BadRequest"}, "401": {"$ref": "#/components/responses/Unauthorized"}}
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rotated token pair",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenPair"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "operationId": "refreshTokenSession"
       }
     },
     "/api/v1/auth/logout": {
       "post": {
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RefreshRequest"}}}},
-        "responses": {"204": {"description": "Logged out"}, "400": {"$ref": "#/components/responses/BadRequest"}, "401": {"$ref": "#/components/responses/Unauthorized"}}
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Logged out"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "operationId": "logoutTokenSession"
       }
     },
     "/api/v1/currencies": {
       "get": {
         "security": [],
-        "parameters": [{"name": "If-None-Match", "in": "header", "schema": {"type": "string"}}],
-        "responses": {"200": {"description": "Currency catalog", "headers": {"ETag": {"schema": {"type": "string"}}}, "content": {"application/json": {"schema": {"type": "array", "items": {"$ref": "#/components/schemas/CurrencyMetadata"}}}}}, "304": {"description": "Catalog unchanged"}}
+        "parameters": [
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Currency catalog",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CurrencyMetadata"
+                  }
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Catalog unchanged"
+          }
+        },
+        "operationId": "listCurrencies"
       }
     },
     "/api/v1/accounts": {
       "get": {
-        "responses": {"200": {"description": "Active accounts", "content": {"application/json": {"schema": {"type": "array", "items": {"$ref": "#/components/schemas/Account"}}}}}, "401": {"$ref": "#/components/responses/Unauthorized"}}
+        "responses": {
+          "200": {
+            "description": "Active accounts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Account"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "operationId": "listAccounts"
       },
       "post": {
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CreateAccountRequest"}}}},
-        "responses": {"201": {"description": "Account created", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Account"}}}}, "400": {"$ref": "#/components/responses/BadRequest"}, "401": {"$ref": "#/components/responses/Unauthorized"}}
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAccountRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Account created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Account"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "operationId": "createAccount"
       }
     },
     "/api/v1/accounts/{accountId}/balance": {
       "get": {
-        "parameters": [{"$ref": "#/components/parameters/AccountId"}],
-        "responses": {"200": {"description": "Balance snapshot", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Balance"}}}}, "404": {"$ref": "#/components/responses/NotFound"}}
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AccountId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Balance snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Balance"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        },
+        "operationId": "getAccountBalance"
       }
     },
     "/api/v1/accounts/{accountId}/archive": {
       "post": {
-        "parameters": [{"$ref": "#/components/parameters/AccountId"}],
-        "responses": {"204": {"description": "Account archived"}, "404": {"$ref": "#/components/responses/NotFound"}, "409": {"$ref": "#/components/responses/Conflict"}}
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AccountId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Account archived"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        },
+        "operationId": "archiveAccount"
       }
     },
     "/api/v1/accounts/{accountId}": {
       "delete": {
-        "parameters": [{"$ref": "#/components/parameters/AccountId"}, {"name": "confirmations", "in": "query", "required": true, "schema": {"type": "integer", "const": 3}}],
-        "responses": {"204": {"description": "Account permanently deleted"}, "400": {"$ref": "#/components/responses/BadRequest"}, "404": {"$ref": "#/components/responses/NotFound"}}
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AccountId"
+          },
+          {
+            "name": "confirmations",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "const": 3
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Account permanently deleted"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        },
+        "operationId": "deleteAccount"
       }
     },
     "/api/v1/categories": {
       "get": {
-        "parameters": [{"name": "board", "in": "query", "schema": {"$ref": "#/components/schemas/CategoryBoard"}}],
-        "responses": {"200": {"description": "Category tree", "content": {"application/json": {"schema": {"type": "array", "items": {"$ref": "#/components/schemas/CategoryTree"}}}}}}
+        "parameters": [
+          {
+            "name": "board",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/CategoryBoard"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Category tree",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CategoryTree"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "operationId": "listCategories"
       },
       "post": {
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CreateCategoryRequest"}}}},
-        "responses": {"201": {"description": "Category created or template activated", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Category"}}}}, "400": {"$ref": "#/components/responses/BadRequest"}, "409": {"$ref": "#/components/responses/Conflict"}, "422": {"$ref": "#/components/responses/RuleViolation"}}
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCategoryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Category created or template activated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Category"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/RuleViolation"
+          }
+        },
+        "operationId": "createCategory"
       }
     },
     "/api/v1/categories/{categoryId}": {
       "delete": {
-        "parameters": [{"$ref": "#/components/parameters/CategoryId"}],
-        "responses": {"204": {"description": "Category soft deleted"}, "404": {"$ref": "#/components/responses/NotFound"}, "409": {"$ref": "#/components/responses/Conflict"}}
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CategoryId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Category soft deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        },
+        "operationId": "deleteCategory"
       }
     },
     "/api/v1/tags": {
-      "get": {"responses": {"200": {"description": "Active tags", "content": {"application/json": {"schema": {"type": "array", "items": {"$ref": "#/components/schemas/Tag"}}}}}}},
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Active tags",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Tag"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "operationId": "listTags"
+      },
       "post": {
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CreateTagRequest"}}}},
-        "responses": {"201": {"description": "Tag created", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Tag"}}}}, "400": {"$ref": "#/components/responses/BadRequest"}, "409": {"$ref": "#/components/responses/Conflict"}}
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTagRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Tag created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Tag"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        },
+        "operationId": "createTag"
       }
     },
     "/api/v1/tags/{tagId}": {
       "delete": {
-        "parameters": [{"$ref": "#/components/parameters/TagId"}],
-        "responses": {"204": {"description": "Tag soft deleted"}, "404": {"$ref": "#/components/responses/NotFound"}}
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TagId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Tag soft deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        },
+        "operationId": "deleteTag"
       }
     },
     "/api/v1/users/me/preferences": {
-      "get": {"responses": {"200": {"description": "User preferences", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/UserPreference"}}}}}},
+      "get": {
+        "responses": {
+          "200": {
+            "description": "User preferences",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserPreference"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "getUserPreferences"
+      },
       "put": {
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/UserPreference"}}}},
-        "responses": {"200": {"description": "Preferences updated", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/UserPreference"}}}}, "400": {"$ref": "#/components/responses/BadRequest"}}
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserPreference"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Preferences updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserPreference"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "operationId": "updateUserPreferences"
       }
     },
     "/api/v1/transactions": {
       "post": {
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CreateTransactionRequest"}}}},
-        "responses": {"201": {"description": "Transaction created", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Transaction"}}}}, "400": {"$ref": "#/components/responses/BadRequest"}, "404": {"$ref": "#/components/responses/NotFound"}, "422": {"$ref": "#/components/responses/RuleViolation"}}
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTransactionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Transaction created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Transaction"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/RuleViolation"
+          }
+        },
+        "operationId": "createTransaction",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ]
       }
     },
     "/api/v1/transactions/{transactionId}": {
       "delete": {
-        "parameters": [{"$ref": "#/components/parameters/TransactionId"}],
-        "responses": {"204": {"description": "Transaction soft deleted"}, "404": {"$ref": "#/components/responses/NotFound"}, "409": {"$ref": "#/components/responses/Conflict"}, "422": {"$ref": "#/components/responses/RuleViolation"}}
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TransactionId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Transaction soft deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/RuleViolation"
+          }
+        },
+        "operationId": "deleteTransaction"
       }
     },
     "/api/v1/transactions/{transactionId}/tags": {
       "put": {
-        "parameters": [{"$ref": "#/components/parameters/TransactionId"}],
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ReplaceTagsRequest"}}}},
-        "responses": {"200": {"description": "Attached tags", "content": {"application/json": {"schema": {"type": "array", "items": {"$ref": "#/components/schemas/Tag"}}}}}, "400": {"$ref": "#/components/responses/BadRequest"}, "404": {"$ref": "#/components/responses/NotFound"}}
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TransactionId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceTagsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Attached tags",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Tag"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        },
+        "operationId": "replaceTransactionTags"
       }
     },
     "/api/v1/transfers": {
       "post": {
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CreateTransferRequest"}}}},
-        "responses": {"201": {"description": "Transfer created", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Transfer"}}}}, "400": {"$ref": "#/components/responses/BadRequest"}, "404": {"$ref": "#/components/responses/NotFound"}, "422": {"$ref": "#/components/responses/RuleViolation"}}
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTransferRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Transfer created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Transfer"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/RuleViolation"
+          }
+        },
+        "operationId": "createTransfer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ]
       }
     },
     "/api/v1/transfers/{transferGroupId}": {
       "get": {
-        "parameters": [{"$ref": "#/components/parameters/TransferGroupId"}],
-        "responses": {"200": {"description": "Transfer aggregate", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Transfer"}}}}, "404": {"$ref": "#/components/responses/NotFound"}}
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TransferGroupId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Transfer aggregate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Transfer"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        },
+        "operationId": "getTransfer"
       }
     },
     "/api/v1/reports/net-worth": {
-      "get": {"responses": {"200": {"description": "Net worth", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/NetWorth"}}}}, "422": {"$ref": "#/components/responses/RuleViolation"}}}
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Net worth",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetWorth"
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/RuleViolation"
+          }
+        },
+        "operationId": "getNetWorth"
+      }
     },
     "/api/v1/reports/cash-flow": {
       "get": {
-        "parameters": [{"name": "startDate", "in": "query", "required": true, "schema": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}$"}}, {"name": "endDate", "in": "query", "required": true, "schema": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}$"}}, {"name": "periodType", "in": "query", "required": true, "schema": {"type": "string", "const": "MONTH"}}],
-        "responses": {"200": {"description": "Monthly cash flow", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CashFlowTrend"}}}}, "400": {"$ref": "#/components/responses/BadRequest"}, "422": {"$ref": "#/components/responses/RuleViolation"}}
+        "parameters": [
+          {
+            "name": "startDate",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}$"
+            }
+          },
+          {
+            "name": "endDate",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}$"
+            }
+          },
+          {
+            "name": "periodType",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "const": "MONTH"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Monthly cash flow",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CashFlowTrend"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/RuleViolation"
+          }
+        },
+        "operationId": "getCashFlow"
       }
     },
     "/api/v1/reports/dashboard-summary": {
-      "get": {"responses": {"200": {"description": "Current-month dashboard in the user's timezone", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DashboardSummary"}}}}, "422": {"$ref": "#/components/responses/RuleViolation"}}}
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Current-month dashboard in the user's timezone",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/RuleViolation"
+          }
+        },
+        "operationId": "getDashboardSummary"
+      }
+    },
+    "/api/v1/web/auth/register": {
+      "post": {
+        "operationId": "registerWebUser",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Origin"
+          },
+          {
+            "$ref": "#/components/parameters/SecFetchSite"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Registered web session",
+            "headers": {
+              "Set-Cookie": {
+                "description": "Rotated pfh_refresh cookie; HttpOnly, Secure, SameSite=Strict, Path=/api/v1/web/auth",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebRegisterResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
+      }
+    },
+    "/api/v1/web/auth/login": {
+      "post": {
+        "operationId": "loginWebUser",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Origin"
+          },
+          {
+            "$ref": "#/components/parameters/SecFetchSite"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authenticated web session",
+            "headers": {
+              "Set-Cookie": {
+                "description": "Rotated pfh_refresh cookie; HttpOnly, Secure, SameSite=Strict, Path=/api/v1/web/auth",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebTokenPair"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/v1/web/auth/refresh": {
+      "post": {
+        "operationId": "refreshWebSession",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Origin"
+          },
+          {
+            "$ref": "#/components/parameters/SecFetchSite"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rotated web session",
+            "headers": {
+              "Set-Cookie": {
+                "description": "Rotated pfh_refresh cookie; HttpOnly, Secure, SameSite=Strict, Path=/api/v1/web/auth",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebTokenPair"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/v1/web/auth/logout": {
+      "post": {
+        "operationId": "logoutWebSession",
+        "security": [
+          {
+            "bearerAuth": [],
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Origin"
+          },
+          {
+            "$ref": "#/components/parameters/SecFetchSite"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Logged out and refresh cookie cleared",
+            "headers": {
+              "Set-Cookie": {
+                "description": "Rotated pfh_refresh cookie; HttpOnly, Secure, SameSite=Strict, Path=/api/v1/web/auth",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
     }
   },
   "components": {
     "securitySchemes": {
-      "bearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      },
+      "cookieAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "pfh_refresh",
+        "description": "Secure HttpOnly refresh cookie; never readable by browser JavaScript"
+      }
     },
     "parameters": {
-      "AccountId": {"name": "accountId", "in": "path", "required": true, "schema": {"$ref": "#/components/schemas/Id"}},
-      "CategoryId": {"name": "categoryId", "in": "path", "required": true, "schema": {"$ref": "#/components/schemas/Id"}},
-      "TagId": {"name": "tagId", "in": "path", "required": true, "schema": {"$ref": "#/components/schemas/Id"}},
-      "TransactionId": {"name": "transactionId", "in": "path", "required": true, "schema": {"$ref": "#/components/schemas/Id"}},
-      "TransferGroupId": {"name": "transferGroupId", "in": "path", "required": true, "schema": {"$ref": "#/components/schemas/Id"}}
+      "AccountId": {
+        "name": "accountId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/Id"
+        }
+      },
+      "CategoryId": {
+        "name": "categoryId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/Id"
+        }
+      },
+      "TagId": {
+        "name": "tagId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/Id"
+        }
+      },
+      "TransactionId": {
+        "name": "transactionId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/Id"
+        }
+      },
+      "TransferGroupId": {
+        "name": "transferGroupId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/Id"
+        }
+      },
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[!-~]+$"
+        }
+      },
+      "IfMatch": {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "description": "One strong positive integer version ETag, for example \"3\"",
+        "schema": {
+          "type": "string",
+          "pattern": "^\"[1-9][0-9]*\"$"
+        }
+      },
+      "Cursor": {
+        "name": "cursor",
+        "in": "query",
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      },
+      "PageSize": {
+        "name": "pageSize",
+        "in": "query",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200,
+          "default": 50
+        }
+      },
+      "Origin": {
+        "name": "Origin",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uri"
+        }
+      },
+      "SecFetchSite": {
+        "name": "Sec-Fetch-Site",
+        "in": "header",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "const": "same-origin"
+        }
+      }
     },
     "responses": {
-      "BadRequest": {"description": "Invalid request", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}},
-      "Unauthorized": {"description": "Invalid or expired access token", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}},
-      "NotFound": {"description": "Resource not found", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}},
-      "Conflict": {"description": "Resource conflict", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}},
-      "RuleViolation": {"description": "Financial rule violation", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}}
+      "BadRequest": {
+        "description": "Invalid request",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Invalid or expired access token",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Resource not found",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "Resource conflict",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "RuleViolation": {
+        "description": "Financial rule violation",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "Request is not permitted",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      }
     },
     "schemas": {
-      "Id": {"type": "integer", "format": "int64", "minimum": 1},
-      "DecimalString": {"type": "string", "maxLength": 128, "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$"},
-      "PositiveDecimalString": {"type": "string", "maxLength": 128, "pattern": "^[0-9]+(?:\\.[0-9]+)?$"},
-      "CurrencyCode": {"type": "string", "minLength": 3, "maxLength": 5, "pattern": "^[A-Za-z]+$"},
-      "LocaleTag": {"type": "string", "maxLength": 16, "pattern": "^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$"},
-      "CategoryBoard": {"type": "string", "enum": ["income", "expense"]},
-      "ErrorResponse": {"type": "object", "additionalProperties": false, "required": ["error_code", "message", "trace_id"], "properties": {"error_code": {"type": "string"}, "message": {"type": "string"}, "trace_id": {"type": "string"}}},
-      "RegisterRequest": {"type": "object", "additionalProperties": false, "required": ["username", "password"], "properties": {"username": {"type": "string", "maxLength": 128}, "password": {"type": "string", "maxLength": 128}, "baseCurrency": {"oneOf": [{"$ref": "#/components/schemas/CurrencyCode"}, {"type": "null"}]}, "preferredLocale": {"oneOf": [{"$ref": "#/components/schemas/LocaleTag"}, {"type": "null"}]}}},
-      "LoginRequest": {"type": "object", "additionalProperties": false, "required": ["username", "password"], "properties": {"username": {"type": "string"}, "password": {"type": "string"}}},
-      "RefreshRequest": {"type": "object", "additionalProperties": false, "required": ["refreshToken"], "properties": {"refreshToken": {"type": "string"}}},
-      "TokenPair": {"type": "object", "additionalProperties": false, "required": ["accessToken", "refreshToken", "expiresIn", "tokenType"], "properties": {"accessToken": {"type": "string"}, "refreshToken": {"type": "string"}, "expiresIn": {"type": "integer"}, "tokenType": {"type": "string", "const": "Bearer"}}},
-      "RegisterResponse": {"type": "object", "additionalProperties": false, "required": ["userId", "accessToken", "refreshToken", "expiresIn", "tokenType"], "properties": {"userId": {"$ref": "#/components/schemas/Id"}, "accessToken": {"type": "string"}, "refreshToken": {"type": "string"}, "expiresIn": {"type": "integer"}, "tokenType": {"type": "string", "const": "Bearer"}}},
-      "CurrencyMetadata": {"type": "object", "additionalProperties": false, "required": ["code", "symbol", "precision", "displayName", "isCrypto"], "properties": {"code": {"$ref": "#/components/schemas/CurrencyCode"}, "symbol": {"type": "string"}, "precision": {"type": "integer", "minimum": 0, "maximum": 8}, "displayName": {"type": "string"}, "isCrypto": {"type": "boolean"}}},
-      "CreateAccountRequest": {"type": "object", "additionalProperties": false, "required": ["name", "type", "subtype", "currencyCode"], "properties": {"name": {"type": "string", "maxLength": 128}, "type": {"type": "string", "enum": ["cash", "savings", "credit", "digital_wallet", "investment", "crypto", "other"]}, "subtype": {"type": "string", "maxLength": 64}, "currencyCode": {"$ref": "#/components/schemas/CurrencyCode"}, "description": {"type": ["string", "null"], "maxLength": 4096}}},
-      "Account": {"type": "object", "additionalProperties": false, "required": ["id", "name", "type", "subtype", "category", "currencyCode", "description", "isArchived", "version"], "properties": {"id": {"$ref": "#/components/schemas/Id"}, "name": {"type": "string"}, "type": {"type": "string"}, "subtype": {"type": "string"}, "category": {"type": "string", "enum": ["asset", "liability"]}, "currencyCode": {"$ref": "#/components/schemas/CurrencyCode"}, "description": {"type": "string"}, "isArchived": {"type": "boolean"}, "version": {"type": "integer", "minimum": 1}}},
-      "Balance": {"type": "object", "additionalProperties": false, "required": ["accountId", "currencyCode", "balance", "lastTransactionId", "updatedAt"], "properties": {"accountId": {"$ref": "#/components/schemas/Id"}, "currencyCode": {"$ref": "#/components/schemas/CurrencyCode"}, "balance": {"$ref": "#/components/schemas/DecimalString"}, "lastTransactionId": {"oneOf": [{"$ref": "#/components/schemas/Id"}, {"type": "null"}]}, "updatedAt": {"type": "string", "format": "date-time"}}},
-      "Category": {"type": "object", "additionalProperties": false, "required": ["id", "name", "board", "source", "parentId", "templateId", "sortOrder"], "properties": {"id": {"$ref": "#/components/schemas/Id"}, "name": {"type": "string"}, "board": {"$ref": "#/components/schemas/CategoryBoard"}, "source": {"type": "string", "enum": ["system", "user"]}, "parentId": {"oneOf": [{"$ref": "#/components/schemas/Id"}, {"type": "null"}]}, "templateId": {"oneOf": [{"$ref": "#/components/schemas/Id"}, {"type": "null"}]}, "sortOrder": {"type": "integer"}}},
-      "CategoryTree": {"type": "object", "additionalProperties": false, "required": ["id", "name", "board", "source", "parentId", "templateId", "sortOrder", "children"], "properties": {"id": {"$ref": "#/components/schemas/Id"}, "name": {"type": "string"}, "board": {"$ref": "#/components/schemas/CategoryBoard"}, "source": {"type": "string", "enum": ["system", "user"]}, "parentId": {"oneOf": [{"$ref": "#/components/schemas/Id"}, {"type": "null"}]}, "templateId": {"oneOf": [{"$ref": "#/components/schemas/Id"}, {"type": "null"}]}, "sortOrder": {"type": "integer"}, "children": {"type": "array", "items": {"$ref": "#/components/schemas/CategoryTree"}}}},
-      "CreateCategoryRequest": {"type": "object", "additionalProperties": false, "properties": {"board": {"oneOf": [{"$ref": "#/components/schemas/CategoryBoard"}, {"type": "null"}]}, "name": {"type": ["string", "null"], "maxLength": 128}, "parentId": {"oneOf": [{"$ref": "#/components/schemas/Id"}, {"type": "null"}]}, "templateId": {"oneOf": [{"$ref": "#/components/schemas/Id"}, {"type": "null"}]}}},
-      "Tag": {"type": "object", "additionalProperties": false, "required": ["id", "name"], "properties": {"id": {"$ref": "#/components/schemas/Id"}, "name": {"type": "string"}}},
-      "CreateTagRequest": {"type": "object", "additionalProperties": false, "required": ["name"], "properties": {"name": {"type": "string", "maxLength": 64}}},
-      "ReplaceTagsRequest": {"type": "object", "additionalProperties": false, "required": ["tagIds"], "properties": {"tagIds": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/components/schemas/Id"}}}},
-      "UserPreference": {"type": "object", "additionalProperties": false, "required": ["baseCurrency", "locale", "timezone", "dateFormat", "numberFormat", "theme", "defaultHomePage", "defaultReportPeriod"], "properties": {"baseCurrency": {"$ref": "#/components/schemas/CurrencyCode"}, "locale": {"$ref": "#/components/schemas/LocaleTag"}, "timezone": {"type": "string", "maxLength": 64}, "dateFormat": {"type": "string", "maxLength": 32}, "numberFormat": {"type": "string", "maxLength": 32}, "theme": {"type": "string", "enum": ["system", "light", "dark"]}, "defaultHomePage": {"type": "string", "enum": ["dashboard", "transactions", "reports", "accounts"]}, "defaultReportPeriod": {"type": "string", "enum": ["current_month", "last_month", "last_3_months", "current_year", "custom"]}}},
-      "CreateTransactionRequest": {"type": "object", "additionalProperties": false, "required": ["accountId", "type", "amount", "currencyCode"], "properties": {"accountId": {"$ref": "#/components/schemas/Id"}, "type": {"type": "string", "enum": ["income", "expense", "adjustment"]}, "amount": {"$ref": "#/components/schemas/DecimalString"}, "currencyCode": {"$ref": "#/components/schemas/CurrencyCode"}, "categoryId": {"oneOf": [{"$ref": "#/components/schemas/Id"}, {"type": "null"}]}, "description": {"type": ["string", "null"], "maxLength": 4096}, "occurredAt": {"type": ["string", "null"], "format": "date-time"}}},
-      "Transaction": {"type": "object", "additionalProperties": false, "required": ["id", "accountId", "type", "amount", "currencyCode", "categoryId", "description", "occurredAt"], "properties": {"id": {"$ref": "#/components/schemas/Id"}, "accountId": {"$ref": "#/components/schemas/Id"}, "type": {"type": "string", "enum": ["income", "expense", "adjustment"]}, "amount": {"$ref": "#/components/schemas/DecimalString"}, "currencyCode": {"$ref": "#/components/schemas/CurrencyCode"}, "categoryId": {"oneOf": [{"$ref": "#/components/schemas/Id"}, {"type": "null"}]}, "description": {"type": "string"}, "occurredAt": {"type": "string", "format": "date-time"}}},
-      "CreateTransferRequest": {"type": "object", "additionalProperties": false, "required": ["sourceAccountId", "targetAccountId", "mode"], "properties": {"sourceAccountId": {"$ref": "#/components/schemas/Id"}, "targetAccountId": {"$ref": "#/components/schemas/Id"}, "mode": {"type": "string", "enum": ["OutgoingAndRate", "BothAmounts", "IncomingAndRate"]}, "outgoingAmount": {"oneOf": [{"$ref": "#/components/schemas/PositiveDecimalString"}, {"type": "null"}]}, "incomingAmount": {"oneOf": [{"$ref": "#/components/schemas/PositiveDecimalString"}, {"type": "null"}]}, "rate": {"oneOf": [{"$ref": "#/components/schemas/PositiveDecimalString"}, {"type": "null"}]}, "feeAmount": {"oneOf": [{"$ref": "#/components/schemas/PositiveDecimalString"}, {"type": "null"}]}, "feeSource": {"type": ["string", "null"], "enum": ["SourceAccount", "TargetAccount", "ThirdParty", null]}, "feeAccountId": {"oneOf": [{"$ref": "#/components/schemas/Id"}, {"type": "null"}]}, "description": {"type": ["string", "null"], "maxLength": 4096}, "occurredAt": {"type": ["string", "null"], "format": "date-time"}}},
-      "Transfer": {"type": "object", "additionalProperties": false, "required": ["transferGroupId", "outgoingTransactionId", "incomingTransactionId", "outgoingAmount", "incomingAmount", "rate", "feeAmount"], "properties": {"transferGroupId": {"$ref": "#/components/schemas/Id"}, "outgoingTransactionId": {"$ref": "#/components/schemas/Id"}, "incomingTransactionId": {"$ref": "#/components/schemas/Id"}, "outgoingAmount": {"$ref": "#/components/schemas/PositiveDecimalString"}, "incomingAmount": {"$ref": "#/components/schemas/PositiveDecimalString"}, "rate": {"oneOf": [{"$ref": "#/components/schemas/PositiveDecimalString"}, {"type": "null"}]}, "feeAmount": {"oneOf": [{"$ref": "#/components/schemas/PositiveDecimalString"}, {"type": "null"}]} }},
-      "NetWorth": {"type": "object", "additionalProperties": false, "required": ["baseCurrency", "totalAssets", "totalLiabilities", "netWorth", "generatedAt"], "properties": {"baseCurrency": {"$ref": "#/components/schemas/CurrencyCode"}, "totalAssets": {"$ref": "#/components/schemas/DecimalString"}, "totalLiabilities": {"$ref": "#/components/schemas/DecimalString"}, "netWorth": {"$ref": "#/components/schemas/DecimalString"}, "generatedAt": {"type": "string", "format": "date-time"}}},
-      "CashFlowTrend": {"type": "object", "additionalProperties": false, "required": ["baseCurrency", "trends"], "properties": {"baseCurrency": {"$ref": "#/components/schemas/CurrencyCode"}, "trends": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["period", "income", "expense"], "properties": {"period": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}$"}, "income": {"$ref": "#/components/schemas/DecimalString"}, "expense": {"$ref": "#/components/schemas/DecimalString"}}}}}},
-      "DashboardSummary": {"type": "object", "additionalProperties": false, "required": ["baseCurrency", "netWorth", "monthlyIncome", "monthlyExpense", "assetDistribution", "topExpenseCategories", "reportPeriodStart", "reportPeriodEnd", "generatedAt"], "properties": {"baseCurrency": {"$ref": "#/components/schemas/CurrencyCode"}, "netWorth": {"$ref": "#/components/schemas/NetWorth"}, "monthlyIncome": {"$ref": "#/components/schemas/DecimalString"}, "monthlyExpense": {"$ref": "#/components/schemas/DecimalString"}, "assetDistribution": {"type": "array", "items": {"type": "object", "required": ["label", "amount", "percentage"], "properties": {"label": {"type": "string"}, "amount": {"$ref": "#/components/schemas/DecimalString"}, "percentage": {"type": "string"}}}}, "topExpenseCategories": {"type": "array", "items": {"type": "object", "required": ["categoryId", "categoryName", "amount", "percentage"], "properties": {"categoryId": {"oneOf": [{"$ref": "#/components/schemas/Id"}, {"type": "null"}]}, "categoryName": {"type": "string"}, "amount": {"$ref": "#/components/schemas/DecimalString"}, "percentage": {"type": "string"}}}}, "reportPeriodStart": {"type": "string", "format": "date-time"}, "reportPeriodEnd": {"type": "string", "format": "date-time"}, "generatedAt": {"type": "string", "format": "date-time"}}}
+      "Id": {
+        "type": "integer",
+        "format": "int64",
+        "minimum": 1
+      },
+      "DecimalString": {
+        "type": "string",
+        "maxLength": 128,
+        "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$"
+      },
+      "PositiveDecimalString": {
+        "type": "string",
+        "maxLength": 128,
+        "pattern": "^[0-9]+(?:\\.[0-9]+)?$"
+      },
+      "CurrencyCode": {
+        "type": "string",
+        "minLength": 3,
+        "maxLength": 5,
+        "pattern": "^[A-Za-z]+$"
+      },
+      "LocaleTag": {
+        "type": "string",
+        "maxLength": 16,
+        "pattern": "^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$"
+      },
+      "CategoryBoard": {
+        "type": "string",
+        "enum": [
+          "income",
+          "expense"
+        ]
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "error_code",
+          "message",
+          "trace_id",
+          "retryable",
+          "field_errors"
+        ],
+        "properties": {
+          "error_code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "trace_id": {
+            "type": "string"
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "field_errors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FieldError"
+            }
+          }
+        }
+      },
+      "RegisterRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "username",
+          "password"
+        ],
+        "properties": {
+          "username": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "baseCurrency": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CurrencyCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "preferredLocale": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LocaleTag"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "username",
+          "password"
+        ],
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          }
+        }
+      },
+      "RefreshRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "refreshToken"
+        ],
+        "properties": {
+          "refreshToken": {
+            "type": "string"
+          }
+        }
+      },
+      "TokenPair": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "accessToken",
+          "refreshToken",
+          "expiresIn",
+          "tokenType"
+        ],
+        "properties": {
+          "accessToken": {
+            "type": "string"
+          },
+          "refreshToken": {
+            "type": "string"
+          },
+          "expiresIn": {
+            "type": "integer"
+          },
+          "tokenType": {
+            "type": "string",
+            "const": "Bearer"
+          }
+        }
+      },
+      "RegisterResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "userId",
+          "accessToken",
+          "refreshToken",
+          "expiresIn",
+          "tokenType"
+        ],
+        "properties": {
+          "userId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "accessToken": {
+            "type": "string"
+          },
+          "refreshToken": {
+            "type": "string"
+          },
+          "expiresIn": {
+            "type": "integer"
+          },
+          "tokenType": {
+            "type": "string",
+            "const": "Bearer"
+          }
+        }
+      },
+      "CurrencyMetadata": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "symbol",
+          "precision",
+          "displayName",
+          "isCrypto"
+        ],
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/CurrencyCode"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "precision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 8
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "isCrypto": {
+            "type": "boolean"
+          }
+        }
+      },
+      "CreateAccountRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "type",
+          "subtype",
+          "currencyCode"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "cash",
+              "savings",
+              "credit",
+              "digital_wallet",
+              "investment",
+              "crypto",
+              "other"
+            ]
+          },
+          "subtype": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "currencyCode": {
+            "$ref": "#/components/schemas/CurrencyCode"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 4096
+          }
+        }
+      },
+      "Account": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "type",
+          "subtype",
+          "category",
+          "currencyCode",
+          "description",
+          "isArchived",
+          "version"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "subtype": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "asset",
+              "liability"
+            ]
+          },
+          "currencyCode": {
+            "$ref": "#/components/schemas/CurrencyCode"
+          },
+          "description": {
+            "type": "string"
+          },
+          "isArchived": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "Balance": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "accountId",
+          "currencyCode",
+          "balance",
+          "lastTransactionId",
+          "updatedAt"
+        ],
+        "properties": {
+          "accountId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "currencyCode": {
+            "$ref": "#/components/schemas/CurrencyCode"
+          },
+          "balance": {
+            "$ref": "#/components/schemas/DecimalString"
+          },
+          "lastTransactionId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Id"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Category": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "board",
+          "source",
+          "parentId",
+          "templateId",
+          "sortOrder"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "name": {
+            "type": "string"
+          },
+          "board": {
+            "$ref": "#/components/schemas/CategoryBoard"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "system",
+              "user"
+            ]
+          },
+          "parentId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Id"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "templateId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Id"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sortOrder": {
+            "type": "integer"
+          }
+        }
+      },
+      "CategoryTree": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "board",
+          "source",
+          "parentId",
+          "templateId",
+          "sortOrder",
+          "children"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "name": {
+            "type": "string"
+          },
+          "board": {
+            "$ref": "#/components/schemas/CategoryBoard"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "system",
+              "user"
+            ]
+          },
+          "parentId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Id"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "templateId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Id"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sortOrder": {
+            "type": "integer"
+          },
+          "children": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CategoryTree"
+            }
+          }
+        }
+      },
+      "CreateCategoryRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "board": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CategoryBoard"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 128
+          },
+          "parentId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Id"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "templateId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Id"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "Tag": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateTagRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64
+          }
+        }
+      },
+      "ReplaceTagsRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tagIds"
+        ],
+        "properties": {
+          "tagIds": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/Id"
+            }
+          }
+        }
+      },
+      "UserPreference": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "baseCurrency",
+          "locale",
+          "timezone",
+          "dateFormat",
+          "numberFormat",
+          "theme",
+          "defaultHomePage",
+          "defaultReportPeriod"
+        ],
+        "properties": {
+          "baseCurrency": {
+            "$ref": "#/components/schemas/CurrencyCode"
+          },
+          "locale": {
+            "$ref": "#/components/schemas/LocaleTag"
+          },
+          "timezone": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "dateFormat": {
+            "type": "string",
+            "maxLength": 32
+          },
+          "numberFormat": {
+            "type": "string",
+            "maxLength": 32
+          },
+          "theme": {
+            "type": "string",
+            "enum": [
+              "system",
+              "light",
+              "dark"
+            ]
+          },
+          "defaultHomePage": {
+            "type": "string",
+            "enum": [
+              "dashboard",
+              "transactions",
+              "reports",
+              "accounts"
+            ]
+          },
+          "defaultReportPeriod": {
+            "type": "string",
+            "enum": [
+              "current_month",
+              "last_month",
+              "last_3_months",
+              "current_year",
+              "custom"
+            ]
+          }
+        }
+      },
+      "CreateTransactionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "accountId",
+          "type",
+          "amount",
+          "currencyCode"
+        ],
+        "properties": {
+          "accountId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "income",
+              "expense",
+              "adjustment"
+            ]
+          },
+          "amount": {
+            "$ref": "#/components/schemas/DecimalString"
+          },
+          "currencyCode": {
+            "$ref": "#/components/schemas/CurrencyCode"
+          },
+          "categoryId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Id"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 4096
+          },
+          "occurredAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "Transaction": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "accountId",
+          "type",
+          "amount",
+          "currencyCode",
+          "categoryId",
+          "description",
+          "occurredAt"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "accountId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "income",
+              "expense",
+              "adjustment"
+            ]
+          },
+          "amount": {
+            "$ref": "#/components/schemas/DecimalString"
+          },
+          "currencyCode": {
+            "$ref": "#/components/schemas/CurrencyCode"
+          },
+          "categoryId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Id"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CreateTransferRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sourceAccountId",
+          "targetAccountId",
+          "mode"
+        ],
+        "properties": {
+          "sourceAccountId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "targetAccountId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "OutgoingAndRate",
+              "BothAmounts",
+              "IncomingAndRate"
+            ]
+          },
+          "outgoingAmount": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PositiveDecimalString"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "incomingAmount": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PositiveDecimalString"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rate": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PositiveDecimalString"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "feeAmount": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PositiveDecimalString"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "feeSource": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "SourceAccount",
+              "TargetAccount",
+              "ThirdParty",
+              null
+            ]
+          },
+          "feeAccountId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Id"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 4096
+          },
+          "occurredAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "Transfer": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "transferGroupId",
+          "outgoingTransactionId",
+          "incomingTransactionId",
+          "outgoingAmount",
+          "incomingAmount",
+          "rate",
+          "feeAmount"
+        ],
+        "properties": {
+          "transferGroupId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "outgoingTransactionId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "incomingTransactionId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "outgoingAmount": {
+            "$ref": "#/components/schemas/PositiveDecimalString"
+          },
+          "incomingAmount": {
+            "$ref": "#/components/schemas/PositiveDecimalString"
+          },
+          "rate": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PositiveDecimalString"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "feeAmount": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PositiveDecimalString"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "NetWorth": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "baseCurrency",
+          "totalAssets",
+          "totalLiabilities",
+          "netWorth",
+          "generatedAt"
+        ],
+        "properties": {
+          "baseCurrency": {
+            "$ref": "#/components/schemas/CurrencyCode"
+          },
+          "totalAssets": {
+            "$ref": "#/components/schemas/DecimalString"
+          },
+          "totalLiabilities": {
+            "$ref": "#/components/schemas/DecimalString"
+          },
+          "netWorth": {
+            "$ref": "#/components/schemas/DecimalString"
+          },
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CashFlowTrend": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "baseCurrency",
+          "trends"
+        ],
+        "properties": {
+          "baseCurrency": {
+            "$ref": "#/components/schemas/CurrencyCode"
+          },
+          "trends": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "period",
+                "income",
+                "expense"
+              ],
+              "properties": {
+                "period": {
+                  "type": "string",
+                  "pattern": "^[0-9]{4}-[0-9]{2}$"
+                },
+                "income": {
+                  "$ref": "#/components/schemas/DecimalString"
+                },
+                "expense": {
+                  "$ref": "#/components/schemas/DecimalString"
+                }
+              }
+            }
+          }
+        }
+      },
+      "DashboardSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "baseCurrency",
+          "netWorth",
+          "monthlyIncome",
+          "monthlyExpense",
+          "assetDistribution",
+          "topExpenseCategories",
+          "reportPeriodStart",
+          "reportPeriodEnd",
+          "generatedAt"
+        ],
+        "properties": {
+          "baseCurrency": {
+            "$ref": "#/components/schemas/CurrencyCode"
+          },
+          "netWorth": {
+            "$ref": "#/components/schemas/NetWorth"
+          },
+          "monthlyIncome": {
+            "$ref": "#/components/schemas/DecimalString"
+          },
+          "monthlyExpense": {
+            "$ref": "#/components/schemas/DecimalString"
+          },
+          "assetDistribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "label",
+                "amount",
+                "percentage"
+              ],
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "amount": {
+                  "$ref": "#/components/schemas/DecimalString"
+                },
+                "percentage": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "topExpenseCategories": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "categoryId",
+                "categoryName",
+                "amount",
+                "percentage"
+              ],
+              "properties": {
+                "categoryId": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Id"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "categoryName": {
+                  "type": "string"
+                },
+                "amount": {
+                  "$ref": "#/components/schemas/DecimalString"
+                },
+                "percentage": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "reportPeriodStart": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reportPeriodEnd": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "FieldError": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "field",
+          "code",
+          "message"
+        ],
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "WebTokenPair": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "accessToken",
+          "expiresIn",
+          "tokenType"
+        ],
+        "properties": {
+          "accessToken": {
+            "type": "string"
+          },
+          "expiresIn": {
+            "type": "integer"
+          },
+          "tokenType": {
+            "type": "string",
+            "const": "Bearer"
+          }
+        }
+      },
+      "WebRegisterResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "userId",
+          "accessToken",
+          "expiresIn",
+          "tokenType"
+        ],
+        "properties": {
+          "userId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "accessToken": {
+            "type": "string"
+          },
+          "expiresIn": {
+            "type": "integer"
+          },
+          "tokenType": {
+            "type": "string",
+            "const": "Bearer"
+          }
+        }
+      },
+      "CursorPageMetadata": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "nextCursor"
+        ],
+        "properties": {
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 512
+          }
+        }
+      }
     }
   }
 }

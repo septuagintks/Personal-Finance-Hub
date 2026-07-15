@@ -6,16 +6,49 @@
 
 #pragma once
 
+#include "pfh/application/ports/i_request_hasher.h"
 #include "pfh/domain/currency.h"
 #include "pfh/domain/decimal.h"
 #include "pfh/domain/exchange_rate.h"
 #include "pfh/domain/money.h"
 #include <gtest/gtest.h>
 #include <chrono>
+#include <array>
+#include <cstdint>
 #include <ctime>
+#include <string>
 #include <string_view>
 
 namespace pfh::test {
+
+class DeterministicRequestHasher final
+    : public application::IRequestHasher {
+public:
+    [[nodiscard]] application::Result<std::string> sha256(
+        std::string_view value) const override {
+        std::array<std::uint64_t, 4> state{
+            14695981039346656037ULL,
+            1099511628211ULL,
+            7809847782465536322ULL,
+            9650029242287828579ULL};
+        for (const auto raw : value) {
+            const auto byte = static_cast<unsigned char>(raw);
+            for (std::size_t index = 0; index < state.size(); ++index) {
+                state[index] ^= static_cast<std::uint64_t>(byte) + index;
+                state[index] *= 1099511628211ULL + index * 2ULL;
+            }
+        }
+        static constexpr char kHex[] = "0123456789abcdef";
+        std::string result;
+        result.reserve(64);
+        for (const auto word : state) {
+            for (int shift = 60; shift >= 0; shift -= 4) {
+                result.push_back(kHex[(word >> shift) & 0x0fULL]);
+            }
+        }
+        return result;
+    }
+};
 
 /// @brief Build a Decimal from a string, failing the test on parse error.
 [[nodiscard]] inline domain::Decimal dec(std::string_view text) {

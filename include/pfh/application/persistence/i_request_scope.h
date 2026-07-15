@@ -3,6 +3,7 @@
 #pragma once
 
 #include "pfh/application/persistence/i_unit_of_work.h"
+#include "pfh/application/ports/i_idempotency_repository.h"
 #include "pfh/domain/repositories/i_account_repository.h"
 #include "pfh/domain/repositories/i_audit_log_repository.h"
 #include "pfh/domain/repositories/i_category_repository.h"
@@ -27,6 +28,7 @@ public:
     [[nodiscard]] virtual domain::IUserPreferenceRepository& preferences() noexcept = 0;
     [[nodiscard]] virtual domain::IExchangeRateRepository& exchange_rates() noexcept = 0;
     [[nodiscard]] virtual domain::IAuditLogRepository& audit_logs() noexcept = 0;
+    [[nodiscard]] virtual IIdempotencyRepository& idempotency() noexcept = 0;
     [[nodiscard]] virtual IUnitOfWork& unit_of_work() noexcept = 0;
 };
 

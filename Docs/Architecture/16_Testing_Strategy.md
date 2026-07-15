@@ -78,9 +78,11 @@ API 测试同时覆盖 framework-neutral 应用边界与真实 Drogon runtime。
 核心路径包括：
 
 - 注册、登录、Refresh Token rotation/reuse detection 和登出。
+- Web Cookie 注册、登录、刷新、同源保护、Cookie 属性、重用检测和登出清理。
 - 账户、分类、标签、偏好、流水和转账。
 - Balance、Net Worth、Cash Flow 与 Dashboard Summary。
 - 币种目录、ETag、TraceId 和统一错误响应。
+- 幂等键同请求重放、不同指纹冲突、租户隔离、过期回收和业务/Outbox 原子性。
 
 持续规则：
 
@@ -89,6 +91,7 @@ API 测试同时覆盖 framework-neutral 应用边界与真实 Drogon runtime。
 - 未知字段、错误类型、越界 ID、非法枚举和超长字符串必须返回稳定错误。
 - 401、403、404、409、422、500 与 502 的映射保持稳定。
 - 生产响应和日志不得暴露 SQL、文件路径、Token、密码、Provider key 或底层异常正文。
+- 结构化错误必须包含 `retryable` 与受控 `field_errors`；强 `If-Match` 只接受单一正版本 ETag。
 - Refresh Token 只存 hash；旧 Token 复用撤销整个 session；Logout 后当前 Access Token 立即失效。
 
 ---

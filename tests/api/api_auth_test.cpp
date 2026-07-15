@@ -120,16 +120,37 @@ protected:
     [[nodiscard]] HttpResponse post(
         std::string path,
         nlohmann::json body,
-        std::string access_token = {}) {
+        std::string access_token = {},
+        std::map<std::string, std::string> headers = {}) {
         HttpRequest request;
         request.method = HttpMethod::Post;
         request.path = std::move(path);
         request.body = body.dump();
+        request.headers = std::move(headers);
         if (!access_token.empty()) {
-            request.headers.emplace(
+            request.headers.insert_or_assign(
                 "Authorization", "Bearer " + access_token);
         }
         return app_.handle(std::move(request));
+    }
+
+    [[nodiscard]] static std::map<std::string, std::string> web_headers(
+        std::string cookie = {}) {
+        std::map<std::string, std::string> result{
+            {"Host", "ledger.test"},
+            {"Origin", "https://ledger.test"},
+            {"Sec-Fetch-Site", "same-origin"}};
+        if (!cookie.empty()) {
+            result.emplace("Cookie", std::move(cookie));
+        }
+        return result;
+    }
+
+    [[nodiscard]] static std::string cookie_pair(const HttpResponse& response) {
+        const auto found = response.headers.find("Set-Cookie");
+        if (found == response.headers.end()) return {};
+        const auto delimiter = found->second.find(';');
+        return found->second.substr(0, delimiter);
     }
 
     [[nodiscard]] nlohmann::json register_user() {
@@ -261,6 +282,112 @@ TEST_F(AuthApiTest, MalformedJsonReturnsStable400WithTraceId) {
     const auto body = nlohmann::json::parse(response.body);
     EXPECT_EQ(body["error_code"], "VALIDATION_ERROR");
     EXPECT_TRUE(body["trace_id"].get<std::string>().starts_with("trace-"));
+}
+
+TEST_F(AuthApiTest, WebRegisterKeepsRefreshTokenInSecureHttpOnlyCookieOnly) {
+    const auto response = post(
+        "/api/v1/web/auth/register",
+        {{"username", "web-user@example.com"},
+         {"password", "correct horse battery staple"}},
+        {},
+        web_headers());
+
+    ASSERT_EQ(response.status, 201) << response.body;
+    const auto body = nlohmann::json::parse(response.body);
+    EXPECT_TRUE(body["accessToken"].is_string());
+    EXPECT_FALSE(body.contains("refreshToken"));
+    ASSERT_TRUE(response.headers.contains("Set-Cookie"));
+    const auto& cookie = response.headers.at("Set-Cookie");
+    EXPECT_TRUE(cookie.starts_with("pfh_refresh="));
+    EXPECT_NE(cookie.find("Path=/api/v1/web/auth"), std::string::npos);
+    EXPECT_NE(cookie.find("HttpOnly"), std::string::npos);
+    EXPECT_NE(cookie.find("Secure"), std::string::npos);
+    EXPECT_NE(cookie.find("SameSite=Strict"), std::string::npos);
+    EXPECT_EQ(response.headers.at("Cache-Control"), "no-store");
+}
+
+TEST_F(AuthApiTest, WebRefreshRotatesCookieAndReuseRevokesSession) {
+    const auto registered = post(
+        "/api/v1/web/auth/register",
+        {{"username", "web-refresh@example.com"},
+         {"password", "correct horse battery staple"}},
+        {},
+        web_headers());
+    ASSERT_EQ(registered.status, 201) << registered.body;
+    const auto original_cookie = cookie_pair(registered);
+    ASSERT_FALSE(original_cookie.empty());
+
+    const auto refreshed = post(
+        "/api/v1/web/auth/refresh",
+        nlohmann::json::object(),
+        {},
+        web_headers(original_cookie));
+    ASSERT_EQ(refreshed.status, 200) << refreshed.body;
+    const auto replacement_cookie = cookie_pair(refreshed);
+    EXPECT_NE(replacement_cookie, original_cookie);
+    const auto refreshed_body = nlohmann::json::parse(refreshed.body);
+    EXPECT_FALSE(refreshed_body.contains("refreshToken"));
+
+    const auto reused = post(
+        "/api/v1/web/auth/refresh",
+        nlohmann::json::object(),
+        {},
+        web_headers(original_cookie));
+    ASSERT_EQ(reused.status, 401);
+    EXPECT_NE(
+        reused.headers.at("Set-Cookie").find("Max-Age=0"),
+        std::string::npos);
+
+    HttpRequest protected_request;
+    protected_request.method = HttpMethod::Get;
+    protected_request.path = "/api/v1/accounts";
+    protected_request.headers.emplace(
+        "Authorization",
+        "Bearer " + refreshed_body["accessToken"].get<std::string>());
+    EXPECT_EQ(app_.handle(std::move(protected_request)).status, 401);
+}
+
+TEST_F(AuthApiTest, WebSessionRejectsMissingOrCrossSiteOrigin) {
+    const auto body = nlohmann::json{
+        {"username", "csrf@example.com"},
+        {"password", "correct horse battery staple"}};
+    EXPECT_EQ(post(
+        "/api/v1/web/auth/register", body).status, 403);
+
+    auto cross_site = web_headers();
+    cross_site["Origin"] = "https://attacker.example";
+    cross_site["Sec-Fetch-Site"] = "cross-site";
+    EXPECT_EQ(post(
+        "/api/v1/web/auth/register", body, {}, cross_site).status, 403);
+    EXPECT_TRUE(store_.users.empty());
+}
+
+TEST_F(AuthApiTest, WebLogoutClearsCookieAndRevokesAccessToken) {
+    const auto registered = post(
+        "/api/v1/web/auth/register",
+        {{"username", "web-logout@example.com"},
+         {"password", "correct horse battery staple"}},
+        {},
+        web_headers());
+    ASSERT_EQ(registered.status, 201) << registered.body;
+    const auto body = nlohmann::json::parse(registered.body);
+    const auto access = body["accessToken"].get<std::string>();
+
+    const auto response = post(
+        "/api/v1/web/auth/logout",
+        nlohmann::json::object(),
+        access,
+        web_headers(cookie_pair(registered)));
+    ASSERT_EQ(response.status, 204) << response.body;
+    EXPECT_NE(
+        response.headers.at("Set-Cookie").find("Max-Age=0"),
+        std::string::npos);
+
+    HttpRequest protected_request;
+    protected_request.method = HttpMethod::Get;
+    protected_request.path = "/api/v1/accounts";
+    protected_request.headers.emplace("Authorization", "Bearer " + access);
+    EXPECT_EQ(app_.handle(std::move(protected_request)).status, 401);
 }
 
 } // namespace pfh::test

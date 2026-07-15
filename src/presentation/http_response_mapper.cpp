@@ -119,10 +119,23 @@ HttpResponse HttpResponseMapper::error(
     } else if (status == 401) {
         message = "Invalid or expired access token";
     }
+    nlohmann::json fields = nlohmann::json::array();
+    for (const auto& field : error_value.field_errors) {
+        fields.push_back(nlohmann::json{
+            {"field", field.field},
+            {"code", field.code},
+            {"message", field.message}});
+    }
+    const bool retryable = error_value.retryable ||
+        error_value.code == application::ErrorCode::DatabaseConnectionFailed ||
+        error_value.code == application::ErrorCode::TransactionFailed ||
+        error_value.code == application::ErrorCode::ExternalServiceError;
     return json(status, nlohmann::json{
         {"error_code", code_for(error_value.code)},
         {"message", message},
-        {"trace_id", trace_id}});
+        {"trace_id", trace_id},
+        {"retryable", retryable},
+        {"field_errors", std::move(fields)}});
 }
 
 HttpResponse HttpResponseMapper::not_found(std::string_view trace_id) {

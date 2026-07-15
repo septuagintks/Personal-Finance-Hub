@@ -1,0 +1,9 @@
+{
+  "name": "personal-finance-hub",
+  "private": true,
+  "packageManager": "pnpm@10.14.0",
+  "scripts": {
+    "api:generate": "corepack pnpm --dir frontend api:generate",
+    "api:check": "corepack pnpm --dir frontend api:check"
+  }
+}

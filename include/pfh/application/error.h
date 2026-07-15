@@ -9,6 +9,8 @@
 #include <expected>
 #include <string>
 #include <system_error>
+#include <utility>
+#include <vector>
 
 namespace pfh::application {
 
@@ -66,13 +68,42 @@ enum class ErrorCode {
 };
 
 /// @brief Detailed error information
+struct FieldError {
+    std::string field;
+    std::string code;
+    std::string message;
+};
+
 struct Error {
     ErrorCode code;
     std::string message;
     std::string details; // Additional context for debugging
+    std::vector<FieldError> field_errors;
+    bool retryable = false;
 
-    Error(ErrorCode code, std::string message, std::string details = "")
-        : code(code), message(std::move(message)), details(std::move(details)) {}
+    Error(
+        ErrorCode code,
+        std::string message,
+        std::string details = "",
+        std::vector<FieldError> field_errors = {},
+        bool retryable = false)
+        : code(code),
+          message(std::move(message)),
+          details(std::move(details)),
+          field_errors(std::move(field_errors)),
+          retryable(retryable) {}
+
+    [[nodiscard]] static Error field_validation(
+        std::string field,
+        std::string code,
+        std::string message) {
+        const auto summary = message;
+        return Error(
+            ErrorCode::ValidationError,
+            summary,
+            {},
+            {FieldError{std::move(field), std::move(code), std::move(message)}});
+    }
 
     /// @brief Create a validation error
     [[nodiscard]] static Error validation(std::string message, std::string details = "") {

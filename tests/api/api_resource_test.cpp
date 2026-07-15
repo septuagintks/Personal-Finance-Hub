@@ -114,7 +114,7 @@ protected:
               users_, users_, defaults_, sessions_, auth_audits_,
               auth_uow_factory_, hasher_, tokens_, clock_),
           scopes_(store_),
-          finance_(scopes_, clock_),
+          finance_(scopes_, clock_, request_hasher_),
           auth_controller_(auth_service_),
           account_controller_(finance_),
           category_controller_(finance_),
@@ -146,16 +146,26 @@ protected:
         std::string path,
         nlohmann::json body = nlohmann::json::object(),
         std::string token = {},
-        std::map<std::string, std::string> query = {}) {
+        std::map<std::string, std::string> query = {},
+        std::map<std::string, std::string> headers = {}) {
         HttpRequest value;
         value.method = method;
         value.path = std::move(path);
         value.query = std::move(query);
+        value.headers = std::move(headers);
         if (method == HttpMethod::Post || method == HttpMethod::Put) {
             value.body = body.dump();
         }
         if (!token.empty()) {
-            value.headers.emplace("Authorization", "Bearer " + token);
+            value.headers.insert_or_assign("Authorization", "Bearer " + token);
+        }
+        if (method == HttpMethod::Post &&
+            (value.path == "/api/v1/transactions" ||
+             value.path == "/api/v1/transfers") &&
+            !value.header("Idempotency-Key").has_value()) {
+            value.headers.emplace(
+                "Idempotency-Key",
+                "resource-test-" + std::to_string(++request_sequence_));
         }
         return app_.handle(std::move(value));
     }
@@ -183,6 +193,7 @@ protected:
     ResourceHasher hasher_;
     ResourceTokenService tokens_;
     ResourceClock clock_;
+    DeterministicRequestHasher request_hasher_;
     AuthService auth_service_;
     InMemoryRequestScopeFactory scopes_;
     FinanceApplicationService finance_;
@@ -197,6 +208,7 @@ protected:
     ReportController report_controller_;
     JwtFilter jwt_filter_;
     ApiApplication app_;
+    std::uint64_t request_sequence_ = 0;
 };
 
 TEST_F(ResourceApiTest, AccountLifecycleAndTenantIsolationAreEnforced) {
@@ -485,6 +497,76 @@ TEST_F(ResourceApiTest, TransactionApiRejectsBadTypesAmountsCurrencyAndBoard) {
         HttpMethod::Post, "/api/v1/transactions", direct_transfer, token).status, 400);
 }
 
+TEST_F(ResourceApiTest, TransactionCreateIsIdempotentAndTenantScoped) {
+    const auto alice = register_user("idempotency-alice@example.com");
+    const auto bob = register_user("idempotency-bob@example.com");
+    const auto alice_token = alice["accessToken"].get<std::string>();
+    const auto bob_token = bob["accessToken"].get<std::string>();
+    const auto alice_account = create_account(alice_token)["id"].get<std::int64_t>();
+    const auto bob_account = create_account(bob_token)["id"].get<std::int64_t>();
+    const auto alice_body = nlohmann::json{
+        {"accountId", alice_account}, {"type", "expense"},
+        {"amount", "12.50"}, {"currencyCode", "CNY"},
+        {"description", "idempotent lunch"}};
+    const std::map<std::string, std::string> key{
+        {"Idempotency-Key", "same-operation-key"}};
+    const auto transactions_before = store_.transactions.size();
+    const auto outbox_before = store_.outbox.size();
+
+    const auto first = request(
+        HttpMethod::Post, "/api/v1/transactions", alice_body,
+        alice_token, {}, key);
+    const auto replay = request(
+        HttpMethod::Post, "/api/v1/transactions", alice_body,
+        alice_token, {}, key);
+    ASSERT_EQ(first.status, 201) << first.body;
+    ASSERT_EQ(replay.status, 201) << replay.body;
+    EXPECT_EQ(replay.body, first.body);
+    EXPECT_EQ(store_.transactions.size(), transactions_before + 1U);
+    EXPECT_EQ(store_.outbox.size(), outbox_before + 1U);
+
+    auto changed = alice_body;
+    changed["amount"] = "13.00";
+    const auto conflict = request(
+        HttpMethod::Post, "/api/v1/transactions", changed,
+        alice_token, {}, key);
+    ASSERT_EQ(conflict.status, 409) << conflict.body;
+    EXPECT_EQ(store_.transactions.size(), transactions_before + 1U);
+
+    auto bob_body = alice_body;
+    bob_body["accountId"] = bob_account;
+    const auto other_tenant = request(
+        HttpMethod::Post, "/api/v1/transactions", bob_body,
+        bob_token, {}, key);
+    ASSERT_EQ(other_tenant.status, 201) << other_tenant.body;
+    EXPECT_EQ(store_.transactions.size(), transactions_before + 2U);
+}
+
+TEST_F(ResourceApiTest, FinancialCreatesRequireValidIdempotencyKey) {
+    const auto user = register_user("idempotency-required@example.com");
+    const auto token = user["accessToken"].get<std::string>();
+    const auto account = create_account(token);
+
+    HttpRequest missing;
+    missing.method = HttpMethod::Post;
+    missing.path = "/api/v1/transactions";
+    missing.body = nlohmann::json{
+        {"accountId", account["id"]}, {"type", "expense"},
+        {"amount", "1"}, {"currencyCode", "CNY"}}.dump();
+    missing.headers.emplace("Authorization", "Bearer " + token);
+    EXPECT_EQ(app_.handle(std::move(missing)).status, 400);
+
+    const auto invalid = request(
+        HttpMethod::Post,
+        "/api/v1/transactions",
+        {{"accountId", account["id"]}, {"type", "expense"},
+         {"amount", "1"}, {"currencyCode", "CNY"}},
+        token,
+        {},
+        {{"Idempotency-Key", "contains a space"}});
+    EXPECT_EQ(invalid.status, 400);
+}
+
 TEST_F(ResourceApiTest, TransactionSoftDeleteIsOwnedAndConflictSafe) {
     const auto alice = register_user("delete-tx-alice@example.com");
     const auto bob = register_user("delete-tx-bob@example.com");
@@ -614,6 +696,47 @@ TEST_F(ResourceApiTest, TransferApiSupportsRateModesAndThirdPartyFee) {
          {"feeSource", "ThirdParty"}, {"feeAccountId", hkd}}, token);
     ASSERT_EQ(incoming_rate.status, 201) << incoming_rate.body;
     EXPECT_EQ(nlohmann::json::parse(incoming_rate.body)["outgoingAmount"], "100");
+}
+
+TEST_F(ResourceApiTest, TransferCreateReplaysWholeAggregateExactlyOnce) {
+    const auto user = register_user("transfer-idempotency@example.com");
+    const auto token = user["accessToken"].get<std::string>();
+    const auto source = create_account(token)["id"].get<std::int64_t>();
+    const auto target_response = request(
+        HttpMethod::Post, "/api/v1/accounts",
+        {{"name", "Transfer Target"}, {"type", "savings"},
+         {"subtype", "bank"}, {"currencyCode", "USD"}}, token);
+    ASSERT_EQ(target_response.status, 201) << target_response.body;
+    const auto target =
+        nlohmann::json::parse(target_response.body)["id"].get<std::int64_t>();
+    const auto body = nlohmann::json{
+        {"sourceAccountId", source}, {"targetAccountId", target},
+        {"mode", "BothAmounts"}, {"outgoingAmount", "70"},
+        {"incomingAmount", "10"}, {"feeAmount", "1"},
+        {"feeSource", "SourceAccount"}};
+    const std::map<std::string, std::string> key{
+        {"Idempotency-Key", "transfer-operation-key"}};
+    const auto transactions_before = store_.transactions.size();
+    const auto groups_before = store_.transfer_groups.size();
+    const auto outbox_before = store_.outbox.size();
+
+    const auto first = request(
+        HttpMethod::Post, "/api/v1/transfers", body, token, {}, key);
+    const auto replay = request(
+        HttpMethod::Post, "/api/v1/transfers", body, token, {}, key);
+    ASSERT_EQ(first.status, 201) << first.body;
+    ASSERT_EQ(replay.status, 201) << replay.body;
+    EXPECT_EQ(replay.body, first.body);
+    EXPECT_EQ(store_.transfer_groups.size(), groups_before + 1U);
+    EXPECT_EQ(store_.transactions.size(), transactions_before + 3U);
+    EXPECT_EQ(store_.outbox.size(), outbox_before + 1U);
+
+    auto changed = body;
+    changed["incomingAmount"] = "11";
+    EXPECT_EQ(request(
+        HttpMethod::Post, "/api/v1/transfers", changed, token, {}, key).status,
+        409);
+    EXPECT_EQ(store_.transfer_groups.size(), groups_before + 1U);
 }
 
 TEST_F(ResourceApiTest, TransferValidationRollsBackWithoutPartialRows) {

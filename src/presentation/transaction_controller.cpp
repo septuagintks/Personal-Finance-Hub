@@ -74,6 +74,13 @@ namespace {
 HttpResponse TransactionController::create(const HttpRequest& request) {
     auto user = require_user(request);
     if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
+    const auto idempotency_key = request.header("Idempotency-Key");
+    if (!idempotency_key.has_value()) {
+        return HttpResponseMapper::error(
+            application::Error::validation(
+                "Idempotency-Key header is required"),
+            request.trace_id);
+    }
     auto body = JsonRequestParser::parse_object(request);
     if (!body) return HttpResponseMapper::error(body.error(), request.trace_id);
     if (auto fields = JsonRequestParser::reject_unknown_fields(
@@ -112,7 +119,7 @@ HttpResponse TransactionController::create(const HttpRequest& request) {
         *currency,
         description->value_or(""),
         *category,
-        *occurred_at});
+        *occurred_at}, *idempotency_key);
     return result
         ? HttpResponseMapper::json(201, transaction_json(*result))
         : HttpResponseMapper::error(result.error(), request.trace_id);

@@ -43,6 +43,7 @@
 build/
 Build/
 build-*/
+node_modules/
 
 # CMake generated files
 CMakeFiles/

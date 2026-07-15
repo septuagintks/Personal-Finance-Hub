@@ -1,6 +1,6 @@
 # Personal Finance Hub - REST API Design
 
-Version: 1.2
+Version: 2.0
 
 Backend: C++23
 
@@ -17,11 +17,11 @@ Architecture: Clean Architecture (Presentation Layer)
 ### 1.1 核心设计规范
 
 1. **版本化路由**：所有面向前端的 API 统一以 `/api/v1` 开头。
-2. **无状态设计**：凭证通过 HTTP Header 的 `Authorization: Bearer <JWT>` 携带，由 Drogon Filter（过滤器）统一拦截校验，并将 `UserId` 注入到请求上下文中。
+2. **凭证边界**：非浏览器客户端继续使用 `Authorization: Bearer <JWT>`；同源 Web 使用内存 Access Token 与 `HttpOnly; Secure; SameSite=Strict` Refresh Cookie。
 3. **统一 JSON 响应结构**：
 
 - 成功响应：直接返回数据对象（对象或数组）。
-- 失败响应：统一采用标准错误格式：`{"error_code": "STRING", "message": "Readable description", "trace_id": "STRING"}`。
+- 失败响应：统一采用标准错误格式：`error_code`、`message`、`trace_id`、`retryable` 和 `field_errors`。
 
 ### 1.2 C++23 std::expected 与 HTTP 状态码映射矩阵
 
@@ -38,6 +38,15 @@ Architecture: Clean Architecture (Presentation Layer)
 | **违反金融业务规则 (DomainRuleViolation)**   | `422 Unprocessable Entity`  | 账户已归档、跨币种金额不平衡、汇率非法   |
 | **外部服务失败 (ExternalServiceError)**      | `502 Bad Gateway`           | 汇率 API 或同步 Provider 不可用          |
 | **系统级故障 (InfrastructureFailure)**       | `500 Internal Server Error` | 数据库死锁、连接超时，前端提示“系统繁忙” |
+
+写请求发生暂时性基础设施故障时，`retryable` 由服务端决定；前端不得据此自动重试非幂等请求。
+
+### 1.4 幂等与并发
+
+- `POST /api/v1/transactions` 和 `POST /api/v1/transfers` 必须携带可打印 ASCII 的 `Idempotency-Key`，长度为 1 至 128。
+- 同一用户、操作和键的同一请求返回原始 DTO；请求指纹不同返回 `409 Conflict`。
+- 用户主动重试同一写入意图时复用原键；客户端超时不得自动生成新键。
+- 版本保护使用一个强 ETag，例如 `If-Match: "3"`；弱 ETag、多个值和非法版本返回结构化 `400`，版本冲突返回 `409`。
 
 ### 1.3 金额与符号边界
 
@@ -455,7 +464,7 @@ Application 层必须重复执行同一校验，不能只依赖 JSON Schema。
 
 ### 4.11 OpenAPI / JSON Schema Contract
 
-当前可执行契约见 [`10_REST_API_OpenAPI.json`](10_REST_API_OpenAPI.json)，采用 OpenAPI 3.1。路由、HTTP 方法、金额 Schema 和 Drogon adapter 注册表由 `openapi_contract` 静态门禁逐次比较。
+当前可执行契约见 [`10_REST_API_OpenAPI.json`](10_REST_API_OpenAPI.json)，采用 OpenAPI 3.1。路由、HTTP 方法、唯一 `operationId`、金额 Schema、Web Cookie 安全方案和 Drogon adapter 注册表由静态门禁逐次比较；前端 DTO 从该文件生成。
 以下规则是 JSON Schema 的全局约束：
 
 1. 金额字段必须是 `type: string`，并使用十进制字符串格式
@@ -511,7 +520,7 @@ CreateTransferRequest:
 
 ErrorResponse:
   type: object
-  required: [error_code, message, trace_id]
+  required: [error_code, message, trace_id, retryable, field_errors]
   properties:
     error_code:
       type: string
@@ -519,6 +528,12 @@ ErrorResponse:
       type: string
     trace_id:
       type: string
+    retryable:
+      type: boolean
+    field_errors:
+      type: array
+      items:
+        $ref: '#/components/schemas/FieldError'
 
 UserPreferenceDTO:
   type: object
@@ -922,6 +937,17 @@ Authorization: Bearer <access_token>
 2. 将 `jti` 加入 `revoked_access_tokens`
 3. 作废数据库中对应的 refresh token
 4. 写入审计日志
+
+### 6.7 Web Cookie 会话
+
+Web 专用端点位于 `/api/v1/web/auth/*`，与 JSON Token 端点并存：
+
+- `register`、`login` 返回内存使用的 `accessToken`，响应不包含 `refreshToken`。
+- Refresh Token 通过 `pfh_refresh` Cookie 返回，固定 `Path=/api/v1/web/auth`，并设置 `HttpOnly`、`Secure`、`SameSite=Strict`、`Cache-Control: no-store`。
+- `refresh` 只读取 Cookie，成功后轮换 Cookie；失败时清除 Cookie 并返回统一认证错误。
+- `logout` 同时要求当前 Access Token 和 Cookie，撤销会话并清除 Cookie。
+- 所有 Web Cookie 写端点要求 `Origin` 与 HTTPS `Host` 同源；存在 `Sec-Fetch-Site` 时必须为 `same-origin`。
+- 浏览器不得把 Access Token 或 Refresh Token 写入 `localStorage`、`sessionStorage`、IndexedDB 或日志。
 
 ---
 

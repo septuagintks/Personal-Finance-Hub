@@ -34,6 +34,7 @@
 #include "pfh/infrastructure/persistence/user_repository_impl.h"
 #include "pfh/infrastructure/security/argon2_password_hasher.h"
 #include "pfh/infrastructure/security/openssl_token_service.h"
+#include "pfh/infrastructure/security/openssl_request_hasher.h"
 #include "pfh/infrastructure/system_clock.h"
 #include "pfh/presentation/api_application.h"
 #include "pfh/presentation/controllers/auth_controller.h"
@@ -201,6 +202,8 @@ application::VoidResult ProductionCompositionRoot::initialize() {
         config_.jwt.access_token_expiry,
         config_.jwt.refresh_token_expiry,
         config_.jwt.clock_skew);
+    request_hasher_ =
+        std::make_unique<infrastructure::OpenSslRequestHasher>();
     users_ = std::make_unique<infrastructure::UserRepositoryImpl>(request_db_);
     registration_defaults_ =
         std::make_unique<infrastructure::RegistrationDefaultsRepositoryImpl>();
@@ -381,7 +384,7 @@ application::VoidResult ProductionCompositionRoot::initialize() {
     request_scope_factory_ =
         std::make_unique<infrastructure::PostgresRequestScopeFactory>(request_db_);
     finance_service_ = std::make_unique<application::FinanceApplicationService>(
-        *request_scope_factory_, *clock_);
+        *request_scope_factory_, *clock_, *request_hasher_);
     auth_controller_ = std::make_unique<presentation::AuthController>(
         *auth_service_);
     account_controller_ = std::make_unique<presentation::AccountController>(

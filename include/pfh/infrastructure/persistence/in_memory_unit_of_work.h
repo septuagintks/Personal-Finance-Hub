@@ -78,6 +78,8 @@ private:
         store_.staged_revoked_access_tokens.clear();
         store_.staged_revoked_sessions.clear();
         store_.staged_audit_logs.clear();
+        store_.staged_idempotency.clear();
+        store_.staged_deleted_idempotency.clear();
         store_.staged_deleted_accounts.clear();
         store_.staged_deleted_transactions.clear();
         store_.staged_deleted_balance_cache.clear();
@@ -113,6 +115,8 @@ private:
             store_.staged_revoked_access_tokens.clear();
             store_.staged_revoked_sessions.clear();
             store_.staged_audit_logs.clear();
+            store_.staged_idempotency.clear();
+            store_.staged_deleted_idempotency.clear();
             store_.staged_deleted_accounts.clear();
             store_.staged_deleted_transactions.clear();
             store_.staged_deleted_balance_cache.clear();
@@ -192,6 +196,12 @@ private:
         for (auto& audit : store_.staged_audit_logs) {
             store_.audit_logs.push_back(std::move(audit));
         }
+        for (const auto& key : store_.staged_deleted_idempotency) {
+            store_.idempotency.erase(key);
+        }
+        for (auto& [key, record] : store_.staged_idempotency) {
+            store_.idempotency.insert_or_assign(key, std::move(record));
+        }
         for (const auto id : store_.staged_deleted_accounts) {
             store_.accounts.erase(id);
         }
@@ -227,6 +237,8 @@ private:
         store_.staged_revoked_access_tokens.clear();
         store_.staged_revoked_sessions.clear();
         store_.staged_audit_logs.clear();
+        store_.staged_idempotency.clear();
+        store_.staged_deleted_idempotency.clear();
         store_.staged_deleted_accounts.clear();
         store_.staged_deleted_transactions.clear();
         store_.staged_deleted_balance_cache.clear();

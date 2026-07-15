@@ -109,6 +109,17 @@ struct InMemoryJobLeaseRecord {
     std::chrono::system_clock::time_point updated_at{};
 };
 
+struct InMemoryIdempotencyRecord {
+    domain::UserId user_id;
+    std::string operation;
+    std::string key;
+    std::string request_fingerprint;
+    bool completed = false;
+    std::map<std::string, std::string> response_values;
+    std::chrono::system_clock::time_point created_at{};
+    std::chrono::system_clock::time_point expires_at{};
+};
+
 /// @brief Process-local store. UoW and outbox operations serialize on mutex;
 /// test setup and direct inspection must not race with repository calls.
 struct InMemoryStore {
@@ -145,6 +156,7 @@ struct InMemoryStore {
     std::vector<domain::AuditLogEntry> audit_logs;
     std::set<std::pair<std::string, std::string>> outbox_handler_receipts;
     std::map<std::string, InMemoryJobLeaseRecord> scheduled_job_leases;
+    std::map<std::string, InMemoryIdempotencyRecord> idempotency;
 
     // Repository helpers can re-enter while a UoW owns the store lock. A
     // recursive mutex lets the UoW report nested transactions explicitly
@@ -169,6 +181,8 @@ struct InMemoryStore {
     std::map<std::string, InMemoryRevokedAccessToken> staged_revoked_access_tokens;
     std::map<std::string, InMemoryRevokedSession> staged_revoked_sessions;
     std::vector<domain::AuditLogEntry> staged_audit_logs;
+    std::map<std::string, InMemoryIdempotencyRecord> staged_idempotency;
+    std::set<std::string> staged_deleted_idempotency;
     std::vector<std::int64_t> staged_deleted_accounts;
     std::vector<std::int64_t> staged_deleted_transactions;
     std::vector<std::int64_t> staged_deleted_balance_cache;

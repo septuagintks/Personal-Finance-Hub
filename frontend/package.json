@@ -1,0 +1,13 @@
+{
+  "name": "@pfh/web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "api:generate": "openapi-typescript ../Docs/Architecture/10_REST_API_OpenAPI.json -o src/generated/api-types.ts",
+    "api:check": "openapi-typescript ../Docs/Architecture/10_REST_API_OpenAPI.json -o src/generated/api-types.ts && git diff --exit-code -- src/generated/api-types.ts"
+  },
+  "devDependencies": {
+    "openapi-typescript": "7.8.0"
+  }
+}

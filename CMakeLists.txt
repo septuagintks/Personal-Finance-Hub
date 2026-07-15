@@ -171,6 +171,7 @@ set(PFH_POSTGRESQL_SOURCES
     src/infrastructure/persistence/postgres_result_set.cpp
     src/infrastructure/persistence/rls_session.cpp
     src/infrastructure/persistence/auth_session_repository_impl.cpp
+    src/infrastructure/persistence/idempotency_repository_impl.cpp
     src/infrastructure/persistence/audit_log_repository_impl.cpp
     src/infrastructure/persistence/registration_defaults_repository_impl.cpp
     src/infrastructure/persistence/postgres_outbox_repository.cpp
@@ -183,6 +184,7 @@ set(PFH_POSTGRESQL_SOURCES
 
 set(PFH_PRODUCTION_SECURITY_SOURCES
     src/infrastructure/security/argon2_password_hasher.cpp
+    src/infrastructure/security/openssl_request_hasher.cpp
     src/infrastructure/security/openssl_token_service.cpp
 )
 

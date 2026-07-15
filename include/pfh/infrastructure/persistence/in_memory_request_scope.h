@@ -7,6 +7,7 @@
 #include "pfh/infrastructure/persistence/in_memory_audit_log_repository.h"
 #include "pfh/infrastructure/persistence/in_memory_category_repository.h"
 #include "pfh/infrastructure/persistence/in_memory_exchange_rate_repository.h"
+#include "pfh/infrastructure/persistence/in_memory_idempotency_repository.h"
 #include "pfh/infrastructure/persistence/in_memory_store.h"
 #include "pfh/infrastructure/persistence/in_memory_tag_repository.h"
 #include "pfh/infrastructure/persistence/in_memory_transaction_repository.h"
@@ -28,6 +29,7 @@ public:
           preferences_(store),
           exchange_rates_(store),
           audit_logs_(store),
+          idempotency_(store),
           uow_(store, user_id) {}
 
     [[nodiscard]] domain::UserId user_id() const noexcept override { return user_id_; }
@@ -50,6 +52,9 @@ public:
     [[nodiscard]] domain::IAuditLogRepository& audit_logs() noexcept override {
         return audit_logs_;
     }
+    [[nodiscard]] application::IIdempotencyRepository& idempotency() noexcept override {
+        return idempotency_;
+    }
     [[nodiscard]] application::IUnitOfWork& unit_of_work() noexcept override {
         return uow_;
     }
@@ -63,6 +68,7 @@ private:
     InMemoryUserPreferenceRepository preferences_;
     InMemoryExchangeRateRepository exchange_rates_;
     InMemoryAuditLogRepository audit_logs_;
+    InMemoryIdempotencyRepository idempotency_;
     InMemoryUnitOfWork uow_;
 };
 

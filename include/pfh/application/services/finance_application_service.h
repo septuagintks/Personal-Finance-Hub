@@ -6,9 +6,11 @@
 #include "pfh/application/error.h"
 #include "pfh/application/persistence/i_request_scope.h"
 #include "pfh/application/ports/i_clock.h"
+#include "pfh/application/ports/i_request_hasher.h"
 
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <vector>
 
 namespace pfh::application {
@@ -22,8 +24,9 @@ class FinanceApplicationService {
 public:
     FinanceApplicationService(
         IRequestScopeFactory& scopes,
-        const IClock& clock)
-        : scopes_(scopes), clock_(clock) {}
+        const IClock& clock,
+        const IRequestHasher& request_hasher)
+        : scopes_(scopes), clock_(clock), request_hasher_(request_hasher) {}
 
     [[nodiscard]] Result<std::vector<AccountDto>> list_accounts(domain::UserId user_id);
     [[nodiscard]] Result<AccountDto> create_account(const CreateAccountCommand& command);
@@ -54,11 +57,17 @@ public:
 
     [[nodiscard]] Result<TransactionDto> create_transaction(
         const CreateTransactionCommand& command);
+    [[nodiscard]] Result<TransactionDto> create_transaction(
+        const CreateTransactionCommand& command,
+        std::string_view idempotency_key);
     [[nodiscard]] VoidResult delete_transaction(
         const DeleteTransactionCommand& command);
 
     [[nodiscard]] Result<TransferResultDto> create_transfer(
         const CreateTransferCommand& command);
+    [[nodiscard]] Result<TransferResultDto> create_transfer(
+        const CreateTransferCommand& command,
+        std::string_view idempotency_key);
     [[nodiscard]] Result<TransferResultDto> get_transfer(
         domain::UserId user_id,
         domain::TransferGroupId group_id);
@@ -75,6 +84,7 @@ private:
 
     IRequestScopeFactory& scopes_;
     const IClock& clock_;
+    const IRequestHasher& request_hasher_;
 };
 
 } // namespace pfh::application

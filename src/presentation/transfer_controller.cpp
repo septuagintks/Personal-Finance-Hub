@@ -78,6 +78,13 @@ parse_fee_source(const std::optional<std::string>& value) {
 HttpResponse TransferController::create(const HttpRequest& request) {
     auto user = require_user(request);
     if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
+    const auto idempotency_key = request.header("Idempotency-Key");
+    if (!idempotency_key.has_value()) {
+        return HttpResponseMapper::error(
+            application::Error::validation(
+                "Idempotency-Key header is required"),
+            request.trace_id);
+    }
     auto body = JsonRequestParser::parse_object(request);
     if (!body) return HttpResponseMapper::error(body.error(), request.trace_id);
     if (auto fields = JsonRequestParser::reject_unknown_fields(
@@ -140,7 +147,7 @@ HttpResponse TransferController::create(const HttpRequest& request) {
         *fee_source,
         *fee_account,
         description->value_or(""),
-        *occurred_at});
+        *occurred_at}, *idempotency_key);
     return result ? HttpResponseMapper::json(201, transfer_json(*result))
                   : HttpResponseMapper::error(result.error(), request.trace_id);
 }

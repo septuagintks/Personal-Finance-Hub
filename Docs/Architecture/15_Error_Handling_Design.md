@@ -1,6 +1,6 @@
 # Personal Finance Hub - Error Handling Design
 
-Version: 1.0
+Version: 2.0
 Backend: C++23
 Architecture: Clean Architecture + std::expected
 
@@ -77,7 +77,9 @@ Presentation 层统一映射：
 {
   "error_code": "DOMAIN_RULE_VIOLATION",
   "message": "Transfer amount is not balanced.",
-  "trace_id": "req-20260623-0001"
+  "trace_id": "req-20260623-0001",
+  "retryable": false,
+  "field_errors": []
 }
 ```
 
@@ -87,6 +89,8 @@ Presentation 层统一映射：
 2. `message` 面向用户或前端开发者，可读但不泄露 SQL、token、密钥
 3. `trace_id` 用于关联服务端日志
 4. 生产环境不得把异常堆栈返回给前端
+5. `field_errors` 只包含允许公开的字段名、稳定代码和用户可读消息；底层 SQL、路径和异常正文不得进入响应。
+6. `retryable` 只由服务端标记可安全重试的暂时性故障，客户端不得据此重试非幂等写请求。
 
 ---
 

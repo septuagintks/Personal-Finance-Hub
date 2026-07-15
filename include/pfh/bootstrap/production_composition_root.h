@@ -37,6 +37,7 @@ class FailoverExchangeRateProvider;
 class FreeCurrencyApiProvider;
 class JobManager;
 class OpenSslTokenService;
+class OpenSslRequestHasher;
 class PostgresActiveCurrencyQuery;
 class PostgresJobLeaseRepository;
 class PostgresOutboxRepository;
@@ -89,6 +90,7 @@ private:
     std::unique_ptr<infrastructure::SystemClock> clock_;
     std::unique_ptr<infrastructure::Argon2PasswordHasher> password_hasher_;
     std::unique_ptr<infrastructure::OpenSslTokenService> token_service_;
+    std::unique_ptr<infrastructure::OpenSslRequestHasher> request_hasher_;
     std::unique_ptr<infrastructure::UserRepositoryImpl> users_;
     std::unique_ptr<infrastructure::RegistrationDefaultsRepositoryImpl>
         registration_defaults_;

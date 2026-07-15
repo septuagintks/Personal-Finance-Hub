@@ -7,8 +7,10 @@
 #include "pfh/application/dto.h"
 #include "pfh/application/error.h"
 #include "pfh/application/error_mapping.h"
+#include "pfh/application/idempotency.h"
 #include "pfh/application/input_constraints.h"
 #include "pfh/application/persistence/i_unit_of_work.h"
+#include "pfh/application/ports/i_idempotency_repository.h"
 #include "pfh/domain/events/domain_events.h"
 #include "pfh/domain/repositories/i_account_repository.h"
 #include "pfh/domain/repositories/i_transaction_repository.h"
@@ -27,10 +29,36 @@ public:
     CreateTransferUseCase(
         domain::IAccountRepository& accounts,
         domain::ITransactionRepository& transactions,
-        IUnitOfWork& uow)
-        : accounts_(accounts), transactions_(transactions), uow_(uow) {}
+        IUnitOfWork& uow,
+        IIdempotencyRepository* idempotency = nullptr)
+        : accounts_(accounts), transactions_(transactions), uow_(uow),
+          idempotency_(idempotency) {}
 
     [[nodiscard]] Result<TransferResultDto> execute(const CreateTransferCommand& cmd) {
+        return execute_impl(cmd, std::nullopt);
+    }
+
+    [[nodiscard]] Result<TransferResultDto> execute(
+        const CreateTransferCommand& cmd,
+        const IdempotencyRequest& idempotency) {
+        return execute_impl(cmd, idempotency);
+    }
+
+private:
+    [[nodiscard]] Result<TransferResultDto> execute_impl(
+        const CreateTransferCommand& cmd,
+        const std::optional<IdempotencyRequest>& idempotency) {
+        if (idempotency.has_value()) {
+            if (idempotency_ == nullptr) {
+                return err(Error::infrastructure_failure(
+                    "Transfer idempotency is unavailable"));
+            }
+            if (auto valid = validate_idempotency_input(
+                    idempotency->key, idempotency->request_fingerprint);
+                !valid) {
+                return err(valid.error());
+            }
+        }
         if (auto shape = validate_command_shape(cmd); !shape) {
             return err(shape.error());
         }
@@ -43,6 +71,7 @@ public:
         // PostgreSQL connection would not see.
         std::optional<domain::TransferAggregate> aggregate;
         domain::TransferPersistResult persisted;
+        std::optional<TransferResultDto> result_dto;
         // Carries an application-level error (with its precise ErrorCode) out of
         // the transaction closure. The closure can only signal abort via a
         // RepositoryError, which would flatten codes like ArchivedAccountOperation
@@ -50,6 +79,31 @@ public:
         std::optional<Error> app_error;
         auto write = uow_.execute_in_transaction(
             [&](domain::ITransactionContext& tx_ctx) -> domain::RepositoryVoidResult {
+                if (idempotency.has_value()) {
+                    auto started = idempotency_->begin(
+                        tx_ctx,
+                        cmd.user_id,
+                        "create_transfer",
+                        idempotency->key,
+                        idempotency->request_fingerprint,
+                        idempotency->created_at,
+                        idempotency->created_at + kIdempotencyLifetime);
+                    if (!started) {
+                        return std::unexpected(started.error());
+                    }
+                    if (started->replay) {
+                        auto restored = from_idempotency_values(
+                            started->response_values);
+                        if (!restored) {
+                            app_error = restored.error();
+                            return std::unexpected(domain::RepositoryError::database(
+                                "Stored idempotency response is invalid"));
+                        }
+                        result_dto = std::move(*restored);
+                        return {};
+                    }
+                }
+
                 // Lock every affected account in ascending id order. This
                 // includes a third-party fee account, preventing three-row
                 // lock cycles when concurrent transfers overlap.
@@ -118,6 +172,18 @@ public:
                     return std::unexpected(saved.error());
                 }
                 persisted = *saved;
+                result_dto = to_dto(persisted, *aggregate);
+                if (idempotency.has_value()) {
+                    auto completed = idempotency_->complete(
+                        tx_ctx,
+                        cmd.user_id,
+                        "create_transfer",
+                        idempotency->key,
+                        to_idempotency_values(*result_dto));
+                    if (!completed) {
+                        return completed;
+                    }
+                }
 
                 uow_.register_event(std::make_shared<domain::TransferCompletedEvent>(
                     cmd.user_id,
@@ -134,24 +200,80 @@ public:
             return err(from_repository(write.error()));
         }
 
+        if (!result_dto.has_value()) {
+            return err(Error::infrastructure_failure(
+                "Transfer result was not produced"));
+        }
+        return *result_dto;
+    }
+
+    [[nodiscard]] static TransferResultDto to_dto(
+        const domain::TransferPersistResult& persisted,
+        const domain::TransferAggregate& aggregate) {
         TransferResultDto dto;
         dto.transfer_group_id = persisted.group_id;
         dto.outgoing_transaction_id = persisted.outgoing_id;
         dto.incoming_transaction_id = persisted.incoming_id;
         dto.outgoing_amount =
-            aggregate->outgoing().amount().amount().to_string();
+            aggregate.outgoing().amount().amount().to_string();
         dto.incoming_amount =
-            aggregate->incoming().amount().amount().to_string();
-        if (aggregate->rate().has_value()) {
-            dto.rate = aggregate->rate()->rate().to_string();
+            aggregate.incoming().amount().amount().to_string();
+        if (aggregate.rate().has_value()) {
+            dto.rate = aggregate.rate()->rate().to_string();
         }
-        if (!aggregate->adjustments().empty()) {
-            dto.fee_amount = aggregate->adjustments().front().amount().amount().abs().to_string();
+        if (!aggregate.adjustments().empty()) {
+            dto.fee_amount = aggregate.adjustments().front().amount().amount().abs().to_string();
         }
         return dto;
     }
 
-private:
+    [[nodiscard]] static IdempotencyValues to_idempotency_values(
+        const TransferResultDto& value) {
+        return {
+            {"transfer_group_id", value.transfer_group_id.to_string()},
+            {"outgoing_transaction_id", value.outgoing_transaction_id.to_string()},
+            {"incoming_transaction_id", value.incoming_transaction_id.to_string()},
+            {"outgoing_amount", value.outgoing_amount},
+            {"incoming_amount", value.incoming_amount},
+            {"rate", value.rate.value_or("")},
+            {"fee_amount", value.fee_amount.value_or("")}};
+    }
+
+    [[nodiscard]] static Result<TransferResultDto> from_idempotency_values(
+        const IdempotencyValues& values) {
+        const auto group = idempotency_value(values, "transfer_group_id");
+        const auto outgoing_id = idempotency_value(
+            values, "outgoing_transaction_id");
+        const auto incoming_id = idempotency_value(
+            values, "incoming_transaction_id");
+        const auto outgoing = idempotency_value(values, "outgoing_amount");
+        const auto incoming = idempotency_value(values, "incoming_amount");
+        const auto rate = idempotency_value(values, "rate");
+        const auto fee = idempotency_value(values, "fee_amount");
+        if (!group || !outgoing_id || !incoming_id || !outgoing || !incoming ||
+            !rate || !fee) {
+            return err(Error::infrastructure_failure(
+                "Stored transfer response is incomplete"));
+        }
+        const auto group_value = parse_idempotency_integer(*group);
+        const auto outgoing_value = parse_idempotency_integer(*outgoing_id);
+        const auto incoming_value = parse_idempotency_integer(*incoming_id);
+        if (!group_value || !outgoing_value || !incoming_value ||
+            *group_value <= 0 || *outgoing_value <= 0 || *incoming_value <= 0) {
+            return err(Error::infrastructure_failure(
+                "Stored transfer response is invalid"));
+        }
+        TransferResultDto result;
+        result.transfer_group_id = domain::TransferGroupId(*group_value);
+        result.outgoing_transaction_id = domain::TransactionId(*outgoing_value);
+        result.incoming_transaction_id = domain::TransactionId(*incoming_value);
+        result.outgoing_amount = std::string(*outgoing);
+        result.incoming_amount = std::string(*incoming);
+        if (!rate->empty()) result.rate = std::string(*rate);
+        if (!fee->empty()) result.fee_amount = std::string(*fee);
+        return result;
+    }
+
     [[nodiscard]] static VoidResult validate_command_shape(
         const CreateTransferCommand& cmd) {
         if (!cmd.user_id.is_valid() || !cmd.source_account_id.is_valid() ||
@@ -384,6 +506,7 @@ private:
     domain::IAccountRepository& accounts_;
     domain::ITransactionRepository& transactions_;
     IUnitOfWork& uow_;
+    IIdempotencyRepository* idempotency_;
 };
 
 } // namespace pfh::application

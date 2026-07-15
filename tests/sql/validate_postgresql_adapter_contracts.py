@@ -58,6 +58,11 @@ def main() -> int:
         "migrations/V5__align_transfer_rate_precision.sql"
     )
     scheduler_migration = read("migrations/V6__outbox_scheduler_foundation.sql")
+    idempotency_migration = read("migrations/V7__request_idempotency.sql")
+    role_init = read("docker/postgres/init-roles.sql")
+    idempotency = read(
+        "src/infrastructure/persistence/idempotency_repository_impl.cpp"
+    )
     outbox = read(
         "src/infrastructure/persistence/postgres_outbox_repository.cpp"
     )
@@ -92,6 +97,7 @@ def main() -> int:
         "postgres_result_set.cpp",
         "rls_session.cpp",
         "auth_session_repository_impl.cpp",
+        "idempotency_repository_impl.cpp",
         "audit_log_repository_impl.cpp",
         "registration_defaults_repository_impl.cpp",
         "postgres_outbox_repository.cpp",
@@ -144,6 +150,7 @@ def main() -> int:
         "src/infrastructure/persistence/category_repository_impl.cpp",
         "src/infrastructure/persistence/user_preference_repository_impl.cpp",
         "src/infrastructure/persistence/tag_repository_impl.cpp",
+        "src/infrastructure/persistence/idempotency_repository_impl.cpp",
     ]
     for path in tenant_sources:
         require(
@@ -200,6 +207,22 @@ def main() -> int:
         and "token_hash" in auth_sessions
         and "INSERT INTO refresh_tokens" in auth_sessions,
         "Auth session adapter must lock/rotate token hashes and support session revocation",
+        failures,
+    )
+    require(
+        "FOR UPDATE" in idempotency
+        and "ON CONFLICT (user_id, operation, idempotency_key) DO NOTHING"
+        in idempotency
+        and "response_values" in idempotency,
+        "Idempotency adapter must serialize duplicate requests and persist responses",
+        failures,
+    )
+    require(
+        "ALTER TABLE request_idempotency FORCE ROW LEVEL SECURITY"
+        in idempotency_migration
+        and "request_idempotency" in role_init
+        and "tenant_tables <> 9" in role_init,
+        "Role initialization must include the V7 FORCE RLS table",
         failures,
     )
     require(

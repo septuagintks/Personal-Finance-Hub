@@ -47,6 +47,18 @@ namespace {
     if (!if_none_match.empty()) {
         core.headers.emplace("If-None-Match", if_none_match);
     }
+    for (const auto* header : {
+             "Host",
+             "Origin",
+             "Sec-Fetch-Site",
+             "Cookie",
+             "Idempotency-Key",
+             "If-Match"}) {
+        const auto value = request->getHeader(header);
+        if (!value.empty()) {
+            core.headers.emplace(header, value);
+        }
+    }
     for (const auto& [name, value] : request->getParameters()) {
         core.query.emplace(name, value);
     }
@@ -90,6 +102,10 @@ void DrogonHttpAdapter::configure() {
     register_static("/api/v1/auth/login", HttpMethod::Post, drogon::Post);
     register_static("/api/v1/auth/refresh", HttpMethod::Post, drogon::Post);
     register_static("/api/v1/auth/logout", HttpMethod::Post, drogon::Post);
+    register_static("/api/v1/web/auth/register", HttpMethod::Post, drogon::Post);
+    register_static("/api/v1/web/auth/login", HttpMethod::Post, drogon::Post);
+    register_static("/api/v1/web/auth/refresh", HttpMethod::Post, drogon::Post);
+    register_static("/api/v1/web/auth/logout", HttpMethod::Post, drogon::Post);
     register_static("/api/v1/currencies", HttpMethod::Get, drogon::Get);
     register_static("/api/v1/accounts", HttpMethod::Get, drogon::Get);
     register_static("/api/v1/accounts", HttpMethod::Post, drogon::Post);

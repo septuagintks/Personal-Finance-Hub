@@ -74,6 +74,22 @@ HttpResponse ApiApplication::handle(HttpRequest request) noexcept {
             request.path == "/api/v1/auth/logout") {
             return finalize(auth_.logout(request));
         }
+        if (request.method == HttpMethod::Post &&
+            request.path == "/api/v1/web/auth/register") {
+            return finalize(auth_.web_register_user(request));
+        }
+        if (request.method == HttpMethod::Post &&
+            request.path == "/api/v1/web/auth/login") {
+            return finalize(auth_.web_login(request));
+        }
+        if (request.method == HttpMethod::Post &&
+            request.path == "/api/v1/web/auth/refresh") {
+            return finalize(auth_.web_refresh(request));
+        }
+        if (request.method == HttpMethod::Post &&
+            request.path == "/api/v1/web/auth/logout") {
+            return finalize(auth_.web_logout(request));
+        }
         if (request.method == HttpMethod::Get &&
             request.path == "/api/v1/currencies" && currencies_ != nullptr) {
             return finalize(currencies_->list(request));

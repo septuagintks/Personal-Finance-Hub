@@ -14,6 +14,7 @@
 #include "pfh/domain/repositories/i_audit_log_repository.h"
 #include "pfh/domain/repositories/i_user_repository.h"
 
+#include <chrono>
 #include <string>
 #include <string_view>
 
@@ -46,6 +47,9 @@ public:
     [[nodiscard]] Result<TokenPairDto> login(const LoginCommand& command);
     [[nodiscard]] Result<TokenPairDto> refresh(const RefreshCommand& command);
     [[nodiscard]] VoidResult logout(const LogoutCommand& command);
+    [[nodiscard]] std::chrono::seconds refresh_token_lifetime() const noexcept {
+        return tokens_.refresh_token_lifetime();
+    }
 
     [[nodiscard]] static Result<std::string> normalize_username(
         std::string_view username);

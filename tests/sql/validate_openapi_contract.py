@@ -1,4 +1,4 @@
-"""Validate the checked-in Phase 1 OpenAPI contract with stdlib only."""
+"""Validate the checked-in OpenAPI route and browser protocol contract."""
 
 from pathlib import Path
 import json
@@ -16,6 +16,10 @@ EXPECTED = {
     "/api/v1/auth/login": {"post"},
     "/api/v1/auth/refresh": {"post"},
     "/api/v1/auth/logout": {"post"},
+    "/api/v1/web/auth/register": {"post"},
+    "/api/v1/web/auth/login": {"post"},
+    "/api/v1/web/auth/refresh": {"post"},
+    "/api/v1/web/auth/logout": {"post"},
     "/api/v1/currencies": {"get"},
     "/api/v1/accounts": {"get", "post"},
     "/api/v1/accounts/{accountId}/balance": {"get"},
@@ -58,7 +62,7 @@ def main() -> int:
         failures.append("OpenAPI version must be 3.1.0")
     paths = document.get("paths", {})
     if set(paths) != set(EXPECTED):
-        failures.append("OpenAPI path set differs from the Phase 1 route table")
+        failures.append("OpenAPI path set differs from the implemented route table")
     for path, methods in EXPECTED.items():
         actual = {
             key for key in paths.get(path, {})
@@ -68,6 +72,19 @@ def main() -> int:
             failures.append(f"{path} methods are {sorted(actual)}, expected {sorted(methods)}")
     if "delete" in paths.get("/api/v1/transfers/{transferGroupId}", {}):
         failures.append("Phase 1 must not publish a transfer delete operation")
+
+    operation_ids: list[str] = []
+    for path, path_item in paths.items():
+        for method, operation in path_item.items():
+            if method not in {"get", "post", "put", "delete", "patch"}:
+                continue
+            operation_id = operation.get("operationId")
+            if not isinstance(operation_id, str) or not operation_id:
+                failures.append(f"{method.upper()} {path} has no operationId")
+            else:
+                operation_ids.append(operation_id)
+    if len(operation_ids) != len(set(operation_ids)):
+        failures.append("OpenAPI operationId values must be unique")
 
     try:
         adapter_source = ADAPTER.read_text(encoding="utf-8")
@@ -91,6 +108,48 @@ def main() -> int:
         failures.append("Drogon exception responses must expose their trace id header")
 
     schemas = document.get("components", {}).get("schemas", {})
+    components = document.get("components", {})
+    security_schemes = components.get("securitySchemes", {})
+    cookie_auth = security_schemes.get("cookieAuth", {})
+    if cookie_auth != {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "pfh_refresh",
+        "description": "Secure HttpOnly refresh cookie; never readable by browser JavaScript",
+    }:
+        failures.append("cookieAuth security scheme is incomplete")
+    for path in (
+        "/api/v1/web/auth/register",
+        "/api/v1/web/auth/login",
+        "/api/v1/web/auth/refresh",
+        "/api/v1/web/auth/logout",
+    ):
+        serialized = json.dumps(paths.get(path, {}), sort_keys=True)
+        if "refreshToken" in serialized:
+            failures.append(f"{path} exposes refreshToken in its JSON contract")
+        if "Set-Cookie" not in serialized or "no-store" not in serialized:
+            failures.append(f"{path} does not define secure cookie response headers")
+
+    idempotency_ref = "#/components/parameters/IdempotencyKey"
+    for path in ("/api/v1/transactions", "/api/v1/transfers"):
+        operation = paths.get(path, {}).get("post", {})
+        parameters = operation.get("parameters", [])
+        if not any(item.get("$ref") == idempotency_ref for item in parameters):
+            failures.append(f"POST {path} must require Idempotency-Key")
+        if "409" not in operation.get("responses", {}):
+            failures.append(f"POST {path} must publish idempotency conflicts")
+
+    error_schema = schemas.get("ErrorResponse", {})
+    expected_error_fields = {
+        "error_code", "message", "trace_id", "retryable", "field_errors",
+    }
+    if set(error_schema.get("required", [])) != expected_error_fields:
+        failures.append("ErrorResponse required fields are incomplete")
+    if set(error_schema.get("properties", {})) != expected_error_fields:
+        failures.append("ErrorResponse properties are incomplete")
+    pagination = schemas.get("CursorPageMetadata", {})
+    if pagination.get("properties", {}).get("nextCursor", {}).get("maxLength") != 512:
+        failures.append("CursorPageMetadata must bound nextCursor to 512 characters")
     decimal = schemas.get("DecimalString", {})
     positive = schemas.get("PositiveDecimalString", {})
     if decimal.get("type") != "string" or positive.get("type") != "string":
@@ -187,7 +246,24 @@ def main() -> int:
         for failure in failures:
             print(f"ERROR: {failure}")
         return 1
-    print("OpenAPI Phase 1 contract: PASS")
+    generated = ROOT / "frontend/src/generated/api-types.ts"
+    try:
+        generated_text = generated.read_text(encoding="utf-8")
+    except OSError as error:
+        failures.append(f"Generated frontend API types cannot be read: {error}")
+        generated_text = ""
+    for marker in (
+        "registerWebUser", "refreshWebSession", "Idempotency-Key",
+        "field_errors", "CursorPageMetadata",
+    ):
+        if marker not in generated_text:
+            failures.append(f"Generated frontend API types are missing {marker}")
+
+    if failures:
+        for failure in failures:
+            print(f"ERROR: {failure}")
+        return 1
+    print("OpenAPI contract and generated types: PASS")
     return 0
 
 

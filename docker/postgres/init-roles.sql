@@ -61,11 +61,11 @@ BEGIN
     WHERE relname = ANY(ARRAY[
         'accounts', 'categories', 'transactions', 'transfer_groups',
         'transaction_tags', 'transaction_tag_relations',
-        'account_balance_cache', 'user_preferences'])
+        'account_balance_cache', 'user_preferences', 'request_idempotency'])
       AND relrowsecurity
       AND relforcerowsecurity;
-    IF tenant_tables <> 8 THEN
-        RAISE EXCEPTION 'expected 8 ENABLE/FORCE RLS tenant tables, got %',
+    IF tenant_tables <> 9 THEN
+        RAISE EXCEPTION 'expected 9 ENABLE/FORCE RLS tenant tables, got %',
             tenant_tables;
     END IF;
 END

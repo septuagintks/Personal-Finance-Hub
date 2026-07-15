@@ -1,533 +1,244 @@
-# Personal Finance Hub - Frontend Architecture & Data Synergy
+# Personal Finance Hub 前端设计
 
-Version: 1.0
-
-Frontend: Vue 3 (Composition API) + Vite
-
-UI Framework: Element Plus
-
-Charts: ECharts
-
-Language: TypeScript (Strict Mode)
+Version: 2.0
+Product Name: `Candy's Ledger` (Tentative)
+Frontend: Vue 3 + TypeScript Strict + Vite
+Status: Approved
 
 ---
 
-## 1. 架构定位与技术栈规范
+## 1. 定位与命名
 
-前端架构同样需要遵循关注点分离原则。我们采用经典的 **Store（状态） - Service（API 封装） - View（页面） - Component（无状态组件）** 四层架构。
+前端把 Phase 1 后端能力组织为可日常使用的个人财务产品。`Personal Finance Hub (PFH)` 保持仓库、工程、架构、API 和内部命名；`Candy's Ledger` 是暂定的面向用户产品名。
 
-### 1.1 核心依赖
-
-- **核心框架**：Vue 3 (`<script setup>` 语法糖)。
-- **状态管理**：Pinia（取代 Vuex，提供完美的 TS 类型推断）。
-- **网络请求**：Axios（配置全局拦截器）。
-- **精度计算**：`decimal.js` 或 `bignumber.js`（**极其重要**，前端严禁使用原生 `Number` 进行金额加减乘除）。
-- **路由管理**：Vue Router 4。
+- 产品名从单一品牌配置读取，用于公开落地页、认证页、浏览器标题和应用 Shell。
+- 后续改名不得修改 API 路径、数据库对象、C++ namespace 或内部模块名。
+- 首个可运行前端入口落地时，根目录 `README.md` 才注明产品名。
+- 登录后直接进入用户默认工作页，不用营销内容阻断核心流程。
 
 ---
 
-## 2. 核心规约：前后端数据协同防御
+## 2. 技术基线
 
-金融系统的前端不能仅仅是一个“展示层”，它必须是数据精度的第一道防线。
+| 类别 | 固定选择 |
+| ---- | -------- |
+| Runtime | Node.js 24 LTS，版本以仓库 `.node-version` 为准 |
+| Package Manager | `pnpm`，版本以根 `packageManager` 为准 |
+| Framework | Vue 3 Composition API + `<script setup>` |
+| Build | Vite |
+| Language | TypeScript Strict |
+| Router / State | Vue Router 4 / Pinia |
+| UI / Icons | Element Plus / Lucide Vue Next |
+| Charts | ECharts，按需加载 |
+| Decimal | `decimal.js` |
+| HTTP | Axios |
+| Contract | OpenAPI 3.1 + `openapi-typescript` 生成类型 |
+| Test | Vitest、Vue Test Utils、MSW、Playwright、axe-core |
 
-### 2.1 精度丢失防御 (The String-Only Rule)
+只提交 `pnpm-lock.yaml`，不得混用 npm、Yarn 或第二份 lockfile。生成的 API 类型位于 `frontend/src/generated/`，不得手工编辑。
 
-JavaScript 原生数字使用 IEEE 754 双精度浮点数，超过 15 位有效数字或在进行小数运算时（如 `0.1 + 0.2`）会产生精度丢失。
+---
 
-- **规约**：后端 API 返回的所有金额字段（`amount`, `balance`, `rate`）均为 **String** 格式。
-- **规约**：前端表单提交给后端的所有金额字段，也必须序列化为 **String**。
-- **规约**：前端组件内部如果需要计算（如计算两笔明细的总和），必须使用 `decimal.js`。
+## 3. 运行拓扑
 
-```typescript
-// 错误示范 (原生 JS)
-const total = parseFloat(income) - parseFloat(expense); // 危险！
-
-// 正确示范 (使用 decimal.js)
-import Decimal from "decimal.js";
-const total = new Decimal(income).minus(new Decimal(expense)).toString();
+```text
+Browser
+   -> Same-origin Web Edge
+       -> static Vue assets
+       -> /api/* reverse proxy
+           -> Drogon Presentation -> Application -> Domain
 ```
 
-### 2.2 全局 HTTP 状态码拦截 (Axios Interceptors)
+- 开发环境由 Vite 代理 `/api`；生产环境由 non-root Nginx 提供静态资源并反向代理 API。
+- Web 与 API 默认同源并使用 HTTPS，不开放宽泛 CORS。
+- 浏览器不直接访问 PostgreSQL、汇率 Provider、Outbox 或 Scheduler。
+- 前端不复制金融、汇率、报表、权限或事务规则，后端响应是最终事实。
 
-配合《10_REST_API_Design.md》，前端通过 Axios 拦截器将后端的 `std::expected` 错误映射为全局 UI 提示。
+---
 
-```typescript
-// src/utils/http.ts
-import axios from "axios";
-import { ElMessage } from "element-plus";
-import { useAuthStore } from "@/stores/auth";
+## 4. 代码边界
 
-const http = axios.create({ baseURL: "/api/v1" });
+```text
+View -> Feature Component -> Store/Composable -> API Service -> Generated Types
+```
 
-http.interceptors.response.use(
-  (response) => response.data,
-  (error) => {
-    const status = error.response?.status;
-    const data = error.response?.data;
+| 层次 | 职责 | 禁止事项 |
+| ---- | ---- | -------- |
+| View | 路由参数、页面级加载与功能编排 | 直接拼 API URL 或实现金融计算 |
+| Feature Component | 一个业务交互及其可复用子组件 | 隐式访问全局状态、复制权限规则 |
+| Store / Composable | 会话、偏好、公共元数据和跨组件流程 | 长期缓存用户财务明细 |
+| API Service | 请求、取消、认证、TraceId 和错误映射 | 手写重复 DTO、吞掉服务端错误 |
+| Generated Types | OpenAPI 的 TypeScript 投影 | 手工修改生成文件 |
 
-    switch (status) {
-      case 401:
-        useAuthStore().logout();
-        ElMessage.error("登录已过期，请重新登录");
-        break;
-      case 422:
-        // 领域规则冲突 (DomainRuleViolation)
-        ElMessage.warning(`操作失败: ${data.message}`);
-        break;
-      case 404:
-        ElMessage.info("请求的数据不存在");
-        break;
-      case 500:
-        ElMessage.error("服务器繁忙，请稍后再试");
-        break;
-      default:
-        ElMessage.error(data?.message || "网络请求异常");
-    }
-    return Promise.reject(error);
-  },
-);
+`frontend/src` 使用以下稳定目录：
+
+```text
+app/          应用初始化、品牌和全局插件
+router/       路由与访问守卫
+views/        路由页面
+features/     纵向业务切片
+components/   无业务所有权的共享组件
+stores/       Pinia stores
+services/     HTTP 与 API adapters
+generated/    OpenAPI 生成类型
+i18n/         zh-CN / en-US 文案
+styles/       tokens、reset 和全局样式
+test/         test setup、MSW 与 fixtures
 ```
 
 ---
 
-## 3. 状态管理设计 (Pinia Stores)
+## 5. API 与会话
 
-我们将高频使用且不易变动的数据放入全局状态，减少重复的 HTTP 请求。
+### 5.1 契约
 
-### 3.1 前端静态元数据缓存策略 (Frontend Static Metadata Caching)
+- OpenAPI operation 必须有唯一 `operationId`。
+- API DTO 从 OpenAPI 生成，生成结果漂移会使质量门禁失败。
+- 列表使用稳定游标和确定性排序，不把全量流水加载到浏览器。
+- 金融创建请求携带 `Idempotency-Key`；同一操作意图重试时复用该键。
+- 非幂等写请求不会被 Axios 自动重试。
+- `409` 表达幂等冲突或版本冲突，前端必须保留用户输入并显示可恢复动作。
 
-诸如支持的货币元数据列表 (`/api/v1/currencies`)、用户的偏好设置、分类树等数据，属于**低频修改、高频查询**的数据。为了极大减少对 Drogon 后端 API 的并发压力，前端设计中采用**客户端缓存 + 协商缓存**策略。
+### 5.2 Web 会话
 
-#### 3.1.1 Pinia + LocalStorage 协同设计
+- Web 前端只调用 `/api/v1/web/auth/*`。
+- Access Token 只存在于当前页面内存，不写入 `localStorage`、`sessionStorage` 或 IndexedDB。
+- Refresh Token 只存在于 `HttpOnly`、`Secure`、`SameSite=Strict` Cookie，JavaScript 不可读取。
+- 应用启动执行一次静默 refresh；单标签页并发 401 共享同一 Promise。
+- 跨标签页使用 Web Locks（不可用时使用租约式 localStorage mutex）串行 refresh，并通过 `BroadcastChannel` 只广播会话状态，不广播 Token。
+- Logout、reuse detection 或 session 撤销会清除内存 Token、用户 Store 和路由状态。
+- 现有 `/api/v1/auth/*` JSON Token API 只服务非浏览器调用方，Web 前端不得使用。
 
-在 Pinia Store 初始化时优先从客户端本地缓存（`localStorage` 或 `sessionStorage`）读取，并规定在何时触发强制刷新。
+### 5.3 错误
 
-```typescript
-// src/stores/metadata.ts
-import { defineStore } from "pinia";
-import { ref } from "vue";
-import http from "@/utils/http";
-
-interface CacheWrapper<T> {
-  version: string;
-  timestamp: number;
-  data: T;
-}
-
-export const useMetadataStore = defineStore("metadata", () => {
-  const currencies = ref<any[]>([]);
-  const CACHE_LIFETIME = 24 * 60 * 60 * 1000; // 24小时缓存有效期
-
-  async function fetchCurrencies(forceRefresh = false) {
-    const cached = localStorage.getItem("cache_currencies");
-    if (cached && !forceRefresh) {
-      const wrapper: CacheWrapper<any[]> = JSON.parse(cached);
-      // 检查缓存是否过期
-      if (Date.now() - wrapper.timestamp < CACHE_LIFETIME) {
-        currencies.value = wrapper.data;
-        return;
-      }
-    }
-
-    // 缓存失效或强制刷新，请求后端
-    try {
-      const data = await http.get("/api/v1/currencies");
-      currencies.value = data;
-
-      const wrapper: CacheWrapper<any[]> = {
-        version: "1.0", // 可配合后端 ETag/Version
-        timestamp: Date.now(),
-        data,
-      };
-      localStorage.setItem("cache_currencies", JSON.stringify(wrapper));
-    } catch (error) {
-      // 容灾：如果后端挂了，继续使用过期的本地缓存
-      if (cached) {
-        const wrapper = JSON.parse(cached);
-        currencies.value = wrapper.data;
-      }
-    }
-  }
-
-  return { currencies, fetchCurrencies };
-});
-```
-
-#### 3.1.2 主动失效与刷新时机
-
-前端必须在以下**关键生命周期节点**主动清除缓存并重新拉取：
-
-1. **用户登录成功时**：清除所有本地缓存，防止 A 用户的分类树/偏好泄露给 B 用户。
-2. **用户执行写操作后**：
-   - 用户新增/修改分类 $\rightarrow$ 触发 `fetchCategories(true)` 强制刷新。
-   - 用户修改个人偏好（如基准货币） $\rightarrow$ 触发 `useAuthStore().updatePreference()` 并刷新相关缓存。
-3. **后端 ETag 机制**：
-   Drogon 后端对静态元数据接口开启 `ETag` 支持。前端 Axios 默认支持浏览器缓存，当后端返回 `304 Not Modified` 时，前端直接使用浏览器本地缓存，不占用 Drogon 的业务处理线程。
-
-### 3.2 认证与偏好 Store (`useAuthStore`)
-
-存储 JWT Token 和用户偏好。基准货币决定所有报表的显示单位，其他偏好决定首页、主题、日期和数字展示。
+API Client 将错误统一投影为：
 
 ```typescript
-// src/stores/auth.ts
-import { defineStore } from "pinia";
-import { ref } from "vue";
-
-type ThemeMode = "system" | "light" | "dark";
-type DefaultHomePage = "dashboard" | "transactions" | "reports" | "accounts";
-type ReportPeriod =
-  | "current_month"
-  | "last_month"
-  | "last_3_months"
-  | "current_year"
-  | "custom";
-
-export const useAuthStore = defineStore("auth", () => {
-  const token = ref<string | null>(localStorage.getItem("jwt"));
-  const baseCurrency = ref<string>("CNY"); // 从后端 /api/v1/users/me 获取
-  const locale = ref<string>("zh-CN");
-  const timezone = ref<string>("Asia/Shanghai");
-  const dateFormat = ref<string>("YYYY-MM-DD");
-  const numberFormat = ref<string>("1,234.56");
-  const theme = ref<ThemeMode>("system");
-  const defaultHomePage = ref<DefaultHomePage>("dashboard");
-  const defaultReportPeriod = ref<ReportPeriod>("current_month");
-
-  function setToken(newToken: string) {
-    token.value = newToken;
-    localStorage.setItem("jwt", newToken);
-  }
-
-  return {
-    token,
-    baseCurrency,
-    locale,
-    timezone,
-    dateFormat,
-    numberFormat,
-    theme,
-    defaultHomePage,
-    defaultReportPeriod,
-    setToken,
-  };
-});
-```
-
-### 3.3 账户缓存 Store (`useAccountStore`)
-
-由于记账表单、转账表单、过滤栏都需要选择账户，账户列表是最需要被全局缓存的实体。
-
-```typescript
-// src/stores/account.ts
-export const useAccountStore = defineStore("account", () => {
-  const accounts = ref<Account[]>([]);
-
-  async function fetchAccounts() {
-    if (accounts.value.length === 0) {
-      accounts.value = await http.get("/accounts");
-    }
-  }
-
-  function getAccountById(id: number) {
-    return accounts.value.find((a) => a.id === id);
-  }
-
-  return { accounts, fetchAccounts, getAccountById };
-});
-```
-
-### 3.4 分类 Store (`useCategoryStore`)
-
-分类树是记账表单、筛选器和分类管理页的共享数据。
-
-```typescript
-export const useCategoryStore = defineStore("category", () => {
-  const incomeTree = ref<CategoryNode[]>([]);
-  const expenseTree = ref<CategoryNode[]>([]);
-
-  async function fetchTree(board: "income" | "expense") {
-    const data = await http.get(`/categories?board=${board}`);
-    if (board === "income") incomeTree.value = data;
-    if (board === "expense") expenseTree.value = data;
-  }
-
-  async function createCategory(payload: {
-    board: "income" | "expense";
-    name: string;
-    parentId?: number | null;
-    templateId?: number | null;
-  }) {
-    await http.post("/categories", payload);
-    await fetchTree(payload.board);
-  }
-
-  async function deleteCategory(id: number, board: "income" | "expense") {
-    await http.delete(`/categories/${id}`);
-    await fetchTree(board);
-  }
-
-  return { incomeTree, expenseTree, fetchTree, createCategory, deleteCategory };
-});
-```
-
-交互规则：
-
-1. 记账表单根据交易类型只展示对应 board 的分类
-2. 用户删除预设分类时，只删除自己的分类副本
-3. 分类树支持拖拽排序时，只提交同一 board 内的排序结果
-
-### 3.5 标签 Store (`useTagStore`)
-
-```typescript
-export const useTagStore = defineStore("tag", () => {
-  const tags = ref<Tag[]>([]);
-
-  async function fetchTags() {
-    tags.value = await http.get("/tags");
-  }
-
-  async function createTag(name: string) {
-    await http.post("/tags", { name });
-    await fetchTags();
-  }
-
-  async function attach(transactionId: number, tagIds: number[]) {
-    await http.put(`/transactions/${transactionId}/tags`, { tagIds });
-  }
-
-  return { tags, fetchTags, createTag, attach };
-});
-```
-
-Tag 作为筛选和标记维度，不参与金额计算。
-
-### 3.6 偏好设置 Store 数据流
-
-`useAuthStore` 在登录后调用：
-
-```typescript
-async function fetchPreferences() {
-  const preference = await http.get("/users/me/preferences");
-  baseCurrency.value = preference.baseCurrency;
-  locale.value = preference.locale;
-  timezone.value = preference.timezone;
-  dateFormat.value = preference.dateFormat;
-  numberFormat.value = preference.numberFormat;
-  theme.value = preference.theme;
-  defaultHomePage.value = preference.defaultHomePage;
-  defaultReportPeriod.value = preference.defaultReportPeriod;
-}
-
-async function updatePreferences(payload: UserPreferenceDTO) {
-  await http.put("/users/me/preferences", payload);
-  await fetchPreferences();
+interface ApiError {
+  errorCode: string;
+  message: string;
+  traceId: string;
+  fieldErrors: Record<string, string>;
+  retryable: boolean;
 }
 ```
 
-偏好变更后必须刷新：
-
-- Dashboard Summary
-- Report filters
-- 金额和日期格式化组件
-- 主题状态
-
-### 3.7 货币元数据 Store
-
-```typescript
-export const useCurrencyStore = defineStore("currency", () => {
-  const currencies = ref<CurrencyMetadata[]>([]);
-
-  async function fetchCurrencies() {
-    if (currencies.value.length === 0) {
-      currencies.value = await http.get("/currencies");
-    }
-  }
-
-  function formatAmount(amount: string, code: string) {
-    const metadata = currencies.value.find((item) => item.code === code);
-    const precision = metadata?.precision ?? 2;
-    const symbol = metadata?.symbol ?? code;
-    return `${symbol}${new Decimal(amount).toFixed(precision)}`;
-  }
-
-  return { currencies, fetchCurrencies, formatAmount };
-});
-```
+- 表单字段错误显示在对应输入处，页面级错误保留 TraceId。
+- `401` 先进入 single-flight refresh；refresh 失败才退出会话。
+- `403` 不改写为 404；`404` 用于资源不存在或不属于当前用户。
+- `500` / `502` 只展示脱敏消息，可重试性以后端字段为准。
 
 ---
 
-## 4. 复杂交互：跨币种转账动态表单
+## 6. 金额、汇率与时间
 
-转账表单是前端最复杂的业务组件，因为它需要根据 `TransferMode`（出账+汇率、出账+入账、入账+汇率）动态锁定（Disable）其中一个输入框，并触发联动计算。
-
-### 4.1 动态联动逻辑设计 (Vue 3 Composition API)
-
-```vue
-<script setup lang="ts">
-import { ref, computed, watch } from "vue";
-import Decimal from "decimal.js";
-
-// 表单状态
-const sourceAmount = ref<string>("");
-const targetAmount = ref<string>("");
-const exchangeRate = ref<string>("");
-const transferMode = ref<
-  "OutgoingAndRate" | "OutgoingAndIncoming" | "IncomingAndRate"
->("OutgoingAndRate");
-
-// 监听模式切换，清理不需要的字段以防脏数据提交
-watch(transferMode, (newMode) => {
-  if (newMode === "OutgoingAndRate") targetAmount.value = "";
-  if (newMode === "OutgoingAndIncoming") exchangeRate.value = "";
-  if (newMode === "IncomingAndRate") sourceAmount.value = "";
-});
-
-// 前端实时预览推导结果（仅作 UI 提示，最终以 C++ 后端推导为准）
-const previewTargetAmount = computed(() => {
-  if (
-    transferMode.value === "OutgoingAndRate" &&
-    sourceAmount.value &&
-    exchangeRate.value
-  ) {
-    try {
-      return new Decimal(sourceAmount.value)
-        .times(new Decimal(exchangeRate.value))
-        .toDP(2)
-        .toString();
-    } catch {
-      return "...";
-    }
-  }
-  return targetAmount.value;
-});
-</script>
-
-<template>
-  <el-form>
-    <el-radio-group v-model="transferMode">
-      <el-radio-button label="OutgoingAndRate">已知出账与汇率</el-radio-button>
-      <el-radio-button label="OutgoingAndIncoming"
-        >已知出账与入账</el-radio-button
-      >
-    </el-radio-group>
-
-    <el-form-item label="出账金额 (Source)">
-      <el-input
-        v-model="sourceAmount"
-        :disabled="transferMode === 'IncomingAndRate'"
-      />
-    </el-form-item>
-
-    <el-form-item label="入账金额 (Target)">
-      <el-input
-        v-model="targetAmount"
-        :disabled="transferMode === 'OutgoingAndRate'"
-        :placeholder="previewTargetAmount"
-      />
-    </el-form-item>
-
-    <el-divider>附加调整</el-divider>
-    <el-form-item label="中转手续费 (可选)">
-      <el-input v-model="feeAmount" placeholder="如：15.00" />
-    </el-form-item>
-  </el-form>
-</template>
-```
+- 金额和汇率在 API、Store 与组件属性中始终保持十进制字符串。
+- 业务预览使用 `decimal.js`；禁止使用 `Number`、`parseFloat` 或隐式数值转换进行财务计算。
+- 图表可以把后端已聚合值转换为有限数值用于像素映射，Tooltip、表格和导出继续使用原始字符串。
+- 转账派生值仅作预览，最终金额、汇率和 Half-Even 舍入以后端响应为准。
+- 日期按用户 `locale`、`timezone` 和 `dateFormat` 显示，不手写固定 UTC offset。
+- Dashboard 月份、报表窗口和历史汇率选择全部由后端确定。
+- 汇率不可用时不显示零、不沿用旧总计，也不拼装部分报表。
 
 ---
 
-## 5. 报表展示层设计 (ECharts 协同)
+## 7. 状态与缓存
 
-报表页面直接消费《09_Reporting_and_Analytics_Design.md》提供的聚合 DTO。前端无需关心汇率换算，只需关注渲染。
+### 7.1 可持久化
 
-### 5.1 响应式图表封装
+浏览器持久化仅允许：
 
-为了防止 ECharts 在窗口缩放时变形，将其封装为一个通用的 Vue 组件。
+- 公共货币元数据及 ETag。
+- 不含用户身份的界面选择，例如用户主动关闭的介绍提示。
+- 跨标签页 refresh mutex 的短期租约元数据，不含 Token。
 
-```vue
-<script setup lang="ts">
-import { onMounted, ref, watch } from "vue";
-import * as echarts from "echarts";
+### 7.2 仅内存
 
-const props = defineProps<{
-  data: { period: string; income: string; expense: string }[];
-  baseCurrency: string;
-}>();
+- Access Token 和认证用户身份。
+- 用户偏好、账户、分类、标签和报表。
+- 表单草稿、分页游标和错误对象。
 
-const chartRef = ref<HTMLElement | null>(null);
-let chartInstance: echarts.ECharts | null = null;
-
-const renderChart = () => {
-  if (!chartInstance) chartInstance = echarts.init(chartRef.value!);
-
-  const option = {
-    tooltip: { trigger: "axis" },
-    legend: { data: ["收入", "支出"] },
-    xAxis: { type: "category", data: props.data.map((d) => d.period) },
-    yAxis: { type: "value", name: `金额 (${props.baseCurrency})` },
-    series: [
-      {
-        name: "收入",
-        type: "bar",
-        itemStyle: { color: "#67C23A" }, // Element Plus 成功绿
-        data: props.data.map((d) => parseFloat(d.income)), // ECharts 渲染必须用数字，此处转换是安全的，因为仅用于像素映射，不用于二次计算
-      },
-      {
-        name: "支出",
-        type: "bar",
-        itemStyle: { color: "#F56C6C" }, // Element Plus 危险红
-        data: props.data.map((d) => parseFloat(d.expense)),
-      },
-    ],
-  };
-  chartInstance.setOption(option);
-};
-
-// 监听数据变化，重新渲染
-watch(() => props.data, renderChart, { deep: true });
-
-onMounted(() => {
-  renderChart();
-  window.addEventListener("resize", () => chartInstance?.resize());
-});
-</script>
-
-<template>
-  <div ref="chartRef" style="width: 100%; height: 400px;"></div>
-</template>
-```
-
-### 5.2 首页 Dashboard 数据流
-
-首页直接请求聚合接口：
-
-```typescript
-const dashboard = await http.get("/reports/dashboard-summary", {
-  params: {
-    startDate,
-    endDate,
-  },
-});
-```
-
-首页组件只消费 `DashboardSummaryDTO`，不在前端拼装净值、月收入、月支出和 Top 分类。
-这样可以避免多个接口在首页竞争加载状态，也减少汇率策略不一致的风险。
+登录、Logout、session 撤销和用户切换必须清空全部用户级状态。写操作成功后只失效受影响资源；偏好中的基准币种或时区变化会使所有报表缓存失效。
 
 ---
 
-## 6. 页面结构补充
+## 8. 页面与交互
 
-必须提供以下工作页：
+| 页面 | 核心职责 |
+| ---- | -------- |
+| Public Landing | 使用产品名建立身份并进入注册/登录，不伪装已交付能力 |
+| Login / Register | 安全会话、字段错误和密码管理器兼容 |
+| Dashboard | 净资产、当月收支、账户分布和 Top 分类 |
+| Accounts | 账户生命周期、余额、归档、恢复和危险删除 |
+| Transactions | 游标分页、筛选、创建、详情、更正和软删除 |
+| Transfers | 三种模式、手续费、聚合详情、更正和软删除 |
+| Reports | 趋势、分类/账户/标签维度和服务端导出 |
+| Settings | 分类、标签和偏好 |
+| Maintenance | 当前用户审计和余额维护 |
+| Operations | `OPERATOR` 任务、Outbox 和 dead letter 状态 |
 
-- `CategorySettingsView`: 管理收入/支出分类树，支持新增、删除、启用预设
-- `TagSettingsView`: 管理标签和交易标签绑定
-- `PreferenceSettingsView`: 管理基准货币、主题、日期格式、默认首页、默认报表周期
-- `DashboardView`: 消费 `DashboardSummaryDTO`
-- `ReportView`: 使用 `ReportFilterDTO` 查询趋势、分类、标签和账户维度报表
+- Desktop 优先高频扫描和录入，Mobile 保证核心记账、转账和查询可完成。
+- 模式选择使用 segmented control，二元设置使用 toggle/checkbox，工具按钮使用 Lucide icon 与 Tooltip。
+- 危险操作显示影响范围并要求明确确认，不能只依赖按钮颜色。
+- 图表提供同数据表格或可访问摘要。
+- 所有关键路径支持键盘操作并满足 WCAG 2.2 AA。
 
-页面约束：
+---
 
-1. 金额展示统一走 `useCurrencyStore.formatAmount`
-2. 日期展示统一走用户偏好中的 `dateFormat` 和 `timezone`
-3. 分类选择器必须按收入/支出 board 隔离
-4. 交易详情页展示 Tag，但不把 Tag 当成分类替代品
+## 9. 威胁模型
+
+| 威胁 | 主要控制 | 验收证据 |
+| ---- | -------- | -------- |
+| XSS 读取 Token | Access Token 仅内存、Refresh HttpOnly、严格 CSP、无 `v-html` 用户输入 | 浏览器存储与 CSP E2E |
+| CSRF | SameSite=Strict、同源 Origin / Fetch Metadata、Web auth 独立路径 | 跨站 POST 拒绝测试 |
+| Token rotation 竞态 | 单页 single-flight、跨标签页 refresh mutex | 并发 refresh E2E |
+| 横向越权 | JWT UserId、Application ownership、参数化 SQL、FORCE RLS | 两用户 API/PostgreSQL 测试 |
+| 重复财务写入 | 持久化 `Idempotency-Key`、同事务业务结果 | 超时与并发重试测试 |
+| 浮点精度损失 | Decimal string + `decimal.js`，后端最终计算 | 大数与边界测试 |
+| CSV formula injection | 文本字段转义，金额按验证后的 Decimal string 导出 | 导出 fixture |
+| 运维提权 | 服务端持久化角色、Operator Filter、部署网络保护探针 | 伪造 JWT role 测试 |
+| 敏感信息泄漏 | 脱敏错误、TraceId、无 Token 日志、构建产物扫描 | 静态与 runtime 扫描 |
+
+---
+
+## 10. 浏览器与性能预算
+
+### 10.1 浏览器矩阵
+
+- Playwright 随锁文件固定的 Chromium、Firefox 和 WebKit。
+- Desktop 视口至少覆盖 1440x900 与 1280x720。
+- Mobile 至少覆盖 390x844 与 360x800。
+- 目标是当前两个稳定大版本；不支持 Internet Explorer 或旧版 EdgeHTML。
+
+### 10.2 参考数据集
+
+- Daily：10,000 条流水、20 个账户、200 个分类/标签组合。
+- Stress：100,000 条流水、50 个账户、500 个分类/标签组合。
+- 两套数据都包含跨币种、Transfer、signed Adjustment、DST 和缺失汇率场景。
+
+### 10.3 初始预算
+
+| 指标 | Daily | Stress |
+| ---- | ----- | ------ |
+| 流水第一页 API p95 | <= 300 ms | <= 500 ms |
+| Dashboard API p95 | <= 500 ms | <= 800 ms |
+| 筛选后首屏可交互 | <= 1.0 s | <= 1.5 s |
+| CSV 首字节 | <= 2 s | <= 5 s |
+| Public Landing LCP | <= 2.5 s | 不适用 |
+| INP / CLS | <= 200 ms / <= 0.1 | <= 300 ms / <= 0.1 |
+| 初始 JS gzip | <= 250 KiB | 同左 |
+
+预算在 P2-S01 固定，在 P2-S11 以目标 Linux/Docker 环境复核。调整预算必须保留测量条件、用户影响和明确理由。
+
+---
+
+## 11. 持续验收
+
+- `pnpm install --frozen-lockfile`、typecheck、lint、unit、component 和 production build。
+- OpenAPI 生成文件无漂移。
+- Playwright 当前切片 E2E；Release Candidate 执行三浏览器全量。
+- axe 自动检查加键盘、焦点、名称与对比度人工检查。
+- 金额字符串、时区、用户切换、401、409、422、500、离线和取消状态。
+- 构建产物、浏览器存储、日志和 source map 无 Token、Cookie、密码或私有配置。
+
+测试矩阵与合并门禁见 [测试策略](16_Testing_Strategy.md)，开发顺序见 [Phase 2 开发计划](../Development_Plans/Phase_2/Phase_2_Development_Plan.md)。

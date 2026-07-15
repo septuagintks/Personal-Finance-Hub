@@ -2,6 +2,7 @@
 
 #include "pfh/application/services/finance_application_service.h"
 
+#include "pfh/application/idempotency.h"
 #include "pfh/application/use_cases/account_query_use_cases.h"
 #include "pfh/application/use_cases/delete_account_use_case.h"
 #include "pfh/application/use_cases/create_transaction_use_case.h"
@@ -14,6 +15,59 @@
 #include <utility>
 
 namespace pfh::application {
+
+namespace {
+
+void append_optional_time(
+    std::string& output,
+    const std::optional<std::chrono::system_clock::time_point>& value) {
+    append_canonical_field(
+        output, value.has_value() ? encode_idempotency_time(*value) : "null");
+}
+
+[[nodiscard]] std::string transaction_fingerprint_input(
+    const CreateTransactionCommand& command) {
+    std::string result;
+    result.reserve(256 + command.description.size());
+    append_canonical_field(result, "create_transaction:v1");
+    append_canonical_field(result, command.user_id.to_string());
+    append_canonical_field(result, command.account_id.to_string());
+    append_canonical_field(result, std::to_string(static_cast<int>(command.type)));
+    append_canonical_field(result, command.amount);
+    append_canonical_field(result, command.currency_code);
+    append_canonical_field(result, command.description);
+    append_canonical_field(
+        result, command.category_id.has_value()
+            ? command.category_id->to_string() : "null");
+    append_optional_time(result, command.occurred_at);
+    return result;
+}
+
+[[nodiscard]] std::string transfer_fingerprint_input(
+    const CreateTransferCommand& command) {
+    std::string result;
+    result.reserve(384 + command.description.size());
+    append_canonical_field(result, "create_transfer:v1");
+    append_canonical_field(result, command.user_id.to_string());
+    append_canonical_field(result, command.source_account_id.to_string());
+    append_canonical_field(result, command.target_account_id.to_string());
+    append_canonical_field(result, std::to_string(static_cast<int>(command.mode)));
+    append_canonical_field(result, command.outgoing_amount);
+    append_canonical_field(result, command.incoming_amount);
+    append_canonical_field(result, command.rate);
+    append_canonical_field(result, command.fee_amount.value_or("null"));
+    append_canonical_field(
+        result, command.fee_source.has_value()
+            ? std::to_string(static_cast<int>(*command.fee_source)) : "null");
+    append_canonical_field(
+        result, command.fee_account_id.has_value()
+            ? command.fee_account_id->to_string() : "null");
+    append_canonical_field(result, command.description);
+    append_optional_time(result, command.occurred_at);
+    return result;
+}
+
+} // namespace
 
 Result<std::unique_ptr<IRequestScope>> FinanceApplicationService::open_scope(
     domain::UserId user_id) {
@@ -169,6 +223,24 @@ Result<TransactionDto> FinanceApplicationService::create_transaction(
         .execute(command);
 }
 
+Result<TransactionDto> FinanceApplicationService::create_transaction(
+    const CreateTransactionCommand& command,
+    std::string_view idempotency_key) {
+    auto fingerprint = request_hasher_.sha256(
+        transaction_fingerprint_input(command));
+    if (!fingerprint) return err(fingerprint.error());
+    auto scope = open_scope(command.user_id);
+    if (!scope) return err(scope.error());
+    return CreateTransactionUseCase(
+        (*scope)->accounts(),
+        (*scope)->categories(),
+        (*scope)->transactions(),
+        (*scope)->unit_of_work(),
+        &(*scope)->idempotency())
+        .execute(command, IdempotencyRequest{
+            std::string(idempotency_key), *fingerprint, clock_.now()});
+}
+
 VoidResult FinanceApplicationService::delete_transaction(
     const DeleteTransactionCommand& command) {
     auto scope = open_scope(command.user_id);
@@ -189,6 +261,23 @@ Result<TransferResultDto> FinanceApplicationService::create_transfer(
         (*scope)->transactions(),
         (*scope)->unit_of_work())
         .execute(command);
+}
+
+Result<TransferResultDto> FinanceApplicationService::create_transfer(
+    const CreateTransferCommand& command,
+    std::string_view idempotency_key) {
+    auto fingerprint = request_hasher_.sha256(
+        transfer_fingerprint_input(command));
+    if (!fingerprint) return err(fingerprint.error());
+    auto scope = open_scope(command.user_id);
+    if (!scope) return err(scope.error());
+    return CreateTransferUseCase(
+        (*scope)->accounts(),
+        (*scope)->transactions(),
+        (*scope)->unit_of_work(),
+        &(*scope)->idempotency())
+        .execute(command, IdempotencyRequest{
+            std::string(idempotency_key), *fingerprint, clock_.now()});
 }
 
 Result<TransferResultDto> FinanceApplicationService::get_transfer(

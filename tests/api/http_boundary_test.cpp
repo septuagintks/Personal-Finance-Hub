@@ -1,6 +1,7 @@
 // Personal Finance Hub - HTTP Boundary Tests
 
 #include "pfh/presentation/http/http_response_mapper.h"
+#include "pfh/presentation/http/concurrency.h"
 #include "pfh/presentation/http/json_request_parser.h"
 #include "pfh/presentation/http/time_codec.h"
 
@@ -59,6 +60,38 @@ TEST(HttpBoundaryTest, InfrastructureErrorResponseDoesNotLeakDetails) {
     const auto body = nlohmann::json::parse(response.body);
     EXPECT_EQ(body["message"], "An unexpected error occurred");
     EXPECT_EQ(body["trace_id"], "trace-safe");
+    EXPECT_FALSE(body["retryable"].get<bool>());
+    EXPECT_TRUE(body["field_errors"].empty());
+}
+
+TEST(HttpBoundaryTest, StructuredFieldErrorsRemainControlledAndMachineReadable) {
+    const auto response = HttpResponseMapper::error(
+        Error::field_validation(
+            "amount", "invalid_decimal", "amount must be a decimal string"),
+        "trace-field");
+    ASSERT_EQ(response.status, 400);
+    const auto body = nlohmann::json::parse(response.body);
+    ASSERT_EQ(body["field_errors"].size(), 1U);
+    EXPECT_EQ(body["field_errors"][0]["field"], "amount");
+    EXPECT_EQ(body["field_errors"][0]["code"], "invalid_decimal");
+    EXPECT_FALSE(body["retryable"].get<bool>());
+}
+
+TEST(HttpBoundaryTest, IfMatchAcceptsOneStrongVersionAndRejectsAmbiguity) {
+    const auto version = parse_if_match_version("\"42\"");
+    ASSERT_TRUE(version.has_value());
+    EXPECT_EQ(*version, 42);
+    EXPECT_EQ(version_etag(*version), "\"42\"");
+
+    for (const auto invalid : {
+             "", "42", "W/\"42\"", "\"0\"", "\"01\"",
+             "\"42\", \"43\"", "*"}) {
+        const auto result = parse_if_match_version(invalid);
+        ASSERT_FALSE(result.has_value()) << invalid;
+        EXPECT_EQ(result.error().code, ErrorCode::ValidationError);
+        ASSERT_EQ(result.error().field_errors.size(), 1U);
+        EXPECT_EQ(result.error().field_errors.front().field, "If-Match");
+    }
 }
 
 TEST(HttpBoundaryTest, OversizedUnsignedIdReturns400ClassErrorInsteadOfThrowing) {

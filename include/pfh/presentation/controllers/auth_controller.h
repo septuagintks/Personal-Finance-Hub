@@ -15,6 +15,10 @@ public:
     [[nodiscard]] HttpResponse login(const HttpRequest& request);
     [[nodiscard]] HttpResponse refresh(const HttpRequest& request);
     [[nodiscard]] HttpResponse logout(const HttpRequest& request);
+    [[nodiscard]] HttpResponse web_register_user(const HttpRequest& request);
+    [[nodiscard]] HttpResponse web_login(const HttpRequest& request);
+    [[nodiscard]] HttpResponse web_refresh(const HttpRequest& request);
+    [[nodiscard]] HttpResponse web_logout(const HttpRequest& request);
 
 private:
     application::AuthService& auth_;
