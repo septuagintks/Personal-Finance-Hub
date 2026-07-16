@@ -236,7 +236,10 @@ TEST_F(PostgreSQLIntegrationTest, UnitOfWorkCommitsAndRollsBackBusinessWithOutbo
             committed_user = *created;
             committed.register_event(std::make_shared<SimpleDomainEvent>(
                 "UserCreated", "User", committed_user.to_string(),
-                R"({"source":"postgres-test"})"));
+                R"({"source":"postgres-test"})", sample_time()));
+            committed.register_event(std::make_shared<SimpleDomainEvent>(
+                "UserReady", "User", committed_user.to_string(),
+                R"({"ready":true})", sample_time() + 1us));
             auto read_your_writes = users.find_by_id(tx, committed_user);
             return read_your_writes
                 ? RepositoryVoidResult{}
@@ -246,7 +249,13 @@ TEST_F(PostgreSQLIntegrationTest, UnitOfWorkCommitsAndRollsBackBusinessWithOutbo
     EXPECT_EQ(scalar_count(database->admin, "SELECT count(*) FROM users"), 1);
     EXPECT_EQ(
         scalar_count(database->admin, "SELECT count(*) FROM domain_events_outbox"),
-        1);
+        2);
+    const auto committed_events = database->admin->execSqlSync(
+        "SELECT event_name, payload::text, occurred_at "
+        "FROM domain_events_outbox ORDER BY occurred_at");
+    ASSERT_EQ(committed_events.size(), 2U);
+    EXPECT_EQ(committed_events[0][0].as<std::string>(), "UserCreated");
+    EXPECT_EQ(committed_events[1][0].as<std::string>(), "UserReady");
 
     DrogonUnitOfWork action_error(database->request);
     auto rolled_back = action_error.execute_in_transaction(
@@ -283,7 +292,7 @@ TEST_F(PostgreSQLIntegrationTest, UnitOfWorkCommitsAndRollsBackBusinessWithOutbo
     EXPECT_EQ(scalar_count(database->admin, "SELECT count(*) FROM users"), 1);
     EXPECT_EQ(
         scalar_count(database->admin, "SELECT count(*) FROM domain_events_outbox"),
-        1);
+        2);
 }
 
 TEST_F(PostgreSQLIntegrationTest, RequestRoleRlsIsFailClosedAndPoolContextDoesNotLeak) {
@@ -346,6 +355,7 @@ TEST_F(PostgreSQLIntegrationTest, CoreRepositoriesRoundTripAndEnforceTenantIsola
     CategoryId root_id;
     CategoryId child_id;
     TagId tag_id;
+    TagId second_tag_id;
     TransactionId transaction_id;
     const auto now = sample_time();
     const std::string token_hash(64, 'a');
@@ -376,6 +386,10 @@ TEST_F(PostgreSQLIntegrationTest, CoreRepositoriesRoundTripAndEnforceTenantIsola
             auto tag = tags.save(tx, Tag(TagId{}, alice.user, "work"));
             if (!tag) return std::unexpected(tag.error());
             tag_id = *tag;
+            auto second_tag = tags.save(
+                tx, Tag(TagId{}, alice.user, "personal"));
+            if (!second_tag) return std::unexpected(second_tag.error());
+            second_tag_id = *second_tag;
 
             auto saved = transactions.save_single(
                 tx,
@@ -386,8 +400,13 @@ TEST_F(PostgreSQLIntegrationTest, CoreRepositoriesRoundTripAndEnforceTenantIsola
             if (!saved) return std::unexpected(saved.error());
             transaction_id = saved->id();
             auto related = tags.replace_transaction_tags(
-                tx, transaction_id, alice.user, {tag_id});
+                tx, transaction_id, alice.user, {tag_id, second_tag_id});
             if (!related) return std::unexpected(related.error());
+            if (related->size() != 2 || related->front().id() != tag_id ||
+                related->back().id() != second_tag_id) {
+                return std::unexpected(RepositoryError::database(
+                    "Batch tag replacement did not preserve input order"));
+            }
 
             auto audit = audits.append(
                 tx,
@@ -425,8 +444,9 @@ TEST_F(PostgreSQLIntegrationTest, CoreRepositoriesRoundTripAndEnforceTenantIsola
     EXPECT_EQ(*root, root_id);
     auto stored_tags = tags.find_by_transaction(transaction_id, alice.user);
     ASSERT_TRUE(stored_tags.has_value()) << stored_tags.error().message;
-    ASSERT_EQ(stored_tags->size(), 1U);
-    EXPECT_EQ(stored_tags->front().name(), "work");
+    ASSERT_EQ(stored_tags->size(), 2U);
+    EXPECT_EQ(stored_tags->front().name(), "personal");
+    EXPECT_EQ(stored_tags->back().name(), "work");
     auto stored_transaction = transactions.find_by_id(transaction_id);
     ASSERT_TRUE(stored_transaction.has_value()) << stored_transaction.error().message;
     EXPECT_EQ(stored_transaction->amount().to_string(), "-12.3456789 USD");
@@ -447,6 +467,10 @@ TEST_F(PostgreSQLIntegrationTest, AccountOptimisticLockAndBalanceCacheTrackSourc
     const auto ids = seed_user("alice");
     AccountRepositoryImpl accounts(database->request, ids.user);
     TransactionRepositoryImpl transactions(database->request, ids.user);
+
+    auto empty_balance = accounts.balance_of(ids.cash);
+    ASSERT_TRUE(empty_balance.has_value()) << empty_balance.error().message;
+    EXPECT_EQ(empty_balance->balance.to_string(), "0 USD");
 
     auto original = accounts.find_by_id(ids.cash);
     ASSERT_TRUE(original.has_value()) << original.error().message;
@@ -534,6 +558,36 @@ TEST_F(PostgreSQLIntegrationTest, AccountOptimisticLockAndBalanceCacheTrackSourc
     auto rebuilt = accounts.balance_of(ids.cash);
     ASSERT_TRUE(rebuilt.has_value()) << rebuilt.error().message;
     EXPECT_EQ(rebuilt->balance.to_string(), "751 USD");
+}
+
+TEST_F(PostgreSQLIntegrationTest, TransactionUserRangeIsHalfOpen) {
+    const auto ids = seed_user("alice");
+    TransactionRepositoryImpl transactions(database->request, ids.user);
+    DrogonUnitOfWork uow(database->request, ids.user);
+    const auto start = sample_time();
+    const auto end = start + 1h;
+    auto write = uow.execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            for (const auto& [account, at] :
+                 std::vector<std::pair<AccountId, Transaction::TimePoint>>{
+                     {ids.cash, start}, {ids.savings, end}}) {
+                auto saved = transactions.save_single(
+                    tx,
+                    Transaction(
+                        TransactionId{}, ids.user, account, money("1", "USD"),
+                        TransactionType::Income, at));
+                if (!saved) return std::unexpected(saved.error());
+            }
+            return {};
+        });
+    ASSERT_TRUE(write.has_value()) << write.error().message;
+
+    auto range = transactions.find_by_user_in_range(
+        ids.user, start, end);
+    ASSERT_TRUE(range.has_value()) << range.error().message;
+    ASSERT_EQ(range->size(), 1U);
+    EXPECT_EQ(range->front().account_id(), ids.cash);
+    EXPECT_EQ(range->front().occurred_at(), start);
 }
 
 TEST_F(PostgreSQLIntegrationTest, TransfersPersistAllFeeSourcesAndRollbackAtomically) {
@@ -673,6 +727,12 @@ TEST_F(PostgreSQLIntegrationTest, NumericBoundariesAndHistoricalRatesRoundTripEx
     auto latest = rates.find_latest(ccy("USD"), ccy("CNY"));
     ASSERT_TRUE(latest.has_value()) << latest.error().message;
     EXPECT_EQ(latest->rate().to_string(), "9999999999.9999999999");
+    auto history = rates.find_history_for_pair(
+        ccy("USD"), ccy("CNY"), time_at(1500), time_at(2500));
+    ASSERT_TRUE(history.has_value()) << history.error().message;
+    ASSERT_EQ(history->size(), 2U);
+    EXPECT_EQ((*history)[0].rate().to_string(), "0.0000000001");
+    EXPECT_EQ((*history)[1].rate().to_string(), "7.123456789");
 
     bool append_only_guard = false;
     try {

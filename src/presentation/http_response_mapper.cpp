@@ -148,4 +148,15 @@ HttpResponse HttpResponseMapper::unexpected(std::string_view trace_id) {
     return error(application::Error::internal_error(), trace_id);
 }
 
+HttpResponse HttpResponseMapper::overloaded(std::string_view trace_id) {
+    auto response = json(503, nlohmann::json{
+        {"error_code", "SERVICE_UNAVAILABLE"},
+        {"message", "The service is temporarily busy"},
+        {"trace_id", trace_id},
+        {"retryable", true},
+        {"field_errors", nlohmann::json::array()}});
+    response.headers.emplace("Retry-After", "1");
+    return response;
+}
+
 } // namespace pfh::presentation

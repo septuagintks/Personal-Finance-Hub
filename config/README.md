@@ -19,7 +19,9 @@
 #### Server Settings
 - `host`: Server bind address (use `0.0.0.0` for all interfaces)
 - `port`: HTTP port (default: 8080)
-- `threads`: Number of worker threads
+- `threads`: Number of Drogon event-loop threads
+- `request_worker_threads`: Dedicated workers for synchronous application and database work (1-64)
+- `request_queue_capacity`: Maximum queued HTTP requests before the server returns a retryable 503 (1-10000)
 
 #### Database Settings
 - `host`: PostgreSQL server address
@@ -58,7 +60,7 @@
 - `api_key`: FreeCurrencyAPI key; prefer `PFH_FREECURRENCYAPI_API_KEY`
 - `request_timeout_seconds`: Per-provider HTTPS timeout; because failover is sequential, it must not exceed half the job execution timeout
 
-The scheduler's Drogon timer callbacks only enqueue work. HTTP, PostgreSQL and event-handler waits execute on the bounded background pool. `job_execution_timeout_seconds` is a soft deadline because C++ worker threads are not terminated unsafely; external HTTP has its own hard timeout. Both `outbox_processing_timeout_seconds` and `job_lease_duration_seconds` must be longer than the soft deadline. FreeCurrencyAPI and exchangerate.fun may run sequentially, so twice `request_timeout_seconds` must fit within the soft deadline.
+HTTP event-loop callbacks copy the request boundary and enqueue synchronous Application, PostgreSQL and Argon2 work on the dedicated bounded request pool. Scheduler timer callbacks use a separate bounded background pool, so background jobs cannot consume HTTP request capacity. `job_execution_timeout_seconds` is a soft deadline because C++ worker threads are not terminated unsafely; external HTTP has its own hard timeout. Both `outbox_processing_timeout_seconds` and `job_lease_duration_seconds` must be longer than the soft deadline. FreeCurrencyAPI and exchangerate.fun may run sequentially, so twice `request_timeout_seconds` must fit within the soft deadline.
 
 The request-role database client performs Outbox transitions, exchange-rate appends, supplemental audit writes, token cleanup and job lease updates against non-RLS tables. The background BYPASSRLS/default-read-only client is reserved exclusively for the cross-tenant active-currency query.
 

@@ -224,7 +224,7 @@ public:
 
 1. 同一用户下 Tag 名称唯一
 2. Tag 软删除后，历史流水关系保留
-3. `replace_transaction_tags` 必须锁定流水、校验流水和全部 Tag 属于同一用户，并在同一事务替换完整关系集合
+3. 每笔流水最多关联 64 个 Tag；`replace_transaction_tags` 必须锁定流水、批量校验全部 Tag 属于同一用户，并在同一事务批量替换完整关系集合
 4. 删除 Tag 前必须使用 `find_by_id_for_user_for_update` 在当前 UoW 中取得审计快照，禁止提交前跨事务重读
 
 ### 2.6 用户偏好仓储接口
@@ -318,22 +318,21 @@ public:
 
 ### 3.2 账户仓储的具体实现
 
-账户余额读取是“带缓存写回的读路径”，必须把账户、流水版本、缓存命中判断、余额重建和缓存 UPSERT 放在同一个租户事务中。当前实现遵守以下顺序：
+账户余额读取是“带缓存写回的读路径”。流水写入、软删除与物理删除必须先锁账户，并在同一事务删除缓存行；因此已提交的缓存行本身就是有效快照，命中路径不需要再次扫描流水版本。当前实现遵守以下顺序：
 
 1. 使用 request-scoped `tenant_user_id` 创建短事务，并先执行 `SET LOCAL`。
-2. 先锁定账户聚合根，再在同一事务中读取 `MAX(transactions.version)`、最新流水 ID 和缓存行；流水新增、软删除与物理删除也必须遵循账户先行锁定约束。
-3. 仅当 `source_version` 与最新流水 ID 同时匹配时命中缓存。
-4. miss/stale 时加载未删除流水，交给纯领域 `BalanceCalculationService` 重建。
-5. 同事务 UPSERT `account_balance_cache`；流水新增、软删除和聚合物理删除也必须在各自写事务内删除受影响账户的缓存。
-6. `source_version` 使用 schema 的流水 `version` 语义，不得使用 In-Memory 的“未删除流水数量”替代。
+2. 用一条未加锁的 Account/Cache join 处理命中；命中返回缓存金额、最后流水 ID 与更新时间。
+3. miss 时锁定 Account 聚合根并复查缓存，避免并发读者重复重建。
+4. 仍为 miss 时由 PostgreSQL 一次聚合 signed `SUM(amount)`、`MAX(version)` 与 `MAX(id)`，不装载完整流水对象集合。
+5. 同事务 UPSERT `account_balance_cache` 并返回数据库生成的 `updated_at`；流水变更继续在各自写事务内删除受影响账户的缓存。
+6. `source_version` 使用 schema 的流水 `MAX(version)`，`last_transaction_id` 使用 `MAX(id)`；不得使用 In-Memory 的“未删除流水数量”替代。
 
 ```cpp
 return postgres::execute_transaction<BalanceSnapshot>(
     dbClient_, tenantUserId_, "read account balance",
     [&](const auto& transaction) -> RepositoryResult<BalanceSnapshot> {
-        // account/cache/version/transactions all use this transaction.
-        // NUMERIC values are read as strings and mapped to Decimal.
-        // Rebuild delegates only financial arithmetic to the Domain Service.
+        // Fast path: one unlocked account/cache join.
+        // Miss path: lock account, recheck cache, aggregate signed NUMERIC facts.
         // Cache UPSERT includes account_id, user_id, source_version and last tx id.
         return rebuiltOrCachedSnapshot;
     });

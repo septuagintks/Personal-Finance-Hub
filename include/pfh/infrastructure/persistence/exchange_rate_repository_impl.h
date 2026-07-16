@@ -40,6 +40,13 @@ public:
         const domain::Currency& base,
         const domain::Currency& target) override;
 
+    [[nodiscard]] domain::RepositoryResult<std::vector<domain::ExchangeRate>>
+    find_history_for_pair(
+        const domain::Currency& base,
+        const domain::Currency& target,
+        std::chrono::system_clock::time_point from,
+        std::chrono::system_clock::time_point to) override;
+
 private:
     drogon::orm::DbClientPtr db_;
 };

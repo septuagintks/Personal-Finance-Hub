@@ -50,6 +50,10 @@ public:
     [[nodiscard]] virtual RepositoryResult<std::vector<Category>> find_all_for_user(
         UserId user_id) = 0;
 
+    /// @brief All categories for reporting, including soft-deleted history.
+    [[nodiscard]] virtual RepositoryResult<std::vector<Category>>
+    find_all_for_user_including_deleted(UserId user_id) = 0;
+
     /// @brief Resolve the first-level (root) category id that `id` rolls up to.
     /// If `id` is already a root, returns it unchanged. Used by reporting to
     /// aggregate historical spend under top-level categories. Soft-deleted

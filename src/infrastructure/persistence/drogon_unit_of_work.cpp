@@ -12,6 +12,9 @@
 #include "pfh/infrastructure/persistence/postgres_repository_support.h"
 #include "pfh/infrastructure/persistence/postgres_result_set.h"
 
+#include <nlohmann/json.hpp>
+
+#include <chrono>
 #include <utility>
 
 namespace pfh::infrastructure {
@@ -103,22 +106,30 @@ domain::RepositoryVoidResult DrogonUnitOfWork::write_outbox(
     constexpr const char* kInsertSql = R"SQL(
         INSERT INTO domain_events_outbox (
             id, event_name, aggregate_type, aggregate_id, payload, occurred_at)
-        VALUES (gen_random_uuid(), $1, $2, $3, $4::jsonb, $5::timestamptz)
+        SELECT gen_random_uuid(), event.data->>'eventName',
+               event.data->>'aggregateType', event.data->>'aggregateId',
+               (event.data->>'payload')::jsonb,
+               TIMESTAMPTZ 'epoch' +
+                   (event.data->>'occurredAtMicros')::bigint *
+                   INTERVAL '1 microsecond'
+        FROM jsonb_array_elements($1::jsonb) WITH ORDINALITY AS event(data, position)
+        ORDER BY event.position
     )SQL";
 
     try {
+        nlohmann::json batch = nlohmann::json::array();
         for (const auto& evt : pending_events_) {
-            // payload_json is already serialized JSON text (event implementations
-            // own their format). Cast inside SQL to keep the call signature
-            // simple.
-            db_tx.execSqlSync(
-                kInsertSql,
-                evt->event_name(),                // VARCHAR
-                evt->aggregate_type(),            // VARCHAR (nullable)
-                evt->aggregate_id(),              // VARCHAR (nullable)
-                evt->payload_json(),              // JSONB (text)
-                pg::toDbTimestamp(evt->occurred_at()));  // TIMESTAMPTZ
+            const auto occurred_at_micros =
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    evt->occurred_at().time_since_epoch()).count();
+            batch.push_back({
+                {"eventName", evt->event_name()},
+                {"aggregateType", evt->aggregate_type()},
+                {"aggregateId", evt->aggregate_id()},
+                {"payload", evt->payload_json()},
+                {"occurredAtMicros", occurred_at_micros}});
         }
+        db_tx.execSqlSync(kInsertSql, batch.dump());
         return {};
     } catch (const drogon::orm::DrogonDbException& e) {
         return std::unexpected(postgres::database_error("outbox insert", e));

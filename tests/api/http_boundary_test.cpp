@@ -77,6 +77,18 @@ TEST(HttpBoundaryTest, StructuredFieldErrorsRemainControlledAndMachineReadable) 
     EXPECT_FALSE(body["retryable"].get<bool>());
 }
 
+TEST(HttpBoundaryTest, OverloadResponseIsRetryableAndTraceable) {
+    const auto response = HttpResponseMapper::overloaded("trace-overload");
+    ASSERT_EQ(response.status, 503);
+    ASSERT_TRUE(response.headers.contains("Retry-After"));
+    EXPECT_EQ(response.headers.at("Retry-After"), "1");
+    const auto body = nlohmann::json::parse(response.body);
+    EXPECT_EQ(body["error_code"], "SERVICE_UNAVAILABLE");
+    EXPECT_EQ(body["trace_id"], "trace-overload");
+    EXPECT_TRUE(body["retryable"].get<bool>());
+    EXPECT_TRUE(body["field_errors"].empty());
+}
+
 TEST(HttpBoundaryTest, IfMatchAcceptsOneStrongVersionAndRejectsAmbiguity) {
     const auto version = parse_if_match_version("\"42\"");
     ASSERT_TRUE(version.has_value());

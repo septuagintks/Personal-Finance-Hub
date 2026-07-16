@@ -151,6 +151,10 @@ public:
             return std::unexpected(domain::RepositoryError::database(
                 "Tag relation replacement requires an active transaction"));
         }
+        if (tag_ids.size() > domain::kMaxTagsPerTransaction) {
+            return std::unexpected(domain::RepositoryError::validation(
+                "A transaction can have at most 64 tags"));
+        }
         const auto transaction = lookup_transaction(transaction_id.value());
         if (!transaction.has_value() || transaction->user_id() != user_id ||
             transaction->is_deleted()) {

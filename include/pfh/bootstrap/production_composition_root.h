@@ -127,6 +127,7 @@ private:
         cleanup_sessions_use_case_;
     std::unique_ptr<infrastructure::PostgresJobLeaseRepository>
         job_lease_repository_;
+    std::unique_ptr<infrastructure::BoundedThreadPool> request_executor_;
     std::unique_ptr<infrastructure::BoundedThreadPool> background_executor_;
     std::unique_ptr<infrastructure::DrogonTimerScheduler> timer_scheduler_;
     std::shared_ptr<infrastructure::OutboxPublisherJob> outbox_job_;

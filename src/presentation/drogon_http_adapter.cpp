@@ -10,6 +10,7 @@
 #include <spdlog/spdlog.h>
 
 #include <functional>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -39,6 +40,7 @@ namespace {
     core.method = method;
     core.path = request->path();
     core.body = std::string(request->body());
+    core.trace_id = ApiApplication::generate_trace_id();
     const auto authorization = request->getHeader("Authorization");
     if (!authorization.empty()) {
         core.headers.emplace("Authorization", authorization);
@@ -65,6 +67,30 @@ namespace {
     return core;
 }
 
+using ResponseCallback =
+    std::function<void(const drogon::HttpResponsePtr&)>;
+
+void dispatch_request(
+    ApiApplication& application,
+    application::IBackgroundExecutor& executor,
+    HttpRequest request,
+    ResponseCallback callback) {
+    const auto trace_id = request.trace_id;
+    auto response_callback =
+        std::make_shared<ResponseCallback>(std::move(callback));
+    const bool accepted = executor.submit(
+        [&application, request = std::move(request), response_callback]() mutable {
+            (*response_callback)(to_drogon(
+                application.handle(std::move(request))));
+        });
+    if (!accepted) {
+        spdlog::warn("HTTP request queue is full trace_id={}", trace_id);
+        auto response = HttpResponseMapper::overloaded(trace_id);
+        response.headers.insert_or_assign("X-Trace-Id", trace_id);
+        (*response_callback)(to_drogon(std::move(response)));
+    }
+}
+
 } // namespace
 
 void DrogonHttpAdapter::configure() {
@@ -77,8 +103,9 @@ void DrogonHttpAdapter::configure() {
             [this, core_method](
                 const drogon::HttpRequestPtr& request,
                 std::function<void(const drogon::HttpResponsePtr&)>&& callback) {
-                callback(to_drogon(application_.handle(
-                    to_core(request, core_method))));
+                dispatch_request(
+                    application_, request_executor_,
+                    to_core(request, core_method), std::move(callback));
             },
             {method});
     };
@@ -92,8 +119,9 @@ void DrogonHttpAdapter::configure() {
                 const drogon::HttpRequestPtr& request,
                 std::function<void(const drogon::HttpResponsePtr&)>&& callback,
                 std::string /*path_parameter*/) {
-                callback(to_drogon(application_.handle(
-                    to_core(request, core_method))));
+                dispatch_request(
+                    application_, request_executor_,
+                    to_core(request, core_method), std::move(callback));
             },
             {method});
     };

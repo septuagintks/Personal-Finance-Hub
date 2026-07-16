@@ -556,6 +556,9 @@ Result<std::vector<TagDto>> ReplaceTransactionTagsUseCase::execute(
     if (!command.user_id.is_valid() || !command.transaction_id.is_valid()) {
         return err(Error::validation("Transaction id is invalid"));
     }
+    if (command.tag_ids.size() > domain::kMaxTagsPerTransaction) {
+        return err(Error::validation("tagIds must contain at most 64 items"));
+    }
     std::set<std::int64_t> unique;
     for (const auto id : command.tag_ids) {
         if (!id.is_valid() || !unique.insert(id.value()).second) {

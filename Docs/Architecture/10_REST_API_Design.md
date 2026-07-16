@@ -398,6 +398,8 @@ PUT    /api/v1/transactions/{id}/tags
 }
 ```
 
+Each transaction accepts at most 64 unique tag IDs.
+
 Tag 不参与余额计算，只用于过滤、搜索和报表维度扩展。
 
 ### 4.9 用户偏好接口

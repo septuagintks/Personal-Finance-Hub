@@ -1369,6 +1369,122 @@ public:
         const Currency&, const Currency&) override {
         return std::unexpected(RepositoryError::database("db down"));
     }
+    domain::RepositoryResult<std::vector<ExchangeRate>> find_history_for_pair(
+        const Currency&, const Currency&,
+        std::chrono::system_clock::time_point,
+        std::chrono::system_clock::time_point) override {
+        return std::unexpected(RepositoryError::database("db down"));
+    }
+};
+
+class CountingTransactionRepository final : public ITransactionRepository {
+public:
+    explicit CountingTransactionRepository(ITransactionRepository& delegate)
+        : delegate_(delegate) {}
+
+    RepositoryResult<Transaction> find_by_id(TransactionId id) override {
+        return delegate_.find_by_id(id);
+    }
+    RepositoryResult<Transaction> find_by_id_for_update(
+        ITransactionContext& tx, TransactionId id) override {
+        return delegate_.find_by_id_for_update(tx, id);
+    }
+    RepositoryResult<Transaction> save_single(
+        ITransactionContext& tx, const Transaction& value) override {
+        return delegate_.save_single(tx, value);
+    }
+    RepositoryResult<TransferPersistResult> save_transfer(
+        ITransactionContext& tx, const TransferAggregate& value) override {
+        return delegate_.save_transfer(tx, value);
+    }
+    RepositoryResult<std::vector<Transaction>> find_by_account(
+        AccountId account_id,
+        std::optional<std::chrono::system_clock::time_point> from,
+        std::optional<std::chrono::system_clock::time_point> to,
+        bool include_deleted) override {
+        return delegate_.find_by_account(
+            account_id, from, to, include_deleted);
+    }
+    RepositoryResult<std::vector<Transaction>> find_by_user(
+        UserId user_id, bool include_deleted) override {
+        ++find_by_user_calls;
+        return delegate_.find_by_user(user_id, include_deleted);
+    }
+    RepositoryResult<std::vector<Transaction>> find_by_user_in_range(
+        UserId user_id,
+        std::optional<std::chrono::system_clock::time_point> from,
+        std::optional<std::chrono::system_clock::time_point> to,
+        bool include_deleted) override {
+        ++range_calls;
+        return delegate_.find_by_user_in_range(
+            user_id, from, to, include_deleted);
+    }
+    RepositoryResult<TransferSnapshot> find_transfer_by_group(
+        TransferGroupId group_id, UserId user_id) override {
+        return delegate_.find_transfer_by_group(group_id, user_id);
+    }
+    RepositoryVoidResult soft_delete(
+        ITransactionContext& tx, TransactionId id, UserId user_id,
+        std::chrono::system_clock::time_point deleted_at) override {
+        return delegate_.soft_delete(tx, id, user_id, deleted_at);
+    }
+    RepositoryVoidResult physical_delete_by_account(
+        ITransactionContext& tx, AccountId account_id) override {
+        return delegate_.physical_delete_by_account(tx, account_id);
+    }
+    RepositoryVoidResult physical_delete_transfers_touching_account(
+        ITransactionContext& tx, AccountId account_id) override {
+        return delegate_.physical_delete_transfers_touching_account(
+            tx, account_id);
+    }
+
+    std::size_t find_by_user_calls = 0;
+    std::size_t range_calls = 0;
+
+private:
+    ITransactionRepository& delegate_;
+};
+
+class CountingRateRepository final : public IExchangeRateRepository {
+public:
+    explicit CountingRateRepository(IExchangeRateRepository& delegate)
+        : delegate_(delegate) {}
+
+    RepositoryResult<ExchangeRateId> append(
+        ITransactionContext& tx, const ExchangeRate& value) override {
+        return delegate_.append(tx, value);
+    }
+    RepositoryResult<ExchangeRate> find_latest(
+        const Currency& base, const Currency& target) override {
+        ++latest_calls;
+        return delegate_.find_latest(base, target);
+    }
+    RepositoryResult<ExchangeRate> find_historical(
+        const Currency& base, const Currency& target,
+        std::chrono::system_clock::time_point at) override {
+        ++historical_calls;
+        return delegate_.find_historical(base, target, at);
+    }
+    RepositoryResult<std::vector<ExchangeRate>> find_all_for_pair(
+        const Currency& base, const Currency& target) override {
+        ++all_calls;
+        return delegate_.find_all_for_pair(base, target);
+    }
+    RepositoryResult<std::vector<ExchangeRate>> find_history_for_pair(
+        const Currency& base, const Currency& target,
+        std::chrono::system_clock::time_point from,
+        std::chrono::system_clock::time_point to) override {
+        ++history_calls;
+        return delegate_.find_history_for_pair(base, target, from, to);
+    }
+
+    std::size_t latest_calls = 0;
+    std::size_t historical_calls = 0;
+    std::size_t all_calls = 0;
+    std::size_t history_calls = 0;
+
+private:
+    IExchangeRateRepository& delegate_;
 };
 } // namespace
 
@@ -1393,6 +1509,52 @@ TEST_F(UseCaseTest, NetWorth_WhenRateRepositoryFails_ReturnsInfrastructureFailur
     EXPECT_EQ(nw.error().code, ErrorCode::InfrastructureFailure);
     // Must NOT leak the DB message.
     EXPECT_EQ(nw.error().message, "Database operation failed");
+}
+
+TEST_F(UseCaseTest, ReportsBatchTransactionsAndCacheRateHistoryPerRequest) {
+    const auto s = seed();
+    auto rate_write = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            auto appended = rate_repo_->append(
+                tx, rate("USD", "CNY", "7", 1000));
+            return appended ? RepositoryVoidResult{}
+                            : RepositoryVoidResult(
+                                  std::unexpected(appended.error()));
+        });
+    ASSERT_TRUE(rate_write.has_value()) << rate_write.error().message;
+
+    CreateTransactionUseCase create(
+        *account_repo_, *category_repo_, *tx_repo_, *uow_);
+    for (const auto at : {sample_time(), sample_time() + std::chrono::hours(1)}) {
+        CreateTransactionCommand command;
+        command.user_id = s.user;
+        command.account_id = s.cny_wallet;
+        command.type = TransactionType::Income;
+        command.amount = "70";
+        command.currency_code = "CNY";
+        command.occurred_at = at;
+        ASSERT_TRUE(create.execute(command).has_value());
+    }
+
+    CountingTransactionRepository transactions(*tx_repo_);
+    CountingRateRepository rates(*rate_repo_);
+    ReportQueryService reports(
+        *account_repo_, transactions, rates, *pref_repo_);
+    const auto now = sample_time() + std::chrono::days(1);
+    auto dashboard = reports.dashboard_summary(s.user, now);
+    ASSERT_TRUE(dashboard.has_value()) << dashboard.error().message;
+    EXPECT_EQ(transactions.range_calls, 1U);
+    EXPECT_EQ(transactions.find_by_user_calls, 0U);
+    EXPECT_EQ(rates.history_calls, 2U);
+    EXPECT_EQ(rates.historical_calls, 0U);
+    EXPECT_EQ(rates.latest_calls, 0U);
+    EXPECT_EQ(rates.all_calls, 0U);
+
+    auto trend = reports.cash_flow_trend(s.user, 2024, 6, 2024, 6);
+    ASSERT_TRUE(trend.has_value()) << trend.error().message;
+    EXPECT_EQ(transactions.range_calls, 2U);
+    EXPECT_EQ(transactions.find_by_user_calls, 0U);
+    EXPECT_EQ(rates.history_calls, 4U);
 }
 
 // Item 4: a transaction stamped exactly at next-month 00:00 belongs to the

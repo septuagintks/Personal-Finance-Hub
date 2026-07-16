@@ -53,6 +53,12 @@ public:
         std::string_view token_id,
         application::AuthTimePoint now) override;
 
+    [[nodiscard]] domain::RepositoryResult<bool> is_access_or_session_revoked(
+        std::string_view issuer,
+        std::string_view token_id,
+        std::string_view session_id,
+        application::AuthTimePoint now) override;
+
     [[nodiscard]] domain::RepositoryResult<bool> is_session_revoked(
         std::string_view session_id,
         application::AuthTimePoint now) override;

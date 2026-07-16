@@ -3,7 +3,9 @@
   "server": {
     "host": "0.0.0.0",
     "port": 8080,
-    "threads": 4
+    "threads": 4,
+    "request_worker_threads": 8,
+    "request_queue_capacity": 256
   },
   "database": {
     "host": "localhost",

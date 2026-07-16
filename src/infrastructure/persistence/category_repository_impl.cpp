@@ -201,6 +201,34 @@ CategoryRepositoryImpl::find_all_for_user(domain::UserId user_id) {
         });
 }
 
+domain::RepositoryResult<std::vector<domain::Category>>
+CategoryRepositoryImpl::find_all_for_user_including_deleted(
+    domain::UserId user_id) {
+    if (user_id != tenant_user_id_) {
+        return std::unexpected(category_not_found());
+    }
+    return postgres::execute_tenant_read<std::vector<domain::Category>>(
+        db_, tenant_user_id_, "list historical categories",
+        [&](const auto& transaction) {
+            const std::string sql = std::string("SELECT ") + kCategoryColumns +
+                " FROM categories WHERE user_id = $1 ORDER BY id";
+            const auto result = transaction->execSqlSync(sql, user_id.value());
+            std::vector<domain::Category> categories;
+            categories.reserve(result.size());
+            for (const auto& row : result) {
+                auto category = map_category_row(row);
+                if (!category) {
+                    return domain::RepositoryResult<
+                        std::vector<domain::Category>>(
+                            std::unexpected(category.error()));
+                }
+                categories.push_back(std::move(*category));
+            }
+            return domain::RepositoryResult<std::vector<domain::Category>>(
+                std::move(categories));
+        });
+}
+
 domain::RepositoryResult<domain::CategoryId>
 CategoryRepositoryImpl::resolve_root_id_for_user(
     domain::CategoryId id,

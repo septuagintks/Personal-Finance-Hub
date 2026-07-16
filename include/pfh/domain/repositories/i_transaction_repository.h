@@ -80,6 +80,14 @@ public:
         UserId user_id,
         bool include_deleted = false) = 0;
 
+    /// @brief Find user transactions in the half-open range [from, to).
+    [[nodiscard]] virtual RepositoryResult<std::vector<Transaction>>
+    find_by_user_in_range(
+        UserId user_id,
+        std::optional<std::chrono::system_clock::time_point> from,
+        std::optional<std::chrono::system_clock::time_point> to,
+        bool include_deleted = false) = 0;
+
     [[nodiscard]] virtual RepositoryResult<TransferSnapshot> find_transfer_by_group(
         TransferGroupId group_id,
         UserId user_id) = 0;

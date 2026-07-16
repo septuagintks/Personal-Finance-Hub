@@ -49,6 +49,13 @@ public:
         domain::UserId user_id,
         bool include_deleted = false) override;
 
+    [[nodiscard]] domain::RepositoryResult<std::vector<domain::Transaction>>
+    find_by_user_in_range(
+        domain::UserId user_id,
+        std::optional<std::chrono::system_clock::time_point> from,
+        std::optional<std::chrono::system_clock::time_point> to,
+        bool include_deleted = false) override;
+
     [[nodiscard]] domain::RepositoryResult<domain::TransferSnapshot>
     find_transfer_by_group(
         domain::TransferGroupId group_id,

@@ -50,6 +50,13 @@ public:
         std::string_view token_id,
         AuthTimePoint now) = 0;
 
+    [[nodiscard]] virtual domain::RepositoryResult<bool>
+    is_access_or_session_revoked(
+        std::string_view issuer,
+        std::string_view token_id,
+        std::string_view session_id,
+        AuthTimePoint now) = 0;
+
     [[nodiscard]] virtual domain::RepositoryResult<bool> is_session_revoked(
         std::string_view session_id,
         AuthTimePoint now) = 0;

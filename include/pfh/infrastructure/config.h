@@ -17,6 +17,8 @@ struct ServerConfig {
     std::string host = "0.0.0.0";
     std::uint16_t port = 8080;
     std::uint32_t threads = 4;
+    std::uint32_t request_worker_threads = 8;
+    std::uint32_t request_queue_capacity = 256;
 };
 
 /// @brief Database configuration
