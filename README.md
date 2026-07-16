@@ -4,7 +4,7 @@ Version: 0.1.0-alpha
 Backend: C++23
 Architecture: Clean Architecture + Lightweight DDD
 
-Personal Finance Hub 是一个高精度、可审计的个人财务后端。Phase 1 已完成账户、流水、转账、多币种汇率、报表、认证、PostgreSQL 持久化、Transactional Outbox、后台调度和 Docker 运行闭环。
+Personal Finance Hub 是仓库、后端和 API 的工程名称；面向用户的 Web 产品暂定名为 **Candy's Ledger**。Phase 1 已完成高精度、可审计的财务后端，Phase 2 正在交付 Vue 3 产品体验。
 
 ---
 
@@ -19,6 +19,7 @@ Personal Finance Hub 是一个高精度、可审计的个人财务后端。Phase
 - Transactional Outbox、重试、dead letter、幂等 Handler 和 Scheduler。
 - FreeCurrencyAPI 主源、exchangerate.fun 整批备用与历史降级。
 - Ubuntu 24.04 Docker 镜像、non-root、healthcheck 和优雅停止。
+- Candy's Ledger 公开入口、同源 Web 会话、认证页面和应用 Shell。
 
 金额与汇率不使用二进制浮点：金额使用 `NUMERIC(20,8)`，汇率使用 `NUMERIC(20,10)`，JSON 金额使用十进制字符串。
 
@@ -49,6 +50,7 @@ Bootstrap ------------------------+
 - GCC/Clang with C++23 and `__int128`。
 - CMake 3.20+。
 - Ninja。
+- Web：Node.js 24 LTS 与 pnpm 10.14.0。
 - Linux production ON：Drogon、PostgreSQL client、OpenSSL、Argon2、libcurl、`tzdata`。
 
 ### 3.2 Windows 快速回归
@@ -85,6 +87,15 @@ cmake --build build/release
 ctest --test-dir build/release --output-on-failure
 ```
 
+### 3.5 Web 前端
+
+```powershell
+corepack pnpm install --frozen-lockfile
+corepack pnpm --dir frontend dev
+```
+
+开发入口使用本地 HTTPS：`https://127.0.0.1:5173`。前端通过同源 `/api` 代理连接本机后端，不把 Access Token 或 Refresh Token 写入浏览器存储。
+
 ---
 
 ## 4. 项目结构
@@ -97,7 +108,8 @@ tests/integration/    In-Memory and PostgreSQL scenarios
 tests/api/            HTTP contract and resource tests
 tests/sql/            Migration and adapter gates
 config/               Runtime configuration templates
-migrations/           Flyway V1-V6
+migrations/           Flyway V1-V7
+frontend/             Candy's Ledger Vue 3 Web client
 Docs/                 Architecture, plans, guides, standards and archive
 ```
 
@@ -114,6 +126,9 @@ Docs/                 Architecture, plans, guides, standards and archive
 | PostgreSQL fixture | 12/12 scenarios PASS |
 | Flyway V1-V6 | migrate/info/validate/no-op PASS |
 | Docker | cold build、healthy、non-root、RLS、Outbox/Scheduler PASS |
+| Phase 2 S01-S02 Windows Debug/Release | 358/358 PASS |
+| Frontend contract/lint/typecheck/unit/build | PASS（13 tests） |
+| Frontend Edge Desktop/Mobile E2E + axe | 8/8 PASS |
 
 ---
 

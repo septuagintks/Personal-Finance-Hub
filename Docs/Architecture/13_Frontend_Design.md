@@ -28,7 +28,7 @@ Status: Approved
 | Build | Vite |
 | Language | TypeScript Strict |
 | Router / State | Vue Router 4 / Pinia |
-| UI / Icons | Element Plus / Lucide Vue Next |
+| UI / Icons | Element Plus / `@lucide/vue` |
 | Charts | ECharts，按需加载 |
 | Decimal | `decimal.js` |
 | HTTP | Axios |

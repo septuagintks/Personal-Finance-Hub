@@ -4,6 +4,17 @@
   "packageManager": "pnpm@10.14.0",
   "scripts": {
     "api:generate": "corepack pnpm --dir frontend api:generate",
-    "api:check": "corepack pnpm --dir frontend api:check"
+    "api:check": "corepack pnpm --dir frontend api:check",
+    "web:typecheck": "corepack pnpm --dir frontend typecheck",
+    "web:lint": "corepack pnpm --dir frontend lint",
+    "web:format:check": "corepack pnpm --dir frontend format:check",
+    "web:build": "corepack pnpm --dir frontend build",
+    "web:test": "corepack pnpm --dir frontend test",
+    "web:e2e": "corepack pnpm --dir frontend e2e",
+    "web:quality": "corepack pnpm --dir frontend quality"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"],
+    "ignoredBuiltDependencies": ["msw"]
   }
 }

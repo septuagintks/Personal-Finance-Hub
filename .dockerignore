@@ -11,8 +11,11 @@ build-*
 cmake-build-*
 config/*.local.*
 logs
+**/node_modules
 out
 pgdata
+**/playwright-report
+**/test-results
 postgres_data
 test_results
 Testing

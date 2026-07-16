@@ -20,7 +20,7 @@ $failedChecks = @()
 # =============================================================================
 # 1. Git Whitespace Check
 # =============================================================================
-Write-Host "[1/5] Checking for whitespace errors..." -ForegroundColor Yellow
+Write-Host "[1/6] Checking for whitespace errors..." -ForegroundColor Yellow
 try {
     git diff --check
     if ($LASTEXITCODE -eq 0) {
@@ -38,7 +38,7 @@ Write-Host ""
 # =============================================================================
 # 2. CMake Configure
 # =============================================================================
-Write-Host "[2/5] Running CMake configure..." -ForegroundColor Yellow
+Write-Host "[2/6] Running CMake configure..." -ForegroundColor Yellow
 if ($Clean -and (Test-Path "build")) {
     Write-Host "  -Clean specified: removing build/ (dependencies will be re-fetched)" -ForegroundColor Gray
     Remove-Item -Recurse -Force "build"
@@ -67,7 +67,7 @@ Write-Host ""
 # =============================================================================
 # 3. Build
 # =============================================================================
-Write-Host "[3/5] Building project..." -ForegroundColor Yellow
+Write-Host "[3/6] Building project..." -ForegroundColor Yellow
 try {
     Push-Location "build"
     cmake --build . --config Debug
@@ -88,7 +88,7 @@ Write-Host ""
 # =============================================================================
 # 4. Unit Tests
 # =============================================================================
-Write-Host "[4/5] Running unit tests..." -ForegroundColor Yellow
+Write-Host "[4/6] Running unit tests..." -ForegroundColor Yellow
 try {
     Push-Location "build"
     ctest -C Debug --output-on-failure
@@ -107,9 +107,31 @@ try {
 Write-Host ""
 
 # =============================================================================
-# 5. Markdown Check
+# 5. Frontend Quality
 # =============================================================================
-Write-Host "[5/5] Checking Markdown files..." -ForegroundColor Yellow
+Write-Host "[5/6] Running frontend quality checks..." -ForegroundColor Yellow
+try {
+    corepack pnpm install --frozen-lockfile
+    if ($LASTEXITCODE -ne 0) {
+        throw "pnpm frozen install failed"
+    }
+    corepack pnpm web:quality
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "✓ Frontend quality checks passed" -ForegroundColor Green
+    } else {
+        Write-Host "✗ Frontend quality checks failed" -ForegroundColor Red
+        $failedChecks += "Frontend quality checks"
+    }
+} catch {
+    Write-Host "✗ Frontend quality checks failed: $_" -ForegroundColor Red
+    $failedChecks += "Frontend quality checks"
+}
+Write-Host ""
+
+# =============================================================================
+# 6. Markdown Check
+# =============================================================================
+Write-Host "[6/6] Checking Markdown files..." -ForegroundColor Yellow
 # Basic markdown checks - can be enhanced with markdownlint if available.
 # Only check project-owned docs; skip build/ (FetchContent deps) and vendored dirs.
 # -Exclude does not filter directories under -Recurse, so filter paths explicitly.
