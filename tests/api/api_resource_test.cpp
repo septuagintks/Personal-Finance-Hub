@@ -496,6 +496,13 @@ TEST_F(ResourceApiTest, TagsAreUniqueAndRelationsAreTenantScoped) {
         HttpMethod::Put, path, {{"tagIds", {tag_id}}}, alice_token);
     ASSERT_EQ(attached.status, 200) << attached.body;
     EXPECT_EQ(nlohmann::json::parse(attached.body).size(), 1U);
+    nlohmann::json too_many = nlohmann::json::array();
+    for (std::int64_t id = 1; id <= 65; ++id) {
+        too_many.push_back(id);
+    }
+    EXPECT_EQ(request(
+        HttpMethod::Put, path, {{"tagIds", std::move(too_many)}},
+        alice_token).status, 400);
     EXPECT_EQ(request(
         HttpMethod::Put, path, {{"tagIds", {tag_id}}}, bob_token).status, 404);
     const auto deleted = request(

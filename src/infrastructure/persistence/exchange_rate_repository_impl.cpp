@@ -191,6 +191,61 @@ ExchangeRateRepositoryImpl::find_all_for_pair(
     }
 }
 
+domain::RepositoryResult<std::vector<domain::ExchangeRate>>
+ExchangeRateRepositoryImpl::find_history_for_pair(
+    const domain::Currency& base,
+    const domain::Currency& target,
+    std::chrono::system_clock::time_point from,
+    std::chrono::system_clock::time_point to) {
+    if (!db_) {
+        return std::unexpected(domain::RepositoryError::database(
+            "Exchange-rate database client is unavailable"));
+    }
+    if (to < from) {
+        return std::unexpected(domain::RepositoryError::validation(
+            "Exchange-rate history range is invalid"));
+    }
+    try {
+        constexpr const char* kSql = R"SQL(
+            (SELECT base_currency_code, target_currency_code, rate::text,
+                    source, fetched_at
+             FROM exchange_rates
+             WHERE base_currency_code = $1 AND target_currency_code = $2
+               AND fetched_at <= $3
+             ORDER BY fetched_at DESC, id DESC
+             LIMIT 1)
+            UNION ALL
+            (SELECT DISTINCT ON (fetched_at)
+                    base_currency_code, target_currency_code, rate::text,
+                    source, fetched_at
+             FROM exchange_rates
+             WHERE base_currency_code = $1 AND target_currency_code = $2
+               AND fetched_at > $3 AND fetched_at <= $4
+             ORDER BY fetched_at, id DESC)
+            ORDER BY fetched_at
+        )SQL";
+        const auto rows = db_->execSqlSync(
+            kSql, base.code(), target.code(), pg::toDbTimestamp(from),
+            pg::toDbTimestamp(to));
+        std::vector<domain::ExchangeRate> rates;
+        rates.reserve(rows.size());
+        for (const auto& row : rows) {
+            auto rate = map_exchange_rate_row(row);
+            if (!rate) {
+                return std::unexpected(rate.error());
+            }
+            rates.push_back(std::move(*rate));
+        }
+        return rates;
+    } catch (const drogon::orm::DrogonDbException& error) {
+        return std::unexpected(postgres::database_error(
+            "load exchange-rate history", error));
+    } catch (const std::exception& error) {
+        return std::unexpected(postgres::unexpected_error(
+            "load exchange-rate history", error));
+    }
+}
+
 }  // namespace pfh::infrastructure
 
 #endif  // PFH_HAS_POSTGRESQL

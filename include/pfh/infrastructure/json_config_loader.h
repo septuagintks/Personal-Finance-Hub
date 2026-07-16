@@ -62,6 +62,10 @@ public:
                 config.server.host = server.value("host", std::string("0.0.0.0"));
                 config.server.port = server.value<std::uint16_t>("port", 8080);
                 config.server.threads = server.value<std::uint32_t>("threads", 4);
+                config.server.request_worker_threads = server.value<std::uint32_t>(
+                    "request_worker_threads", 8);
+                config.server.request_queue_capacity = server.value<std::uint32_t>(
+                    "request_queue_capacity", 256);
             }
 
             // Database config
@@ -212,10 +216,15 @@ public:
                 return std::unexpected(Error(application::ErrorCode::ConfigurationError,
                     "Password pepper still holds a placeholder value; set a real pepper or leave it empty"));
             }
-            if (config.server.threads == 0 || config.database.pool_size == 0 ||
+            if (config.server.threads == 0 ||
+                config.server.request_worker_threads == 0 ||
+                config.server.request_worker_threads > 64 ||
+                config.server.request_queue_capacity == 0 ||
+                config.server.request_queue_capacity > 10000 ||
+                config.database.pool_size == 0 ||
                 config.background_database.pool_size == 0) {
                 return std::unexpected(Error(application::ErrorCode::ConfigurationError,
-                    "Server threads and database pool sizes must be positive"));
+                    "Server worker and database pool configuration is invalid"));
             }
             if (config.scheduler.worker_threads == 0 ||
                 config.scheduler.worker_threads > 64 ||

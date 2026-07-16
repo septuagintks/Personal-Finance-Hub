@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "pfh/application/scheduler/i_background_executor.h"
 #include "pfh/presentation/api_application.h"
 
 #ifdef PFH_HAS_POSTGRESQL
@@ -22,14 +23,18 @@ class DrogonHttpAdapter {
 public:
     DrogonHttpAdapter(
         ApiApplication& application,
+        application::IBackgroundExecutor& request_executor,
         HttpServerConfig server)
-        : application_(application), server_(std::move(server)) {}
+        : application_(application),
+          request_executor_(request_executor),
+          server_(std::move(server)) {}
 
     void configure();
     void run();
 
 private:
     ApiApplication& application_;
+    application::IBackgroundExecutor& request_executor_;
     HttpServerConfig server_;
 };
 

@@ -70,6 +70,9 @@ ProductionCompositionRoot::ProductionCompositionRoot(
     : config_(std::move(config)) {}
 
 ProductionCompositionRoot::~ProductionCompositionRoot() {
+    if (request_executor_) {
+        request_executor_->shutdown();
+    }
     if (job_manager_) {
         job_manager_->stop_all();
     }
@@ -117,6 +120,14 @@ application::VoidResult ProductionCompositionRoot::validate_config() const {
         return application::err(application::Error(
             application::ErrorCode::ConfigurationError,
             "Password pepper exceeds 1024 bytes"));
+    }
+    if (config_.server.request_worker_threads == 0 ||
+        config_.server.request_worker_threads > 64 ||
+        config_.server.request_queue_capacity == 0 ||
+        config_.server.request_queue_capacity > 10000) {
+        return application::err(application::Error(
+            application::ErrorCode::ConfigurationError,
+            "HTTP request worker configuration is invalid"));
     }
     if (config_.scheduler.enabled) {
         if (config_.scheduler.worker_threads == 0 ||
@@ -416,8 +427,13 @@ application::VoidResult ProductionCompositionRoot::initialize() {
         *transaction_controller_,
         *transfer_controller_,
         *report_controller_);
+    request_executor_ =
+        std::make_unique<infrastructure::BoundedThreadPool>(
+            config_.server.request_worker_threads,
+            config_.server.request_queue_capacity);
     http_adapter_ = std::make_unique<presentation::DrogonHttpAdapter>(
         *api_application_,
+        *request_executor_,
         presentation::HttpServerConfig{
             config_.server.host,
             config_.server.port,

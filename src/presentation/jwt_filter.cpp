@@ -45,16 +45,12 @@ application::Result<RequestIdentity> JwtFilter::authenticate(
         return application::err(application::Error::unauthorized(
             "Invalid or expired access token"));
     }
-    auto access_revoked = sessions_.is_access_token_revoked(
-        claims->issuer, claims->token_id, now);
-    if (!access_revoked) {
-        return application::err(application::from_repository(access_revoked.error()));
+    auto revoked = sessions_.is_access_or_session_revoked(
+        claims->issuer, claims->token_id, claims->session_id, now);
+    if (!revoked) {
+        return application::err(application::from_repository(revoked.error()));
     }
-    auto session_revoked = sessions_.is_session_revoked(claims->session_id, now);
-    if (!session_revoked) {
-        return application::err(application::from_repository(session_revoked.error()));
-    }
-    if (*access_revoked || *session_revoked) {
+    if (*revoked) {
         return application::err(application::Error::unauthorized(
             "Invalid or expired access token"));
     }

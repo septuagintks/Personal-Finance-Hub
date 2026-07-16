@@ -6,7 +6,6 @@
 
 #ifdef PFH_HAS_POSTGRESQL
 
-#include "pfh/domain/balance_calculation_service.h"
 #include "pfh/infrastructure/persistence/postgres_repository_support.h"
 #include "pfh/infrastructure/persistence/postgres_result_set.h"
 
@@ -22,12 +21,6 @@ namespace {
 constexpr const char* kAccountColumns = R"SQL(
     id, user_id, name, type::text, subtype, category::text, currency_code,
     description, is_archived, archived_at, created_at, updated_at, version
-)SQL";
-
-constexpr const char* kTransactionColumns = R"SQL(
-    id, user_id, account_id, category_id, type::text, amount::text,
-    currency_code, description, transfer_group_id, deleted_at,
-    transaction_time, created_at
 )SQL";
 
 domain::RepositoryResult<domain::Account> map_account_row(
@@ -60,43 +53,25 @@ domain::RepositoryResult<domain::Account> map_account_row(
     }
 }
 
-domain::RepositoryResult<domain::Transaction> map_transaction_row(
-    const drogon::orm::Row& row) {
+domain::RepositoryResult<domain::BalanceSnapshot> map_cached_balance(
+    const drogon::orm::Row& row,
+    domain::AccountId account_id) {
     try {
+        const auto currency = domain::Currency::create(pg::getString(row, 0));
         const auto amount = domain::Decimal::parse_numeric_20_8(
-            pg::getNumericAsString(row, 5));
-        const auto currency = domain::Currency::create(pg::getString(row, 6));
-        if (!amount.has_value() || !currency.has_value()) {
+            pg::getNumericAsString(row, 1));
+        if (!currency.has_value() || !amount.has_value()) {
             return std::unexpected(domain::RepositoryError::database(
-                "Stored transaction amount or currency is invalid"));
+                "Stored balance cache is invalid"));
         }
-
-        const auto category_value = pg::getOptionalBigInt(row, 3);
-        const auto group_value = pg::getOptionalBigInt(row, 8);
-        std::optional<domain::CategoryId> category_id;
-        std::optional<domain::TransferGroupId> group_id;
-        if (category_value.has_value()) {
-            category_id = domain::CategoryId(*category_value);
-        }
-        if (group_value.has_value()) {
-            group_id = domain::TransferGroupId(*group_value);
-        }
-
-        return domain::Transaction(
-            domain::TransactionId(pg::getBigInt(row, 0)),
-            domain::UserId(pg::getBigInt(row, 1)),
-            domain::AccountId(pg::getBigInt(row, 2)),
+        return domain::BalanceSnapshot(
+            account_id,
             domain::Money(*amount, *currency),
-            pg::parseTransactionType(pg::getString(row, 4)),
-            pg::getTimestamp(row, 10),
-            pg::getOptionalString(row, 7).value_or(""),
-            category_id,
-            group_id,
-            pg::getTimestamp(row, 11),
-            pg::getOptionalTimestamp(row, 9));
+            pg::getTimestamp(row, 3),
+            domain::TransactionId(pg::getOptionalBigInt(row, 2).value_or(0)));
     } catch (const std::exception&) {
         return std::unexpected(domain::RepositoryError::database(
-            "Stored transaction row is invalid"));
+            "Stored balance cache row is invalid"));
     }
 }
 
@@ -232,87 +207,72 @@ domain::RepositoryResult<domain::BalanceSnapshot>
 AccountRepositoryImpl::balance_of(domain::AccountId id) {
     return postgres::execute_transaction<domain::BalanceSnapshot>(
         db_, tenant_user_id_, "read account balance", [&](const auto& transaction) {
-            const std::string account_sql = std::string("SELECT ") +
-                kAccountColumns +
-                " FROM accounts WHERE id = $1 AND user_id = $2 FOR UPDATE";
-            const auto account_result = transaction->execSqlSync(
-                account_sql, id.value(), tenant_user_id_.value());
-            if (account_result.empty()) {
+            constexpr const char* kFastPathSql = R"SQL(
+                SELECT account.currency_code, cache.balance::text,
+                       cache.last_transaction_id, cache.updated_at
+                FROM accounts AS account
+                LEFT JOIN account_balance_cache AS cache
+                  ON cache.account_id = account.id
+                 AND cache.user_id = account.user_id
+                WHERE account.id = $1 AND account.user_id = $2
+            )SQL";
+            const auto fast_path = transaction->execSqlSync(
+                kFastPathSql, id.value(), tenant_user_id_.value());
+            if (fast_path.empty()) {
                 return domain::RepositoryResult<domain::BalanceSnapshot>(
                     std::unexpected(account_not_found()));
             }
-            auto account = map_account_row(account_result[0]);
-            if (!account.has_value()) {
-                return domain::RepositoryResult<domain::BalanceSnapshot>(
-                    std::unexpected(account.error()));
+            if (pg::getOptionalString(fast_path[0], 1).has_value()) {
+                return map_cached_balance(fast_path[0], id);
             }
 
-            constexpr const char* kVersionSql = R"SQL(
-                SELECT COALESCE(MAX(version), 0), MAX(id)
-                FROM transactions
-                WHERE account_id = $1 AND user_id = $2 AND deleted_at IS NULL
+            constexpr const char* kLockedRecheckSql = R"SQL(
+                SELECT account.currency_code, cache.balance::text,
+                       cache.last_transaction_id, cache.updated_at
+                FROM accounts AS account
+                LEFT JOIN account_balance_cache AS cache
+                  ON cache.account_id = account.id
+                 AND cache.user_id = account.user_id
+                WHERE account.id = $1 AND account.user_id = $2
+                FOR UPDATE OF account
             )SQL";
-            const auto version_result = transaction->execSqlSync(
-                kVersionSql, id.value(), tenant_user_id_.value());
-            const auto source_version = pg::getBigInt(version_result[0], 0);
-            const auto last_transaction_value =
-                pg::getOptionalBigInt(version_result[0], 1);
-
-            constexpr const char* kCacheSql = R"SQL(
-                SELECT balance::text, last_transaction_id, source_version,
-                       updated_at
-                FROM account_balance_cache
-                WHERE account_id = $1 AND user_id = $2
-            )SQL";
-            const auto cache_result = transaction->execSqlSync(
-                kCacheSql, id.value(), tenant_user_id_.value());
-            if (!cache_result.empty() &&
-                pg::getBigInt(cache_result[0], 2) == source_version &&
-                pg::getOptionalBigInt(cache_result[0], 1) ==
-                    last_transaction_value) {
-                auto balance = domain::Decimal::parse_numeric_20_8(
-                    pg::getNumericAsString(cache_result[0], 0));
-                if (!balance.has_value()) {
-                    return domain::RepositoryResult<domain::BalanceSnapshot>(
-                        std::unexpected(domain::RepositoryError::database(
-                            "Stored balance cache is invalid")));
-                }
-                const domain::TransactionId last_transaction_id(
-                    last_transaction_value.value_or(0));
+            const auto locked = transaction->execSqlSync(
+                kLockedRecheckSql, id.value(), tenant_user_id_.value());
+            if (locked.empty()) {
                 return domain::RepositoryResult<domain::BalanceSnapshot>(
-                    domain::BalanceSnapshot(
-                        id,
-                        domain::Money(*balance, account->currency()),
-                        pg::getTimestamp(cache_result[0], 3),
-                        last_transaction_id));
+                    std::unexpected(account_not_found()));
+            }
+            if (pg::getOptionalString(locked[0], 1).has_value()) {
+                return map_cached_balance(locked[0], id);
             }
 
-            const std::string transaction_sql = std::string("SELECT ") +
-                kTransactionColumns +
-                " FROM transactions WHERE account_id = $1 AND user_id = $2 "
-                "AND deleted_at IS NULL ORDER BY transaction_time, id";
-            const auto transaction_result = transaction->execSqlSync(
-                transaction_sql, id.value(), tenant_user_id_.value());
-            std::vector<domain::Transaction> transactions;
-            transactions.reserve(transaction_result.size());
-            for (const auto& row : transaction_result) {
-                auto mapped = map_transaction_row(row);
-                if (!mapped.has_value()) {
-                    return domain::RepositoryResult<domain::BalanceSnapshot>(
-                        std::unexpected(mapped.error()));
-                }
-                transactions.push_back(std::move(*mapped));
-            }
-
-            auto snapshot = domain::BalanceCalculationService::calculate_balance(
-                id, transactions, account->currency());
-            if (!snapshot.has_value()) {
+            const auto currency = domain::Currency::create(
+                pg::getString(locked[0], 0));
+            if (!currency.has_value()) {
                 return domain::RepositoryResult<domain::BalanceSnapshot>(
                     std::unexpected(domain::RepositoryError::database(
-                        "Balance calculation failed")));
+                        "Stored account has an unsupported currency")));
             }
-            snapshot->last_transaction_id =
-                domain::TransactionId(last_transaction_value.value_or(0));
+
+            constexpr const char* kAggregateSql = R"SQL(
+                SELECT COALESCE(SUM(amount), 0)::text,
+                       COALESCE(MAX(version), 0), MAX(id)
+                FROM transactions
+                WHERE account_id = $1 AND user_id = $2
+                  AND deleted_at IS NULL
+            )SQL";
+            const auto aggregate = transaction->execSqlSync(
+                kAggregateSql, id.value(), tenant_user_id_.value());
+            const auto balance = domain::Decimal::parse_numeric_20_8(
+                pg::getNumericAsString(aggregate[0], 0));
+            if (!balance.has_value()) {
+                return domain::RepositoryResult<domain::BalanceSnapshot>(
+                    std::unexpected(domain::RepositoryError::database(
+                        "Aggregated account balance is invalid")));
+            }
+            const auto source_version = pg::getBigInt(aggregate[0], 1);
+            const auto last_transaction_value =
+                pg::getOptionalBigInt(aggregate[0], 2);
 
             constexpr const char* kUpsertCacheSql = R"SQL(
                 INSERT INTO account_balance_cache (
@@ -326,15 +286,22 @@ AccountRepositoryImpl::balance_of(domain::AccountId id) {
                     source_version = EXCLUDED.source_version,
                     cache_version = account_balance_cache.cache_version + 1,
                     updated_at = NOW()
+                RETURNING balance::text, last_transaction_id, updated_at
             )SQL";
-            transaction->execSqlSync(
+            const auto rebuilt = transaction->execSqlSync(
                 kUpsertCacheSql,
                 id.value(),
                 tenant_user_id_.value(),
-                snapshot->balance.amount().to_string(),
+                balance->to_string(),
                 last_transaction_value,
                 source_version);
-            return domain::RepositoryResult<domain::BalanceSnapshot>(*snapshot);
+            return domain::RepositoryResult<domain::BalanceSnapshot>(
+                domain::BalanceSnapshot(
+                    id,
+                    domain::Money(*balance, *currency),
+                    pg::getTimestamp(rebuilt[0], 2),
+                    domain::TransactionId(
+                        pg::getOptionalBigInt(rebuilt[0], 1).value_or(0))));
         });
 }
 

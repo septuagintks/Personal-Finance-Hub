@@ -99,6 +99,20 @@ public:
         return result;
     }
 
+    [[nodiscard]] domain::RepositoryResult<std::vector<domain::Category>>
+    find_all_for_user_including_deleted(domain::UserId user_id) override {
+        std::vector<domain::Category> result;
+        for (const auto& [_, cat] : merged()) {
+            if (cat.owner() == user_id) {
+                result.push_back(cat);
+            }
+        }
+        std::sort(result.begin(), result.end(), [](const auto& lhs, const auto& rhs) {
+            return lhs.id() < rhs.id();
+        });
+        return result;
+    }
+
     [[nodiscard]] domain::RepositoryResult<domain::CategoryId> resolve_root_id_for_user(
         domain::CategoryId id,
         domain::UserId user_id) override {

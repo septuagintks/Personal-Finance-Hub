@@ -285,6 +285,7 @@ def run_smoke(client: Client) -> None:
                 "occurredAt": "2026-07-10T08:30:00+08:00",
             },
             alice_token,
+            {"Idempotency-Key": f"runtime-income-{suffix}"},
         ),
         201,
         "create income",
@@ -302,6 +303,7 @@ def run_smoke(client: Client) -> None:
                 "occurredAt": "2026-07-11T09:45:00+08:00",
             },
             alice_token,
+            {"Idempotency-Key": f"runtime-expense-{suffix}"},
         ),
         201,
         "create expense",
@@ -326,6 +328,7 @@ def run_smoke(client: Client) -> None:
             "currencyCode": "USD",
         },
         alice_token,
+        {"Idempotency-Key": f"runtime-invalid-amount-{suffix}"},
     )
     expect_status(numeric_amount, 400, "JSON number amount rejection")
     expect_trace(numeric_amount, "JSON number amount rejection")
@@ -343,6 +346,7 @@ def run_smoke(client: Client) -> None:
                 "occurredAt": "2026-07-12T10:00:00+08:00",
             },
             alice_token,
+            {"Idempotency-Key": f"runtime-transfer-{suffix}"},
         ),
         201,
         "create transfer",

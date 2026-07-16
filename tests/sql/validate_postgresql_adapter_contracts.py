@@ -385,6 +385,7 @@ def main() -> int:
     )
 
     for token in (
+        "COALESCE(SUM(amount), 0)::text",
         "COALESCE(MAX(version), 0)",
         "last_transaction_value",
         "INSERT INTO account_balance_cache",
@@ -440,9 +441,25 @@ def main() -> int:
         failures,
     )
     require(
-        "FROM accounts WHERE id = $1 AND user_id = $2 FOR UPDATE"
-        in account,
+        "LEFT JOIN account_balance_cache AS cache" in account
+        and "FOR UPDATE OF account" in account
+        and "COALESCE(SUM(amount), 0)::text" in account,
         "Balance cache rebuild must lock the account aggregate",
+        failures,
+    )
+    require(
+        "jsonb_array_elements($1::jsonb) WITH ORDINALITY"
+        in read("src/infrastructure/persistence/drogon_unit_of_work.cpp")
+        and "db_tx.execSqlSync(kInsertSql, batch.dump())"
+        in read("src/infrastructure/persistence/drogon_unit_of_work.cpp"),
+        "Unit of Work must batch pending outbox events in one SQL insert",
+        failures,
+    )
+    require(
+        "jsonb_array_elements_text($1::jsonb) WITH ORDINALITY" in tag
+        and "jsonb_array_elements_text($3::jsonb)" in tag
+        and "kMaxTagsPerTransaction" in tag,
+        "Tag replacement must batch validation/insertion with a bounded input",
         failures,
     )
 

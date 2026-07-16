@@ -7,6 +7,8 @@
 #include "pfh/infrastructure/persistence/postgres_repository_support.h"
 #include "pfh/infrastructure/persistence/postgres_result_set.h"
 
+#include <nlohmann/json.hpp>
+
 #include <set>
 #include <string>
 #include <utility>
@@ -239,6 +241,10 @@ TagRepositoryImpl::replace_transaction_tags(
         return std::unexpected(domain::RepositoryError::not_found(
             "Transaction not found for user"));
     }
+    if (tag_ids.size() > domain::kMaxTagsPerTransaction) {
+        return std::unexpected(domain::RepositoryError::validation(
+            "A transaction can have at most 64 tags"));
+    }
     auto context = postgres::require_transaction(tx_iface, tenant_user_id_);
     if (!context) {
         return std::unexpected(context.error());
@@ -254,22 +260,35 @@ TagRepositoryImpl::replace_transaction_tags(
         }
 
         std::set<std::int64_t> unique;
-        std::vector<domain::Tag> resolved;
-        resolved.reserve(tag_ids.size());
+        nlohmann::json requested_ids = nlohmann::json::array();
         for (const auto tag_id : tag_ids) {
             if (!tag_id.is_valid() || !unique.insert(tag_id.value()).second) {
                 return std::unexpected(domain::RepositoryError::validation(
                     "Tag ids must be unique positive integers"));
             }
-            const std::string tag_sql = std::string("SELECT ") + kTagColumns +
-                " FROM transaction_tags "
-                "WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL FOR SHARE";
-            const auto tag = (*context)->transaction().execSqlSync(
-                tag_sql, tag_id.value(), user_id.value());
-            if (tag.empty()) {
-                return std::unexpected(tag_not_found());
-            }
-            auto mapped = map_tag(tag[0]);
+            requested_ids.push_back(tag_id.value());
+        }
+
+        constexpr const char* kResolveTagsSql = R"SQL(
+            SELECT tag.id, tag.user_id, tag.name, tag.deleted_at,
+                   tag.created_at, tag.updated_at
+            FROM jsonb_array_elements_text($1::jsonb) WITH ORDINALITY
+                 AS requested(id, position)
+            JOIN transaction_tags tag ON tag.id = requested.id::bigint
+            WHERE tag.user_id = $2 AND tag.deleted_at IS NULL
+            ORDER BY requested.position
+            FOR SHARE OF tag
+        )SQL";
+        const auto tags = (*context)->transaction().execSqlSync(
+            kResolveTagsSql, requested_ids.dump(), user_id.value());
+        if (tags.size() != tag_ids.size()) {
+            return std::unexpected(tag_not_found());
+        }
+
+        std::vector<domain::Tag> resolved;
+        resolved.reserve(tags.size());
+        for (const auto& tag : tags) {
+            auto mapped = map_tag(tag);
             if (!mapped) {
                 return std::unexpected(mapped.error());
             }
@@ -279,12 +298,20 @@ TagRepositoryImpl::replace_transaction_tags(
         (*context)->transaction().execSqlSync(
             "DELETE FROM transaction_tag_relations "
             "WHERE transaction_id = $1 AND user_id = $2",
-            transaction_id.value(), user_id.value());
-        for (const auto tag_id : tag_ids) {
+            transaction_id.value(),
+            user_id.value());
+        if (!tag_ids.empty()) {
+            constexpr const char* kInsertRelationsSql = R"SQL(
+                INSERT INTO transaction_tag_relations (
+                    transaction_id, tag_id, user_id)
+                SELECT $1, requested.id::bigint, $2
+                FROM jsonb_array_elements_text($3::jsonb) AS requested(id)
+            )SQL";
             (*context)->transaction().execSqlSync(
-                "INSERT INTO transaction_tag_relations "
-                "(transaction_id, tag_id, user_id) VALUES ($1, $2, $3)",
-                transaction_id.value(), tag_id.value(), user_id.value());
+                kInsertRelationsSql,
+                transaction_id.value(),
+                user_id.value(),
+                requested_ids.dump());
         }
         return resolved;
     } catch (const drogon::orm::DrogonDbException& error) {

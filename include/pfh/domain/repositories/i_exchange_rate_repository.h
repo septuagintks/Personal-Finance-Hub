@@ -38,6 +38,15 @@ public:
     [[nodiscard]] virtual RepositoryResult<std::vector<ExchangeRate>> find_all_for_pair(
         const Currency& base,
         const Currency& target) = 0;
+
+    /// @brief Load the minimum history needed for as-of lookups in [from, to].
+    /// Includes the newest row at-or-before `from`, plus rows through `to`.
+    [[nodiscard]] virtual RepositoryResult<std::vector<ExchangeRate>>
+    find_history_for_pair(
+        const Currency& base,
+        const Currency& target,
+        std::chrono::system_clock::time_point from,
+        std::chrono::system_clock::time_point to) = 0;
 };
 
 } // namespace pfh::domain

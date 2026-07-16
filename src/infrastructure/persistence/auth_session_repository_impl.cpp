@@ -280,6 +280,43 @@ AuthSessionRepositoryImpl::is_access_token_revoked(
     }
 }
 
+domain::RepositoryResult<bool>
+AuthSessionRepositoryImpl::is_access_or_session_revoked(
+    std::string_view issuer,
+    std::string_view token_id,
+    std::string_view session_id,
+    application::AuthTimePoint now) {
+    if (!request_db_) {
+        return std::unexpected(domain::RepositoryError::database(
+            "Authentication database client is unavailable"));
+    }
+    try {
+        constexpr const char* kSql = R"SQL(
+            SELECT EXISTS (
+                SELECT 1 FROM revoked_access_tokens
+                WHERE issuer = $1 AND jti = $2 AND expires_at > $4
+            ) OR EXISTS (
+                SELECT 1 FROM revoked_sessions
+                WHERE session_id = $3 AND expires_at > $4
+            )
+        )SQL";
+        const auto result = request_db_->execSqlSync(
+            kSql, std::string(issuer), std::string(token_id),
+            std::string(session_id), pg::toDbTimestamp(now));
+        if (result.empty()) {
+            return std::unexpected(domain::RepositoryError::database(
+                "Authentication revocation check returned no row"));
+        }
+        return pg::getBool(result[0], 0);
+    } catch (const drogon::orm::DrogonDbException& error) {
+        return std::unexpected(postgres::database_error(
+            "check authentication revocation", error));
+    } catch (const std::exception& error) {
+        return std::unexpected(postgres::unexpected_error(
+            "check authentication revocation", error));
+    }
+}
+
 domain::RepositoryResult<bool> AuthSessionRepositoryImpl::is_session_revoked(
     std::string_view session_id,
     application::AuthTimePoint now) {

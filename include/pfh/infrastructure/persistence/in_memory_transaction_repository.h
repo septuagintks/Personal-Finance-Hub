@@ -340,6 +340,16 @@ public:
     [[nodiscard]] domain::RepositoryResult<std::vector<domain::Transaction>> find_by_user(
         domain::UserId user_id,
         bool include_deleted = false) override {
+        return find_by_user_in_range(
+            user_id, std::nullopt, std::nullopt, include_deleted);
+    }
+
+    [[nodiscard]] domain::RepositoryResult<std::vector<domain::Transaction>>
+    find_by_user_in_range(
+        domain::UserId user_id,
+        std::optional<std::chrono::system_clock::time_point> from,
+        std::optional<std::chrono::system_clock::time_point> to,
+        bool include_deleted = false) override {
         auto merged = merge_transactions();
         std::vector<domain::Transaction> result;
         for (const auto& [_, tx] : merged) {
@@ -347,6 +357,12 @@ public:
                 continue;
             }
             if (!include_deleted && tx.is_deleted()) {
+                continue;
+            }
+            if (from.has_value() && tx.occurred_at() < *from) {
+                continue;
+            }
+            if (to.has_value() && tx.occurred_at() >= *to) {
                 continue;
             }
             result.push_back(tx);

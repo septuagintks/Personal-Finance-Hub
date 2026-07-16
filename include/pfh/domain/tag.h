@@ -6,10 +6,13 @@
 #include "pfh/domain/user.h"
 
 #include <chrono>
+#include <cstddef>
 #include <optional>
 #include <string>
 
 namespace pfh::domain {
+
+inline constexpr std::size_t kMaxTagsPerTransaction = 64;
 
 class Tag {
 public:

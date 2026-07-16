@@ -23,6 +23,7 @@ public:
         std::string_view trace_id);
     [[nodiscard]] static HttpResponse not_found(std::string_view trace_id);
     [[nodiscard]] static HttpResponse unexpected(std::string_view trace_id);
+    [[nodiscard]] static HttpResponse overloaded(std::string_view trace_id);
 
     [[nodiscard]] static int status_for(application::ErrorCode code) noexcept;
     [[nodiscard]] static std::string code_for(application::ErrorCode code);

@@ -1949,6 +1949,7 @@
         "properties": {
           "tagIds": {
             "type": "array",
+            "maxItems": 64,
             "uniqueItems": true,
             "items": {
               "$ref": "#/components/schemas/Id"

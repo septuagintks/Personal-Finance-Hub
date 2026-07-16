@@ -563,6 +563,12 @@ HttpResponse TagController::replace_transaction_tags(
             application::Error::validation("tagIds must be an array"),
             request.trace_id);
     }
+    if (found->size() > domain::kMaxTagsPerTransaction) {
+        return HttpResponseMapper::error(
+            application::Error::validation(
+                "tagIds must contain at most 64 items"),
+            request.trace_id);
+    }
     std::vector<domain::TagId> tag_ids;
     tag_ids.reserve(found->size());
     for (const auto& item : *found) {

@@ -238,6 +238,12 @@ TEST_F(RepositoryIntegrationTest, TransactionRepository_TimeRangeIsHalfOpen) {
     ASSERT_TRUE(result.has_value());
     ASSERT_EQ(result->size(), 1U);
     EXPECT_EQ(result->front().occurred_at(), start);
+
+    auto user_result = tx_repo_->find_by_user_in_range(
+        ids.user, start, end);
+    ASSERT_TRUE(user_result.has_value());
+    ASSERT_EQ(user_result->size(), 1U);
+    EXPECT_EQ(user_result->front().occurred_at(), start);
 }
 
 // ---- Optimistic locking ----
@@ -678,6 +684,30 @@ TEST_F(RepositoryIntegrationTest, ExchangeRateRepository_WhenQueryingHistorical_
     auto latest = rate_repo_->find_latest(ccy("USD"), ccy("CNY"));
     ASSERT_TRUE(latest.has_value());
     EXPECT_EQ(latest->rate().to_string(), "7.3");
+}
+
+TEST_F(RepositoryIntegrationTest, ExchangeRateRepository_HistoryIncludesAnchorAndRange) {
+    auto write = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            for (const auto& value : {
+                     rate("USD", "CNY", "7.1", 1000),
+                     rate("USD", "CNY", "7.2", 2000),
+                     rate("USD", "CNY", "7.3", 3000),
+                     rate("USD", "CNY", "7.4", 4000)}) {
+                auto appended = rate_repo_->append(tx, value);
+                if (!appended) return std::unexpected(appended.error());
+            }
+            return {};
+        });
+    ASSERT_TRUE(write.has_value()) << write.error().message;
+
+    auto history = rate_repo_->find_history_for_pair(
+        ccy("USD"), ccy("CNY"), time_at(2500), time_at(4000));
+    ASSERT_TRUE(history.has_value()) << history.error().message;
+    ASSERT_EQ(history->size(), 3U);
+    EXPECT_EQ((*history)[0].rate().to_string(), "7.2");
+    EXPECT_EQ((*history)[1].rate().to_string(), "7.3");
+    EXPECT_EQ((*history)[2].rate().to_string(), "7.4");
 }
 
 // ---- Preference fallback ----

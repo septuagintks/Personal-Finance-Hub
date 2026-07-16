@@ -44,6 +44,9 @@ public:
     [[nodiscard]] domain::RepositoryResult<std::vector<domain::Category>> find_all_for_user(
         domain::UserId user_id) override;
 
+    [[nodiscard]] domain::RepositoryResult<std::vector<domain::Category>>
+    find_all_for_user_including_deleted(domain::UserId user_id) override;
+
     [[nodiscard]] domain::RepositoryResult<domain::CategoryId> resolve_root_id_for_user(
         domain::CategoryId id,
         domain::UserId user_id) override;

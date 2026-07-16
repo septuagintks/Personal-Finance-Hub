@@ -38,7 +38,8 @@ private:
 
 constexpr const char* kValidConfig = R"({
   "environment": "test",
-  "server": { "host": "127.0.0.1", "port": 9090, "threads": 8 },
+  "server": { "host": "127.0.0.1", "port": 9090, "threads": 8,
+                "request_worker_threads": 6, "request_queue_capacity": 120 },
   "database": { "host": "db", "port": 6543, "name": "pfh_test",
                 "user": "tester", "password": "pw", "pool_size": 5,
                 "connection_timeout": 15 },
@@ -71,6 +72,8 @@ TEST(JsonConfigLoader, WhenValidConfig_LoadsAllFields) {
     EXPECT_EQ(r->server.host, "127.0.0.1");
     EXPECT_EQ(r->server.port, 9090);
     EXPECT_EQ(r->server.threads, 8u);
+    EXPECT_EQ(r->server.request_worker_threads, 6u);
+    EXPECT_EQ(r->server.request_queue_capacity, 120u);
     EXPECT_EQ(r->database.port, 6543);
     EXPECT_EQ(r->database.name, "pfh_test");
     EXPECT_EQ(r->database.pool_size, 5u);
@@ -195,6 +198,23 @@ TEST(JsonConfigLoader, WhenSchedulerDurationsConflict_ReturnsError) {
         "\"job_lease_duration_seconds\":60",
         ",\"exchange_rate\":{\"provider\":\"mock\","
         "\"request_timeout_seconds\":6}");
+}
+
+TEST(JsonConfigLoader, WhenRequestWorkerConfigurationIsInvalid_ReturnsError) {
+    const auto expect_invalid = [](const std::string& server_fields) {
+        TempConfig cfg(
+            "{\"jwt\":{\"secret\":\"0123456789abcdef0123456789abcdef\"},"
+            "\"server\":{" + server_fields + "}}");
+        JsonConfigLoader loader(cfg.path());
+        auto result = loader.load();
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().code, ErrorCode::ConfigurationError);
+    };
+
+    expect_invalid("\"request_worker_threads\":0");
+    expect_invalid("\"request_worker_threads\":65");
+    expect_invalid("\"request_queue_capacity\":0");
+    expect_invalid("\"request_queue_capacity\":10001");
 }
 
 // ---- Log level / output parsing ----

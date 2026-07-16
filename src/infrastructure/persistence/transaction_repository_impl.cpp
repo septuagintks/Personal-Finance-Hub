@@ -534,6 +534,16 @@ domain::RepositoryResult<std::vector<domain::Transaction>>
 TransactionRepositoryImpl::find_by_user(
     domain::UserId user_id,
     bool include_deleted) {
+    return find_by_user_in_range(
+        user_id, std::nullopt, std::nullopt, include_deleted);
+}
+
+domain::RepositoryResult<std::vector<domain::Transaction>>
+TransactionRepositoryImpl::find_by_user_in_range(
+    domain::UserId user_id,
+    std::optional<std::chrono::system_clock::time_point> from,
+    std::optional<std::chrono::system_clock::time_point> to,
+    bool include_deleted) {
     if (user_id != tenant_user_id_) {
         return std::unexpected(transaction_not_found());
     }
@@ -544,21 +554,44 @@ TransactionRepositoryImpl::find_by_user(
             if (!include_deleted) {
                 sql += " AND deleted_at IS NULL";
             }
+            if (from.has_value()) {
+                sql += " AND transaction_time >= $2";
+            }
+            if (to.has_value()) {
+                sql += from.has_value() ? " AND transaction_time < $3"
+                                        : " AND transaction_time < $2";
+            }
             sql += " ORDER BY transaction_time, id";
 
-            const auto result = transaction->execSqlSync(sql, user_id.value());
-            std::vector<domain::Transaction> transactions;
-            transactions.reserve(result.size());
-            for (const auto& row : result) {
-                auto mapped = map_transaction_row(row);
-                if (!mapped.has_value()) {
-                    return domain::RepositoryResult<std::vector<domain::Transaction>>(
-                        std::unexpected(mapped.error()));
+            const auto map_rows = [](const drogon::orm::Result& result) {
+                std::vector<domain::Transaction> transactions;
+                transactions.reserve(result.size());
+                for (const auto& row : result) {
+                    auto mapped = map_transaction_row(row);
+                    if (!mapped.has_value()) {
+                        return domain::RepositoryResult<
+                            std::vector<domain::Transaction>>(
+                                std::unexpected(mapped.error()));
+                    }
+                    transactions.push_back(std::move(*mapped));
                 }
-                transactions.push_back(std::move(*mapped));
+                return domain::RepositoryResult<std::vector<domain::Transaction>>(
+                    std::move(transactions));
+            };
+            if (from.has_value() && to.has_value()) {
+                return map_rows(transaction->execSqlSync(
+                    sql, user_id.value(), pg::toDbTimestamp(*from),
+                    pg::toDbTimestamp(*to)));
             }
-            return domain::RepositoryResult<std::vector<domain::Transaction>>(
-                std::move(transactions));
+            if (from.has_value()) {
+                return map_rows(transaction->execSqlSync(
+                    sql, user_id.value(), pg::toDbTimestamp(*from)));
+            }
+            if (to.has_value()) {
+                return map_rows(transaction->execSqlSync(
+                    sql, user_id.value(), pg::toDbTimestamp(*to)));
+            }
+            return map_rows(transaction->execSqlSync(sql, user_id.value()));
         });
 }
 

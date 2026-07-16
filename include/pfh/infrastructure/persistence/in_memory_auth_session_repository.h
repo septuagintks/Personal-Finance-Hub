@@ -172,6 +172,18 @@ public:
                lookup(store_.revoked_access_tokens);
     }
 
+    [[nodiscard]] domain::RepositoryResult<bool> is_access_or_session_revoked(
+        std::string_view issuer,
+        std::string_view token_id,
+        std::string_view session_id,
+        application::AuthTimePoint now) override {
+        auto access = is_access_token_revoked(issuer, token_id, now);
+        if (!access || *access) {
+            return access;
+        }
+        return is_session_revoked(session_id, now);
+    }
+
     [[nodiscard]] domain::RepositoryResult<bool> is_session_revoked(
         std::string_view session_id,
         application::AuthTimePoint now) override {

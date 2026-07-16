@@ -20,14 +20,81 @@
 #include "pfh/domain/repositories/i_user_preference_repository.h"
 #include <algorithm>
 #include <chrono>
+#include <iterator>
 #include <map>
 #include <optional>
+#include <set>
+#include <string>
 #include <utility>
 #include <vector>
 
 namespace pfh::application {
 
 class ReportQueryService {
+private:
+    using TimePoint = std::chrono::system_clock::time_point;
+
+    class HistoricalRateCache {
+    public:
+        HistoricalRateCache(
+            domain::IExchangeRateRepository& rates,
+            TimePoint from,
+            TimePoint to)
+            : rates_(rates),
+              from_(std::min(from, to)),
+              to_(std::max(from, to)) {}
+
+        [[nodiscard]] Result<std::optional<domain::ExchangeRate>> find(
+            const domain::Currency& base,
+            const domain::Currency& target,
+            TimePoint at) {
+            const auto key = std::pair{base.code(), target.code()};
+            auto found = histories_.find(key);
+            if (found == histories_.end()) {
+                auto history = rates_.find_history_for_pair(
+                    base, target, from_, to_);
+                if (!history) {
+                    return err(from_repository(history.error()));
+                }
+                std::stable_sort(
+                    history->begin(), history->end(),
+                    [](const auto& lhs, const auto& rhs) {
+                        return lhs.fetched_at() < rhs.fetched_at();
+                    });
+                found = histories_.emplace(key, std::move(*history)).first;
+            }
+
+            const auto& history = found->second;
+            const auto after = std::upper_bound(
+                history.begin(), history.end(), at,
+                [](TimePoint value, const domain::ExchangeRate& rate) {
+                    return value < rate.fetched_at();
+                });
+            if (after == history.begin()) {
+                return std::optional<domain::ExchangeRate>{};
+            }
+            return std::optional<domain::ExchangeRate>{*std::prev(after)};
+        }
+
+    private:
+        domain::IExchangeRateRepository& rates_;
+        TimePoint from_;
+        TimePoint to_;
+        std::map<
+            std::pair<std::string, std::string>,
+            std::vector<domain::ExchangeRate>> histories_;
+    };
+
+    struct ConvertedTransaction {
+        const domain::Transaction* transaction;
+        domain::Money amount;
+    };
+
+    struct AccountValue {
+        domain::AccountType type;
+        domain::Money balance;
+    };
+
 public:
     ReportQueryService(
         domain::IAccountRepository& accounts,
@@ -56,87 +123,19 @@ public:
         if (!pref) {
             return err(from_repository(pref.error()));
         }
-        const auto& base = pref->base_currency();
-
-        auto txs = transactions_.find_by_user(user_id, false);
+        auto txs = transactions_.find_by_user_in_range(
+            user_id, from, to, false);
         if (!txs) {
             return err(from_repository(txs.error()));
         }
-
-        auto zero = domain::Decimal::from_integer(0);
-        if (!zero) {
-            return err(from_domain(zero.error()));
+        const auto bounds = transaction_time_bounds(*txs);
+        HistoricalRateCache rate_cache(rates_, bounds.first, bounds.second);
+        auto converted = convert_transactions(
+            *txs, pref->base_currency(), rate_cache);
+        if (!converted) {
+            return err(converted.error());
         }
-        domain::Money income(*zero, base);
-        domain::Money expense(*zero, base);
-
-        for (const auto& tx : *txs) {
-            if (tx.type() == domain::TransactionType::Transfer) {
-                // Transfer never participates in income/expense stats.
-                continue;
-            }
-            if (from.has_value() && tx.occurred_at() < *from) {
-                continue;
-            }
-            if (to.has_value() && tx.occurred_at() >= *to) { // exclusive upper bound
-                continue;
-            }
-
-            auto converted = convert_to_base(tx.amount(), base, tx.occurred_at());
-            if (!converted) {
-                return err(converted.error());
-            }
-
-            if (tx.type() == domain::TransactionType::Income) {
-                // Income is a magnitude; count it as inflow.
-                auto sum = income.add(converted->is_negative()
-                                          ? converted->negated()
-                                          : *converted);
-                if (!sum) {
-                    return err(from_domain(sum.error()));
-                }
-                income = *sum;
-            } else if (tx.type() == domain::TransactionType::Expense) {
-                // Expense is a magnitude; count it as outflow.
-                auto abs_amt = converted->is_negative() ? converted->negated() : *converted;
-                auto sum = expense.add(abs_amt);
-                if (!sum) {
-                    return err(from_domain(sum.error()));
-                }
-                expense = *sum;
-            } else if (tx.type() == domain::TransactionType::Adjustment) {
-                // Adjustments are SIGNED: a positive adjustment (refund/subsidy/
-                // FX gain) is an inflow and joins income; a negative one (fee/
-                // correction/FX loss) is an outflow and joins expense as a
-                // positive magnitude. This lets reports represent both, instead
-                // of forcing every adjustment into expense.
-                if (converted->is_negative()) {
-                    auto sum = expense.add(converted->negated());
-                    if (!sum) {
-                        return err(from_domain(sum.error()));
-                    }
-                    expense = *sum;
-                } else {
-                    auto sum = income.add(*converted);
-                    if (!sum) {
-                        return err(from_domain(sum.error()));
-                    }
-                    income = *sum;
-                }
-            }
-        }
-
-        auto net = income.subtract(expense);
-        if (!net) {
-            return err(from_domain(net.error()));
-        }
-
-        CashFlowDto dto;
-        dto.currency_code = base.code();
-        dto.income_total = income.amount().to_string();
-        dto.expense_total = expense.amount().to_string();
-        dto.net_total = net->amount().to_string();
-        return dto;
+        return aggregate_cash_flow(*converted, pref->base_currency());
     }
 
     [[nodiscard]] Result<NetWorthDto> net_worth(
@@ -150,55 +149,18 @@ public:
         if (!pref) {
             return err(from_repository(pref.error()));
         }
-        const auto& base = pref->base_currency();
-
         auto accounts = accounts_.find_active_by_user(user_id);
         if (!accounts) {
             return err(from_repository(accounts.error()));
         }
 
-        auto zero = domain::Decimal::from_integer(0);
-        if (!zero) {
-            return err(from_domain(zero.error()));
+        HistoricalRateCache rate_cache(rates_, now, now);
+        auto balances = load_account_values(
+            *accounts, pref->base_currency(), now, rate_cache);
+        if (!balances) {
+            return err(balances.error());
         }
-        domain::Money assets(*zero, base);
-        domain::Money liabilities(*zero, base);
-        for (const auto& account : *accounts) {
-            auto snapshot = accounts_.balance_of(account.id());
-            if (!snapshot) {
-                return err(from_repository(snapshot.error()));
-            }
-            auto converted = convert_to_base(snapshot->balance, base, now);
-            if (!converted) {
-                return err(converted.error());
-            }
-            // Split by BALANCE SIGN per the reporting design (09 §2.1): a
-            // positive converted balance adds to total_assets, a negative one
-            // to total_liabilities. This is independent of account category, so
-            // e.g. an overdrawn cash account correctly counts as a liability and
-            // a credit account in credit counts as an asset. total = assets +
-            // liabilities holds because liabilities stays negative.
-            domain::Money& bucket =
-                converted->amount().is_negative() ? liabilities : assets;
-            auto sum = bucket.add(*converted);
-            if (!sum) {
-                return err(from_domain(sum.error()));
-            }
-            bucket = *sum;
-        }
-
-        auto total = assets.add(liabilities);
-        if (!total) {
-            return err(from_domain(total.error()));
-        }
-
-        NetWorthDto dto;
-        dto.currency_code = base.code();
-        dto.total = total->amount().to_string();
-        dto.total_assets = assets.amount().to_string();
-        dto.total_liabilities = liabilities.amount().to_string();
-        dto.generated_at = now;
-        return dto;
+        return aggregate_net_worth(*balances, pref->base_currency(), now);
     }
 
     // `now` is injectable so tests can pin the reporting window; production
@@ -214,37 +176,63 @@ public:
         // Month boundaries are computed in the user's own timezone so a
         // transaction near local midnight on the 1st/last of the month is filed
         // in the correct calendar month, not shifted by the UTC offset.
-        auto pref_for_tz = preferences_.find_by_user(user_id);
-        if (!pref_for_tz) {
-            return err(from_repository(pref_for_tz.error()));
+        auto preference = preferences_.find_by_user(user_id);
+        if (!preference) {
+            return err(from_repository(preference.error()));
         }
-        auto window = current_month_window(now, pref_for_tz->timezone());
+        auto window = current_month_window(now, preference->timezone());
         if (!window) {
             return err(window.error());
         }
         const auto [period_start, period_end] = *window;
 
-        auto nw = net_worth(user_id, now);
-        if (!nw) {
-            return err(nw.error());
-        }
-        auto cf = cash_flow(user_id, period_start, period_end);
-        if (!cf) {
-            return err(cf.error());
-        }
         auto accounts = accounts_.find_active_by_user(user_id);
         if (!accounts) {
             return err(from_repository(accounts.error()));
         }
+        auto transactions = transactions_.find_by_user_in_range(
+            user_id, period_start, period_end, false);
+        if (!transactions) {
+            return err(from_repository(transactions.error()));
+        }
+
+        const auto bounds = transaction_time_bounds(*transactions);
+        const auto rate_from = transactions->empty()
+            ? now
+            : std::min(now, bounds.first);
+        const auto rate_to = transactions->empty()
+            ? now
+            : std::max(now, bounds.second);
+        HistoricalRateCache rate_cache(rates_, rate_from, rate_to);
+        auto account_values = load_account_values(
+            *accounts, preference->base_currency(), now, rate_cache);
+        if (!account_values) {
+            return err(account_values.error());
+        }
+        auto converted_transactions = convert_transactions(
+            *transactions, preference->base_currency(), rate_cache);
+        if (!converted_transactions) {
+            return err(converted_transactions.error());
+        }
+        auto net_worth = aggregate_net_worth(
+            *account_values, preference->base_currency(), now);
+        if (!net_worth) {
+            return err(net_worth.error());
+        }
+        auto cash_flow = aggregate_cash_flow(
+            *converted_transactions, preference->base_currency());
+        if (!cash_flow) {
+            return err(cash_flow.error());
+        }
 
         DashboardSummaryDto dto;
-        dto.currency_code = nw->currency_code;
-        dto.net_worth = nw->total;
-        dto.total_assets = nw->total_assets;
-        dto.total_liabilities = nw->total_liabilities;
-        dto.income_total = cf->income_total;
-        dto.expense_total = cf->expense_total;
-        dto.cash_flow_net = cf->net_total;
+        dto.currency_code = net_worth->currency_code;
+        dto.net_worth = net_worth->total;
+        dto.total_assets = net_worth->total_assets;
+        dto.total_liabilities = net_worth->total_liabilities;
+        dto.income_total = cash_flow->income_total;
+        dto.expense_total = cash_flow->expense_total;
+        dto.cash_flow_net = cash_flow->net_total;
         dto.account_count = accounts->size();
         dto.report_period_start = period_start;
         dto.report_period_end = period_end;
@@ -253,14 +241,15 @@ public:
         // Asset distribution: per active account, its base-currency balance and
         // share of total assets (liability accounts are reported with their
         // natural negative amount, matching the REST contract example).
-        auto dist = asset_distribution(user_id, nw->currency_code, now);
+        auto dist = asset_distribution(*account_values);
         if (!dist) {
             return err(dist.error());
         }
         dto.asset_distribution = std::move(*dist);
 
         // Top expense categories over the current-month window.
-        auto cats = top_expense_categories(user_id, period_start, period_end);
+        auto cats = top_expense_categories(
+            user_id, *converted_transactions);
         if (!cats) {
             return err(cats.error());
         }
@@ -302,30 +291,234 @@ public:
         if (!preference) {
             return err(from_repository(preference.error()));
         }
-        CashFlowTrendDto result;
-        result.base_currency = preference->base_currency().code();
+        std::vector<std::pair<TimePoint, TimePoint>> windows;
+        std::vector<std::string> periods;
         for (auto current = start; current <= end; current += ch::months{1}) {
             auto window = calendar_month_window(current, preference->timezone());
             if (!window) {
                 return err(window.error());
             }
-            auto flow = cash_flow(user_id, window->first, window->second);
-            if (!flow) {
-                return err(flow.error());
-            }
+            windows.push_back(*window);
             const auto month_number = static_cast<unsigned>(current.month());
             std::string period = std::to_string(static_cast<int>(current.year())) + "-";
             if (month_number < 10) period += "0";
             period += std::to_string(month_number);
+            periods.push_back(std::move(period));
+        }
+
+        auto transactions = transactions_.find_by_user_in_range(
+            user_id, windows.front().first, windows.back().second, false);
+        if (!transactions) {
+            return err(from_repository(transactions.error()));
+        }
+        const auto bounds = transaction_time_bounds(*transactions);
+        HistoricalRateCache rate_cache(rates_, bounds.first, bounds.second);
+        auto converted = convert_transactions(
+            *transactions, preference->base_currency(), rate_cache);
+        if (!converted) {
+            return err(converted.error());
+        }
+
+        auto zero = domain::Decimal::from_integer(0);
+        if (!zero) {
+            return err(from_domain(zero.error()));
+        }
+        std::vector<domain::Money> incomes;
+        std::vector<domain::Money> expenses;
+        incomes.reserve(windows.size());
+        expenses.reserve(windows.size());
+        for (std::size_t index = 0; index < windows.size(); ++index) {
+            incomes.emplace_back(*zero, preference->base_currency());
+            expenses.emplace_back(*zero, preference->base_currency());
+        }
+
+        std::size_t bucket = 0;
+        for (const auto& transaction : *converted) {
+            const auto occurred_at = transaction.transaction->occurred_at();
+            while (bucket < windows.size() &&
+                   occurred_at >= windows[bucket].second) {
+                ++bucket;
+            }
+            if (bucket >= windows.size()) {
+                break;
+            }
+            if (occurred_at < windows[bucket].first) {
+                continue;
+            }
+            auto added = add_cash_flow(
+                transaction, incomes[bucket], expenses[bucket]);
+            if (!added) {
+                return err(added.error());
+            }
+        }
+
+        CashFlowTrendDto result;
+        result.base_currency = preference->base_currency().code();
+        result.trends.reserve(windows.size());
+        for (std::size_t index = 0; index < windows.size(); ++index) {
+            auto flow = cash_flow_from_totals(
+                incomes[index], expenses[index], preference->base_currency());
+            if (!flow) {
+                return err(flow.error());
+            }
             result.trends.push_back(CashFlowPeriodDto{
-                std::move(period), flow->income_total, flow->expense_total,
-                flow->net_total});
+                std::move(periods[index]), flow->income_total,
+                flow->expense_total, flow->net_total});
         }
         return result;
     }
 
 private:
-    using TimePoint = std::chrono::system_clock::time_point;
+    [[nodiscard]] static std::pair<TimePoint, TimePoint> transaction_time_bounds(
+        const std::vector<domain::Transaction>& transactions) {
+        if (transactions.empty()) {
+            return {TimePoint{}, TimePoint{}};
+        }
+        auto earliest = transactions.front().occurred_at();
+        auto latest = earliest;
+        for (const auto& transaction : transactions) {
+            earliest = std::min(earliest, transaction.occurred_at());
+            latest = std::max(latest, transaction.occurred_at());
+        }
+        return {earliest, latest};
+    }
+
+    [[nodiscard]] Result<std::vector<ConvertedTransaction>> convert_transactions(
+        const std::vector<domain::Transaction>& transactions,
+        const domain::Currency& base,
+        HistoricalRateCache& rate_cache) const {
+        std::vector<ConvertedTransaction> result;
+        result.reserve(transactions.size());
+        for (const auto& transaction : transactions) {
+            if (transaction.type() == domain::TransactionType::Transfer) {
+                continue;
+            }
+            auto converted = convert_to_base(
+                transaction.amount(), base, transaction.occurred_at(),
+                rate_cache);
+            if (!converted) {
+                return err(converted.error());
+            }
+            result.push_back(ConvertedTransaction{
+                &transaction, std::move(*converted)});
+        }
+        return result;
+    }
+
+    [[nodiscard]] static VoidResult add_cash_flow(
+        const ConvertedTransaction& converted,
+        domain::Money& income,
+        domain::Money& expense) {
+        const auto type = converted.transaction->type();
+        if (type == domain::TransactionType::Income ||
+            (type == domain::TransactionType::Adjustment &&
+             !converted.amount.is_negative())) {
+            const auto value = converted.amount.is_negative()
+                ? converted.amount.negated()
+                : converted.amount;
+            auto sum = income.add(value);
+            if (!sum) {
+                return err(from_domain(sum.error()));
+            }
+            income = *sum;
+        } else if (type == domain::TransactionType::Expense ||
+                   type == domain::TransactionType::Adjustment) {
+            const auto value = converted.amount.is_negative()
+                ? converted.amount.negated()
+                : converted.amount;
+            auto sum = expense.add(value);
+            if (!sum) {
+                return err(from_domain(sum.error()));
+            }
+            expense = *sum;
+        }
+        return ok();
+    }
+
+    [[nodiscard]] static Result<CashFlowDto> cash_flow_from_totals(
+        const domain::Money& income,
+        const domain::Money& expense,
+        const domain::Currency& base) {
+        auto net = income.subtract(expense);
+        if (!net) {
+            return err(from_domain(net.error()));
+        }
+        return CashFlowDto{
+            base.code(),
+            income.amount().to_string(),
+            expense.amount().to_string(),
+            net->amount().to_string()};
+    }
+
+    [[nodiscard]] static Result<CashFlowDto> aggregate_cash_flow(
+        const std::vector<ConvertedTransaction>& transactions,
+        const domain::Currency& base) {
+        auto zero = domain::Decimal::from_integer(0);
+        if (!zero) {
+            return err(from_domain(zero.error()));
+        }
+        domain::Money income(*zero, base);
+        domain::Money expense(*zero, base);
+        for (const auto& transaction : transactions) {
+            auto added = add_cash_flow(transaction, income, expense);
+            if (!added) {
+                return err(added.error());
+            }
+        }
+        return cash_flow_from_totals(income, expense, base);
+    }
+
+    [[nodiscard]] Result<std::vector<AccountValue>> load_account_values(
+        const std::vector<domain::Account>& accounts,
+        const domain::Currency& base,
+        TimePoint now,
+        HistoricalRateCache& rate_cache) {
+        std::vector<AccountValue> result;
+        result.reserve(accounts.size());
+        for (const auto& account : accounts) {
+            auto snapshot = accounts_.balance_of(account.id());
+            if (!snapshot) {
+                return err(from_repository(snapshot.error()));
+            }
+            auto converted = convert_to_base(
+                snapshot->balance, base, now, rate_cache);
+            if (!converted) {
+                return err(converted.error());
+            }
+            result.push_back(AccountValue{
+                account.type(), std::move(*converted)});
+        }
+        return result;
+    }
+
+    [[nodiscard]] static Result<NetWorthDto> aggregate_net_worth(
+        const std::vector<AccountValue>& accounts,
+        const domain::Currency& base,
+        TimePoint now) {
+        auto zero = domain::Decimal::from_integer(0);
+        if (!zero) {
+            return err(from_domain(zero.error()));
+        }
+        domain::Money assets(*zero, base);
+        domain::Money liabilities(*zero, base);
+        for (const auto& account : accounts) {
+            domain::Money& bucket = account.balance.amount().is_negative()
+                ? liabilities
+                : assets;
+            auto sum = bucket.add(account.balance);
+            if (!sum) {
+                return err(from_domain(sum.error()));
+            }
+            bucket = *sum;
+        }
+        auto total = assets.add(liabilities);
+        if (!total) {
+            return err(from_domain(total.error()));
+        }
+        return NetWorthDto{
+            base.code(), total->amount().to_string(),
+            assets.amount().to_string(), liabilities.amount().to_string(), now};
+    }
 
     [[nodiscard]] static Result<TimePoint> checked_time_point(
         std::chrono::sys_seconds value) {
@@ -485,21 +678,8 @@ private:
     // AccountType (not per-account). The percentage denominator is the total of
     // positive (asset) balances, so a net-liability type shows a negative share
     // — matching the REST example where Credit is "-3.7%".
-    [[nodiscard]] Result<std::vector<DistributionSliceDto>> asset_distribution(
-        domain::UserId user_id,
-        const std::string& /*base_code*/,
-        TimePoint now) {
-        auto pref = preferences_.find_by_user(user_id);
-        if (!pref) {
-            return err(from_repository(pref.error()));
-        }
-        const auto& base = pref->base_currency();
-
-        auto accounts = accounts_.find_active_by_user(user_id);
-        if (!accounts) {
-            return err(from_repository(accounts.error()));
-        }
-
+    [[nodiscard]] static Result<std::vector<DistributionSliceDto>>
+    asset_distribution(const std::vector<AccountValue>& accounts) {
         auto zero = domain::Decimal::from_integer(0);
         if (!zero) {
             return err(from_domain(zero.error()));
@@ -510,29 +690,21 @@ private:
         std::map<int, domain::Decimal> by_type;
         domain::Decimal asset_total = *zero;
 
-        for (const auto& account : *accounts) {
-            auto snapshot = accounts_.balance_of(account.id());
-            if (!snapshot) {
-                return err(from_repository(snapshot.error()));
-            }
-            auto converted = convert_to_base(snapshot->balance, base, now);
-            if (!converted) {
-                return err(converted.error());
-            }
-            const int key = static_cast<int>(account.type());
+        for (const auto& account : accounts) {
+            const int key = static_cast<int>(account.type);
             if (by_type.find(key) == by_type.end()) {
                 by_type.emplace(key, *zero);
-                order.push_back(account.type());
+                order.push_back(account.type);
             }
-            auto sum = by_type.at(key).add(converted->amount());
+            auto sum = by_type.at(key).add(account.balance.amount());
             if (!sum) {
                 return err(from_domain(sum.error()));
             }
             by_type.at(key) = *sum;
 
             // Positive balances contribute to the asset-share denominator.
-            if (converted->amount().is_positive()) {
-                auto asum = asset_total.add(converted->amount());
+            if (account.balance.amount().is_positive()) {
+                auto asum = asset_total.add(account.balance.amount());
                 if (!asum) {
                     return err(from_domain(asum.error()));
                 }
@@ -557,25 +729,22 @@ private:
         return result;
     }
 
-    // Aggregate expense over [from, to) by FIRST-LEVEL (root) category, largest
-    // first (09 §2.4 rule 8). When a category repository is available, every
-    // transaction's category is rolled up to its top-level parent and the slice
-    // carries that root's human name; without one, we fall back to grouping by
-    // the raw category id (id string as name). Uncategorized expenses group
-    // under an empty category id.
+    // Aggregate already-converted expense rows by first-level category. The
+    // complete historical tree is loaded once so soft-deleted categories remain
+    // nameable without a per-transaction recursive repository query.
     [[nodiscard]] Result<std::vector<CategoryBreakdownDto>> top_expense_categories(
         domain::UserId user_id,
-        TimePoint from,
-        TimePoint to) {
-        auto pref = preferences_.find_by_user(user_id);
-        if (!pref) {
-            return err(from_repository(pref.error()));
-        }
-        const auto& base = pref->base_currency();
-
-        auto txs = transactions_.find_by_user(user_id, false);
-        if (!txs) {
-            return err(from_repository(txs.error()));
+        const std::vector<ConvertedTransaction>& transactions) {
+        std::map<std::int64_t, domain::Category> category_by_id;
+        if (categories_ != nullptr) {
+            auto categories =
+                categories_->find_all_for_user_including_deleted(user_id);
+            if (!categories) {
+                return err(from_repository(categories.error()));
+            }
+            for (auto& category : *categories) {
+                category_by_id.emplace(category.id().value(), std::move(category));
+            }
         }
 
         auto zero = domain::Decimal::from_integer(0);
@@ -594,7 +763,8 @@ private:
             return c.has_value() ? c->value() : -1;
         };
 
-        for (const auto& tx : *txs) {
+        for (const auto& converted : transactions) {
+            const auto& tx = *converted.transaction;
             // Expense breakdown counts outflows only: every Expense, and
             // NEGATIVE adjustments (fees/corrections). A positive adjustment is
             // an inflow and does not belong in a spend breakdown. Income and
@@ -605,44 +775,56 @@ private:
             if (!is_expense && !is_outflow_adjustment) {
                 continue;
             }
-            if (tx.occurred_at() < from || tx.occurred_at() >= to) {
-                continue;
-            }
-            auto converted = convert_to_base(tx.amount(), base, tx.occurred_at());
-            if (!converted) {
-                return err(converted.error());
-            }
             // Skip positive (inflow) adjustments; they are not spend.
             if (tx.type() == domain::TransactionType::Adjustment &&
-                !converted->is_negative()) {
+                !converted.amount.is_negative()) {
                 continue;
             }
             auto abs_amt =
-                converted->is_negative() ? converted->negated() : *converted;
+                converted.amount.is_negative()
+                    ? converted.amount.negated()
+                    : converted.amount;
 
             // Roll the transaction's category up to its first-level parent.
             std::optional<domain::CategoryId> bucket = tx.category_id();
             std::string bucket_name;
             if (categories_ != nullptr && tx.category_id().has_value()) {
-                auto root = categories_->resolve_root_id_for_user(
-                    *tx.category_id(), user_id);
-                if (!root) {
-                    if (root.error().status == domain::RepositoryStatus::NotFound) {
-                        // A physically missing historical category cannot be
-                        // named, but the report can still retain the amount.
-                        bucket = std::nullopt;
-                    } else {
-                        return err(from_repository(root.error()));
-                    }
+                auto current = category_by_id.find(tx.category_id()->value());
+                if (current == category_by_id.end()) {
+                    // A physically missing historical category cannot be named,
+                    // but the amount still belongs in the report.
+                    bucket = std::nullopt;
                 } else {
-                    bucket = *root;
-                    auto root_cat =
-                        categories_->find_by_id_for_user_including_deleted(
-                            *root, user_id);
-                    if (!root_cat) {
-                        return err(from_repository(root_cat.error()));
+                    std::set<std::int64_t> visited;
+                    bool reached_root = false;
+                    for (int depth = 0;
+                         depth < domain::kMaxCategoryTreeDepth;
+                         ++depth) {
+                        const auto& node = current->second;
+                        if (!visited.insert(node.id().value()).second) {
+                            return err(from_repository(
+                                domain::RepositoryError::database(
+                                    "Category parent cycle detected")));
+                        }
+                        if (node.is_root()) {
+                            bucket = node.id();
+                            bucket_name = node.name();
+                            reached_root = true;
+                            break;
+                        }
+                        current = category_by_id.find(
+                            node.parent_id()->value());
+                        if (current == category_by_id.end()) {
+                            return err(from_repository(
+                                domain::RepositoryError::database(
+                                    "Category parent chain is broken")));
+                        }
                     }
-                    bucket_name = root_cat->name();
+                    if (!reached_root) {
+                        return err(from_repository(
+                            domain::RepositoryError::database(
+                                "Category parent chain exceeds 64 levels")));
+                    }
                 }
             }
 
@@ -709,15 +891,14 @@ private:
     //   5. USD triangulation           -> USD->from & USD->base, cross-rate
     //   6. otherwise                    -> error (missing rate; NOT latest)
     //
-    // Reproducibility: we only ever call find_historical(at). We deliberately do
-    // NOT fall back to find_latest, which could return a rate fetched AFTER `at`
-    // and make a historical report non-reproducible. Callers wanting the current
-    // value pass `at = now()`, for which find_historical returns the newest rate
-    // at-or-before now (i.e. the current rate).
+    // Reproducibility: the request-local cache contains an anchor at-or-before
+    // the report window plus all snapshots inside it. It never falls back to a
+    // future/latest rate.
     [[nodiscard]] Result<domain::Money> convert_to_base(
         const domain::Money& amount,
         const domain::Currency& base,
-        std::chrono::system_clock::time_point at) const {
+        std::chrono::system_clock::time_point at,
+        HistoricalRateCache& rate_cache) const {
         if (amount.currency() == base) {
             return amount;
         }
@@ -729,16 +910,11 @@ private:
         // through to the next fallback; any other repository error (e.g. a
         // database failure) must abort and propagate as InfrastructureFailure,
         // never be silently downgraded to "missing rate".
-        auto lookup = [this, at](const domain::Currency& b, const domain::Currency& t)
+        auto lookup = [&rate_cache, at](
+                          const domain::Currency& b,
+                          const domain::Currency& t)
             -> Result<std::optional<domain::ExchangeRate>> {
-            auto r = rates_.find_historical(b, t, at);
-            if (r) {
-                return std::optional<domain::ExchangeRate>(*r);
-            }
-            if (r.error().status == domain::RepositoryStatus::NotFound) {
-                return std::optional<domain::ExchangeRate>(std::nullopt);
-            }
-            return err(from_repository(r.error()));
+            return rate_cache.find(b, t, at);
         };
 
         // 3. Direct rate: 1 from = rate base.

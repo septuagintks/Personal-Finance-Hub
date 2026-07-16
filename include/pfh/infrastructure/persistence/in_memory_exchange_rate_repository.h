@@ -9,6 +9,7 @@
 
 #include "pfh/domain/repositories/i_exchange_rate_repository.h"
 #include "pfh/infrastructure/persistence/in_memory_store.h"
+#include <algorithm>
 #include <map>
 #include <utility>
 #include <vector>
@@ -96,6 +97,40 @@ public:
             if (rate.base() == base && rate.target() == target) {
                 result.push_back(rate);
             }
+        }
+        return result;
+    }
+
+    [[nodiscard]] domain::RepositoryResult<std::vector<domain::ExchangeRate>>
+    find_history_for_pair(
+        const domain::Currency& base,
+        const domain::Currency& target,
+        std::chrono::system_clock::time_point from,
+        std::chrono::system_clock::time_point to) override {
+        if (to < from) {
+            return std::unexpected(domain::RepositoryError::validation(
+                "Exchange-rate history range is invalid"));
+        }
+        auto all = find_all_for_pair(base, target);
+        if (!all) {
+            return all;
+        }
+        std::sort(all->begin(), all->end(), [](const auto& lhs, const auto& rhs) {
+            return lhs.fetched_at() < rhs.fetched_at();
+        });
+        std::vector<domain::ExchangeRate> result;
+        const domain::ExchangeRate* anchor = nullptr;
+        for (const auto& rate : *all) {
+            if (rate.fetched_at() <= from) {
+                anchor = &rate;
+                continue;
+            }
+            if (rate.fetched_at() <= to) {
+                result.push_back(rate);
+            }
+        }
+        if (anchor != nullptr) {
+            result.insert(result.begin(), *anchor);
         }
         return result;
     }
