@@ -12,43 +12,71 @@
 
 namespace pfh::application {
 
+[[nodiscard]] inline AccountDto account_to_dto(const domain::Account& account) {
+    AccountDto dto;
+    dto.id = account.id();
+    dto.owner = account.owner();
+    dto.name = account.name();
+    dto.type = account.type();
+    dto.subtype = account.subtype();
+    dto.category = account.category();
+    dto.currency_code = account.currency().code();
+    dto.description = account.description();
+    dto.is_archived = account.is_archived();
+    dto.archived_at = account.archived_at();
+    dto.created_at = account.created_at();
+    dto.updated_at = account.updated_at();
+    dto.version = account.version();
+    return dto;
+}
+
 class ListAccountsUseCase {
 public:
     explicit ListAccountsUseCase(domain::IAccountRepository& accounts)
         : accounts_(accounts) {}
 
-    [[nodiscard]] Result<std::vector<AccountDto>> execute(domain::UserId user_id) {
+    [[nodiscard]] Result<std::vector<AccountDto>> execute(
+        domain::UserId user_id,
+        AccountListStatus status = AccountListStatus::Active) {
         if (!user_id.is_valid()) {
             return err(Error::validation("User id is invalid"));
         }
-        auto accounts = accounts_.find_active_by_user(user_id);
+        std::optional<bool> archived = false;
+        if (status == AccountListStatus::Archived) archived = true;
+        if (status == AccountListStatus::All) archived = std::nullopt;
+        auto accounts = accounts_.find_by_user(user_id, archived);
         if (!accounts) {
             return err(from_repository(accounts.error()));
         }
         std::vector<AccountDto> result;
         result.reserve(accounts->size());
         for (const auto& a : *accounts) {
-            result.push_back(to_dto(a));
+            result.push_back(account_to_dto(a));
         }
         return result;
     }
 
 private:
-    [[nodiscard]] static AccountDto to_dto(const domain::Account& a) {
-        AccountDto dto;
-        dto.id = a.id();
-        dto.owner = a.owner();
-        dto.name = a.name();
-        dto.type = a.type();
-        dto.subtype = a.subtype();
-        dto.category = a.category();
-        dto.currency_code = a.currency().code();
-        dto.description = a.description();
-        dto.is_archived = a.is_archived();
-        dto.version = a.version();
-        return dto;
+    domain::IAccountRepository& accounts_;
+};
+
+class GetAccountUseCase {
+public:
+    explicit GetAccountUseCase(domain::IAccountRepository& accounts)
+        : accounts_(accounts) {}
+
+    [[nodiscard]] Result<AccountDto> execute(
+        domain::UserId user_id,
+        domain::AccountId account_id) {
+        if (!user_id.is_valid() || !account_id.is_valid()) {
+            return err(Error::validation("User and account ids must be valid"));
+        }
+        auto account = accounts_.find_by_id_for_user(account_id, user_id);
+        if (!account) return err(from_repository(account.error()));
+        return account_to_dto(*account);
     }
 
+private:
     domain::IAccountRepository& accounts_;
 };
 

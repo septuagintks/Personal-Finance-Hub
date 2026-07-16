@@ -64,6 +64,23 @@ TEST(HttpBoundaryTest, InfrastructureErrorResponseDoesNotLeakDetails) {
     EXPECT_TRUE(body["field_errors"].empty());
 }
 
+TEST(HttpBoundaryTest, RequiredEmptyStringDistinguishesMissingFromEmpty) {
+    HttpRequest request;
+    request.body = R"({"description":""})";
+    auto object = JsonRequestParser::parse_object(request);
+    ASSERT_TRUE(object.has_value());
+
+    auto empty = JsonRequestParser::required_string_allow_empty(
+        *object, "description", 16);
+    ASSERT_TRUE(empty.has_value());
+    EXPECT_TRUE(empty->empty());
+
+    auto missing = JsonRequestParser::required_string_allow_empty(
+        *object, "note", 16);
+    ASSERT_FALSE(missing.has_value());
+    EXPECT_EQ(missing.error().code, ErrorCode::MissingRequiredField);
+}
+
 TEST(HttpBoundaryTest, StructuredFieldErrorsRemainControlledAndMachineReadable) {
     const auto response = HttpResponseMapper::error(
         Error::field_validation(

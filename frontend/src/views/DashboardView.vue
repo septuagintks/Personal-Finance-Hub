@@ -177,13 +177,13 @@ onBeforeUnmount(() => requestController?.abort());
             <div><strong>Secure session</strong><small>Protected and memory-only</small></div>
             <span class="setup-check">Done</span>
           </div>
-          <div class="setup-row">
+          <RouterLink class="setup-row setup-row--link" :to="{ name: 'accounts' }">
             <span>02</span>
             <div>
               <strong>Add an account</strong><small>Connect your first place for money</small>
             </div>
             <span class="setup-arrow">→</span>
-          </div>
+          </RouterLink>
           <div class="setup-row">
             <span>03</span>
             <div><strong>Record movement</strong><small>Keep the details exact</small></div>

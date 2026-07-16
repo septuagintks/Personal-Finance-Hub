@@ -77,6 +77,12 @@ public:
 
     [[nodiscard]] domain::RepositoryResult<std::vector<domain::Account>> find_active_by_user(
         domain::UserId user_id) override {
+        return find_by_user(user_id, false);
+    }
+
+    [[nodiscard]] domain::RepositoryResult<std::vector<domain::Account>> find_by_user(
+        domain::UserId user_id,
+        std::optional<bool> archived) override {
         std::map<std::int64_t, domain::Account> merged = store_.accounts;
         if (store_.in_transaction) {
             for (const auto& [id, acc] : store_.staged_accounts) {
@@ -89,11 +95,25 @@ public:
 
         std::vector<domain::Account> result;
         for (const auto& [_, acc] : merged) {
-            if (acc.owner() == user_id && !acc.is_archived()) {
+            if (acc.owner() == user_id &&
+                (!archived.has_value() || acc.is_archived() == *archived)) {
                 result.push_back(acc);
             }
         }
         return result;
+    }
+
+    [[nodiscard]] domain::RepositoryResult<bool> has_transactions(
+        domain::ITransactionContext& /*tx*/,
+        domain::AccountId id) override {
+        if (!store_.in_transaction) {
+            return std::unexpected(domain::RepositoryError::database(
+                "has_transactions requires an active transaction"));
+        }
+        auto transactions = transaction_repo_.find_by_account(
+            id, std::nullopt, std::nullopt, true);
+        if (!transactions) return std::unexpected(transactions.error());
+        return !transactions->empty();
     }
 
     [[nodiscard]] domain::RepositoryResult<std::vector<domain::Currency>> list_active_currencies()

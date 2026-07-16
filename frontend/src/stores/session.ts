@@ -22,16 +22,21 @@ import {
   serializeRefresh,
 } from '../services/refresh-coordinator';
 import { ApiError } from '../services/api-error';
+import { useAccountStore } from './accounts';
 import { useUserContextStore } from './user-context';
 
 type RegisterRequest = components['schemas']['RegisterRequest'];
 type LoginRequest = components['schemas']['LoginRequest'];
-const availableHomeRoutes: Record<string, string> = { dashboard: '/dashboard' };
+const availableHomeRoutes: Record<string, string> = {
+  dashboard: '/dashboard',
+  accounts: '/accounts',
+};
 
 installRefreshHandler();
 
 export const useSessionStore = defineStore('session', () => {
   const userContext = useUserContextStore();
+  const accounts = useAccountStore();
   const status = ref<'idle' | 'restoring' | 'authenticated' | 'anonymous'>('idle');
   const userId = ref<number | null>(null);
   const expiresAt = ref<number | null>(null);
@@ -58,6 +63,7 @@ export const useSessionStore = defineStore('session', () => {
     setAccessToken(null);
     clearRefreshState();
     userContext.clear();
+    accounts.clear();
     userId.value = null;
     expiresAt.value = null;
     status.value = 'restoring';
@@ -92,6 +98,7 @@ export const useSessionStore = defineStore('session', () => {
     setAccessToken(null);
     clearRefreshState();
     userContext.clear();
+    accounts.clear();
     userId.value = null;
     expiresAt.value = null;
     status.value = 'anonymous';

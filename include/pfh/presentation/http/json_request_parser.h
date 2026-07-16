@@ -37,6 +37,12 @@ public:
         std::string_view field,
         std::size_t max_length = 4096);
 
+    [[nodiscard]] static application::Result<std::string>
+    required_string_allow_empty(
+        const Json& object,
+        std::string_view field,
+        std::size_t max_length = 4096);
+
     [[nodiscard]] static application::Result<std::optional<std::string>>
     optional_string(
         const Json& object,

@@ -21,7 +21,7 @@ const menuOpen = ref(false);
 
 const navigation = [
   { label: 'Overview', to: '/dashboard', icon: LayoutDashboard },
-  { label: 'Accounts', to: '/accounts', icon: WalletCards, disabled: true },
+  { label: 'Accounts', to: '/accounts', icon: WalletCards },
   { label: 'Transactions', to: '/transactions', icon: ReceiptText, disabled: true },
   { label: 'Reports', to: '/reports', icon: ChartNoAxesCombined, disabled: true },
   { label: 'Settings', to: '/settings', icon: Settings2, disabled: true },
@@ -45,7 +45,7 @@ async function logout(): Promise<void> {
           :to="item.disabled ? route.fullPath : item.to"
           class="app-nav__item"
           :class="{
-            'app-nav__item--active': route.path === item.to,
+            'app-nav__item--active': route.path === item.to || route.path.startsWith(`${item.to}/`),
             'app-nav__item--disabled': item.disabled,
           }"
           :aria-disabled="item.disabled || undefined"
@@ -99,9 +99,11 @@ async function logout(): Promise<void> {
               :to="item.disabled ? route.fullPath : item.to"
               class="app-nav__item"
               :class="{
-                'app-nav__item--active': route.path === item.to,
+                'app-nav__item--active':
+                  route.path === item.to || route.path.startsWith(`${item.to}/`),
                 'app-nav__item--disabled': item.disabled,
               }"
+              :aria-disabled="item.disabled || undefined"
               @click="item.disabled ? $event.preventDefault() : (menuOpen = false)"
             >
               <component :is="item.icon" :size="18" /><span>{{ item.label }}</span

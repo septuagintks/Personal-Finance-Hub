@@ -39,6 +39,14 @@ public:
     [[nodiscard]] domain::RepositoryResult<std::vector<domain::Account>> find_active_by_user(
         domain::UserId user_id) override;
 
+    [[nodiscard]] domain::RepositoryResult<std::vector<domain::Account>> find_by_user(
+        domain::UserId user_id,
+        std::optional<bool> archived) override;
+
+    [[nodiscard]] domain::RepositoryResult<bool> has_transactions(
+        domain::ITransactionContext& tx,
+        domain::AccountId id) override;
+
     [[nodiscard]] domain::RepositoryResult<domain::BalanceSnapshot> balance_of(
         domain::AccountId id) override;
 

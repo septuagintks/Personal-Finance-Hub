@@ -215,6 +215,48 @@ private:
     AccountId account_id_;
 };
 
+class AccountUpdatedEvent final : public UserScopedEvent {
+public:
+    AccountUpdatedEvent(
+        UserId user_id, AccountId account_id,
+        std::chrono::system_clock::time_point occurred_at)
+        : UserScopedEvent(user_id, occurred_at), account_id_(account_id) {}
+
+    [[nodiscard]] std::string event_name() const override { return "AccountUpdated"; }
+    [[nodiscard]] std::string aggregate_type() const override { return "Account"; }
+    [[nodiscard]] std::string aggregate_id() const override {
+        return account_id_.to_string();
+    }
+    [[nodiscard]] std::string payload_json() const override {
+        return "{" + base_payload() +
+               ",\"accountId\":" + std::to_string(account_id_.value()) + "}";
+    }
+
+private:
+    AccountId account_id_;
+};
+
+class AccountRestoredEvent final : public UserScopedEvent {
+public:
+    AccountRestoredEvent(
+        UserId user_id, AccountId account_id,
+        std::chrono::system_clock::time_point occurred_at)
+        : UserScopedEvent(user_id, occurred_at), account_id_(account_id) {}
+
+    [[nodiscard]] std::string event_name() const override { return "AccountRestored"; }
+    [[nodiscard]] std::string aggregate_type() const override { return "Account"; }
+    [[nodiscard]] std::string aggregate_id() const override {
+        return account_id_.to_string();
+    }
+    [[nodiscard]] std::string payload_json() const override {
+        return "{" + base_payload() +
+               ",\"accountId\":" + std::to_string(account_id_.value()) + "}";
+    }
+
+private:
+    AccountId account_id_;
+};
+
 class CategoryCreatedEvent final : public UserScopedEvent {
 public:
     CategoryCreatedEvent(

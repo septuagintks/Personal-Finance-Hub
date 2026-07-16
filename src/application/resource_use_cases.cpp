@@ -36,6 +36,9 @@ using TimePoint = std::chrono::system_clock::time_point;
         account.currency().code(),
         account.description(),
         account.is_archived(),
+        account.archived_at(),
+        account.created_at(),
+        account.updated_at(),
         account.version()};
 }
 
@@ -152,7 +155,7 @@ Result<AccountDto> CreateAccountUseCase::execute(
     const domain::Account account(
         domain::AccountId{}, command.user_id, command.name, command.type,
         command.subtype, *currency, command.description, false, std::nullopt,
-        now, now);
+        now, now, 1, command.category);
     domain::AccountId persisted_id;
     auto write = uow_.execute_in_transaction(
         [&](domain::ITransactionContext& tx) -> domain::RepositoryVoidResult {
@@ -180,7 +183,8 @@ Result<AccountDto> CreateAccountUseCase::execute(
 
 VoidResult ArchiveAccountUseCase::execute(
     const ArchiveAccountCommand& command) {
-    if (!command.user_id.is_valid() || !command.account_id.is_valid()) {
+    if (!command.user_id.is_valid() || !command.account_id.is_valid() ||
+        command.expected_version <= 0) {
         return err(Error::validation("Account id is invalid"));
     }
     const auto archived_at = command.archived_at.value_or(
@@ -197,6 +201,11 @@ VoidResult ArchiveAccountUseCase::execute(
                 app_error = Error::conflict("Account is already archived");
                 return std::unexpected(domain::RepositoryError::conflict(
                     "Account is already archived"));
+            }
+            if (account->version() != command.expected_version) {
+                app_error = Error::conflict("Account version conflict");
+                return std::unexpected(domain::RepositoryError::conflict(
+                    "Account version conflict"));
             }
             account->archive(archived_at);
             if (auto saved = accounts_.save(tx, *account); !saved) {
@@ -217,6 +226,132 @@ VoidResult ArchiveAccountUseCase::execute(
             }
             uow_.register_event(std::make_shared<domain::AccountArchivedEvent>(
                 command.user_id, command.account_id, archived_at));
+            return {};
+        });
+    if (!write) {
+        return app_error.has_value() ? err(*app_error)
+                                     : err(from_repository(write.error()));
+    }
+    return ok();
+}
+
+Result<AccountDto> UpdateAccountUseCase::execute(
+    const UpdateAccountCommand& command) {
+    const bool valid_category = command.category == domain::AccountCategory::Asset ||
+        command.category == domain::AccountCategory::Liability;
+    if (!command.user_id.is_valid() || !command.account_id.is_valid() ||
+        command.expected_version <= 0 || !valid_account_type(command.type) ||
+        !valid_category || !valid_text(command.name, 128) ||
+        !valid_text(command.subtype, 64) ||
+        !valid_text(command.description, 4096, true)) {
+        return err(Error::validation("Account fields are invalid"));
+    }
+    auto currency = domain::Currency::create(command.currency_code);
+    if (!currency) return err(from_domain(currency.error()));
+
+    const auto now = std::chrono::system_clock::now();
+    std::optional<Error> app_error;
+    std::optional<domain::Account> updated;
+    auto write = uow_.execute_in_transaction(
+        [&](domain::ITransactionContext& tx) -> domain::RepositoryVoidResult {
+            auto current = accounts_.find_by_id_for_update(
+                tx, command.account_id, command.user_id);
+            if (!current) return std::unexpected(current.error());
+            if (current->version() != command.expected_version) {
+                app_error = Error::conflict("Account version conflict");
+                return std::unexpected(domain::RepositoryError::conflict(
+                    "Account version conflict"));
+            }
+            if (current->currency().code() != currency->code()) {
+                auto has_history = accounts_.has_transactions(tx, command.account_id);
+                if (!has_history) return std::unexpected(has_history.error());
+                if (*has_history) {
+                    app_error = Error::domain_rule_violation(
+                        "Account currency cannot change after transactions exist");
+                    return std::unexpected(domain::RepositoryError::validation(
+                        "Account currency is immutable after first transaction"));
+                }
+            }
+
+            domain::Account next(
+                current->id(), current->owner(), command.name, command.type,
+                command.subtype, *currency, command.description,
+                current->is_archived(), current->archived_at(),
+                current->created_at(), now, current->version(), command.category);
+            if (auto saved = accounts_.save(tx, next); !saved) {
+                return std::unexpected(saved.error());
+            }
+            if (auto audited = audit_logs_.append(
+                    tx,
+                    audit_entry(
+                        command.user_id, domain::AuditAction::Update, "Account",
+                        command.account_id.to_string(),
+                        "{\"name\":" + json_quoted(current->name()) +
+                            ",\"currencyCode\":" +
+                            json_quoted(current->currency().code()) + "}",
+                        "{\"name\":" + json_quoted(command.name) +
+                            ",\"currencyCode\":" +
+                            json_quoted(currency->code()) + "}",
+                        now));
+                !audited) {
+                return audited;
+            }
+            uow_.register_event(std::make_shared<domain::AccountUpdatedEvent>(
+                command.user_id, command.account_id, now));
+            updated.emplace(
+                current->id(), current->owner(), command.name, command.type,
+                command.subtype, *currency, command.description,
+                current->is_archived(), current->archived_at(),
+                current->created_at(), now, current->version() + 1, command.category);
+            return {};
+        });
+    if (!write) {
+        return app_error.has_value() ? err(*app_error)
+                                     : err(from_repository(write.error()));
+    }
+    return account_dto(*updated);
+}
+
+VoidResult RestoreAccountUseCase::execute(
+    const RestoreAccountCommand& command) {
+    if (!command.user_id.is_valid() || !command.account_id.is_valid() ||
+        command.expected_version <= 0) {
+        return err(Error::validation("Account id or version is invalid"));
+    }
+    const auto restored_at = command.restored_at.value_or(
+        std::chrono::system_clock::now());
+    std::optional<Error> app_error;
+    auto write = uow_.execute_in_transaction(
+        [&](domain::ITransactionContext& tx) -> domain::RepositoryVoidResult {
+            auto account = accounts_.find_by_id_for_update(
+                tx, command.account_id, command.user_id);
+            if (!account) return std::unexpected(account.error());
+            if (!account->is_archived()) {
+                app_error = Error::conflict("Account is not archived");
+                return std::unexpected(domain::RepositoryError::conflict(
+                    "Account is not archived"));
+            }
+            if (account->version() != command.expected_version) {
+                app_error = Error::conflict("Account version conflict");
+                return std::unexpected(domain::RepositoryError::conflict(
+                    "Account version conflict"));
+            }
+            account->unarchive(restored_at);
+            if (auto saved = accounts_.save(tx, *account); !saved) {
+                return std::unexpected(saved.error());
+            }
+            if (auto audited = audit_logs_.append(
+                    tx,
+                    audit_entry(
+                        command.user_id, domain::AuditAction::Update, "Account",
+                        command.account_id.to_string(),
+                        "{\"isArchived\":true}",
+                        "{\"isArchived\":false}", restored_at));
+                !audited) {
+                return audited;
+            }
+            uow_.register_event(std::make_shared<domain::AccountRestoredEvent>(
+                command.user_id, command.account_id, restored_at));
             return {};
         });
     if (!write) {

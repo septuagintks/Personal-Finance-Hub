@@ -113,9 +113,22 @@ HttpResponse ApiApplication::handle(HttpRequest request) noexcept {
                 id.has_value() && request.method == HttpMethod::Post) {
                 return finalize(accounts_->archive(request, *id));
             }
+            if (const auto id = route_id(
+                    request.path, "/api/v1/accounts/", "/restore");
+                id.has_value() && request.method == HttpMethod::Post) {
+                return finalize(accounts_->restore(request, *id));
+            }
             if (const auto id = route_id(request.path, "/api/v1/accounts/");
-                id.has_value() && request.method == HttpMethod::Delete) {
-                return finalize(accounts_->dangerous_delete(request, *id));
+                id.has_value()) {
+                if (request.method == HttpMethod::Get) {
+                    return finalize(accounts_->get(request, *id));
+                }
+                if (request.method == HttpMethod::Put) {
+                    return finalize(accounts_->update(request, *id));
+                }
+                if (request.method == HttpMethod::Delete) {
+                    return finalize(accounts_->dangerous_delete(request, *id));
+                }
             }
         }
         if (request.path == "/api/v1/categories" && categories_ != nullptr) {

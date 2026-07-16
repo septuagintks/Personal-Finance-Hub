@@ -83,10 +83,19 @@ Result<std::unique_ptr<IRequestScope>> FinanceApplicationService::open_scope(
 }
 
 Result<std::vector<AccountDto>> FinanceApplicationService::list_accounts(
-    domain::UserId user_id) {
+    domain::UserId user_id,
+    AccountListStatus status) {
     auto scope = open_scope(user_id);
     if (!scope) return err(scope.error());
-    return ListAccountsUseCase((*scope)->accounts()).execute(user_id);
+    return ListAccountsUseCase((*scope)->accounts()).execute(user_id, status);
+}
+
+Result<AccountDto> FinanceApplicationService::get_account(
+    domain::UserId user_id,
+    domain::AccountId account_id) {
+    auto scope = open_scope(user_id);
+    if (!scope) return err(scope.error());
+    return GetAccountUseCase((*scope)->accounts()).execute(user_id, account_id);
 }
 
 Result<AccountDto> FinanceApplicationService::create_account(
@@ -220,6 +229,24 @@ Result<TransactionDto> FinanceApplicationService::create_transaction(
         (*scope)->categories(),
         (*scope)->transactions(),
         (*scope)->unit_of_work())
+        .execute(command);
+}
+
+VoidResult FinanceApplicationService::restore_account(
+    const RestoreAccountCommand& command) {
+    auto scope = open_scope(command.user_id);
+    if (!scope) return err(scope.error());
+    return RestoreAccountUseCase(
+        (*scope)->accounts(), (*scope)->audit_logs(), (*scope)->unit_of_work())
+        .execute(command);
+}
+
+Result<AccountDto> FinanceApplicationService::update_account(
+    const UpdateAccountCommand& command) {
+    auto scope = open_scope(command.user_id);
+    if (!scope) return err(scope.error());
+    return UpdateAccountUseCase(
+        (*scope)->accounts(), (*scope)->audit_logs(), (*scope)->unit_of_work())
         .execute(command);
 }
 

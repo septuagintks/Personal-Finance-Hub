@@ -132,7 +132,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/accounts/{accountId}": {
+    "/api/v1/accounts/{accountId}/restore": {
         parameters: {
             query?: never;
             header?: never;
@@ -141,6 +141,22 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        post: operations["restoreAccount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/accounts/{accountId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getAccount"];
+        put: operations["updateAccount"];
         post?: never;
         delete: operations["deleteAccount"];
         options?: never;
@@ -479,19 +495,38 @@ export interface components {
             /** @enum {string} */
             type: "cash" | "savings" | "credit" | "digital_wallet" | "investment" | "crypto" | "other";
             subtype: string;
+            /** @enum {string|null} */
+            category?: "asset" | "liability" | null;
             currencyCode: components["schemas"]["CurrencyCode"];
             description?: string | null;
+        };
+        UpdateAccountRequest: {
+            name: string;
+            /** @enum {string} */
+            type: "cash" | "savings" | "credit" | "digital_wallet" | "investment" | "crypto" | "other";
+            subtype: string;
+            /** @enum {string} */
+            category: "asset" | "liability";
+            currencyCode: components["schemas"]["CurrencyCode"];
+            description: string;
         };
         Account: {
             id: components["schemas"]["Id"];
             name: string;
-            type: string;
+            /** @enum {string} */
+            type: "cash" | "savings" | "credit" | "digital_wallet" | "investment" | "crypto" | "other";
             subtype: string;
             /** @enum {string} */
             category: "asset" | "liability";
             currencyCode: components["schemas"]["CurrencyCode"];
             description: string;
             isArchived: boolean;
+            /** Format: date-time */
+            archivedAt: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
             version: number;
         };
         Balance: {
@@ -871,14 +906,16 @@ export interface operations {
     };
     listAccounts: {
         parameters: {
-            query?: never;
+            query?: {
+                status?: "active" | "archived" | "all";
+            };
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Active accounts */
+            /** @description Accounts matching the requested archive state */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -887,6 +924,7 @@ export interface operations {
                     "application/json": components["schemas"]["Account"][];
                 };
             };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
         };
     };
@@ -914,6 +952,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            422: components["responses"]["RuleViolation"];
         };
     };
     getAccountBalance: {
@@ -936,13 +975,17 @@ export interface operations {
                     "application/json": components["schemas"]["Balance"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
         };
     };
     archiveAccount: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description One strong positive integer version ETag, for example "3" */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
             path: {
                 accountId: components["parameters"]["AccountId"];
             };
@@ -957,8 +1000,97 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+        };
+    };
+    restoreAccount: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description One strong positive integer version ETag, for example "3" */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                accountId: components["parameters"]["AccountId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Account restored */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                accountId: components["parameters"]["AccountId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Account detail */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Account"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateAccount: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description One strong positive integer version ETag, for example "3" */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                accountId: components["parameters"]["AccountId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateAccountRequest"];
+            };
+        };
+        responses: {
+            /** @description Account updated */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Account"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["RuleViolation"];
         };
     };
     deleteAccount: {
@@ -982,6 +1114,7 @@ export interface operations {
                 content?: never;
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
         };
     };

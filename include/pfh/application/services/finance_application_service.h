@@ -28,12 +28,19 @@ public:
         const IRequestHasher& request_hasher)
         : scopes_(scopes), clock_(clock), request_hasher_(request_hasher) {}
 
-    [[nodiscard]] Result<std::vector<AccountDto>> list_accounts(domain::UserId user_id);
+    [[nodiscard]] Result<std::vector<AccountDto>> list_accounts(
+        domain::UserId user_id,
+        AccountListStatus status = AccountListStatus::Active);
+    [[nodiscard]] Result<AccountDto> get_account(
+        domain::UserId user_id,
+        domain::AccountId account_id);
     [[nodiscard]] Result<AccountDto> create_account(const CreateAccountCommand& command);
+    [[nodiscard]] Result<AccountDto> update_account(const UpdateAccountCommand& command);
     [[nodiscard]] Result<BalanceDto> account_balance(
         domain::UserId user_id,
         domain::AccountId account_id);
     [[nodiscard]] VoidResult archive_account(const ArchiveAccountCommand& command);
+    [[nodiscard]] VoidResult restore_account(const RestoreAccountCommand& command);
     [[nodiscard]] VoidResult delete_account(const DeleteAccountCommand& command);
 
     [[nodiscard]] Result<std::vector<CategoryTreeDto>> list_categories(

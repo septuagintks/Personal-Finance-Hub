@@ -32,7 +32,16 @@ struct AccountDto {
     std::string currency_code;
     std::string description;
     bool is_archived = false;
+    std::optional<std::chrono::system_clock::time_point> archived_at;
+    std::chrono::system_clock::time_point created_at{};
+    std::chrono::system_clock::time_point updated_at{};
     std::int64_t version = 1;
+};
+
+enum class AccountListStatus {
+    Active,
+    Archived,
+    All
 };
 
 struct CreateAccountCommand {
@@ -42,12 +51,33 @@ struct CreateAccountCommand {
     std::string subtype;
     std::string currency_code;
     std::string description;
+    std::optional<domain::AccountCategory> category;
+};
+
+struct UpdateAccountCommand {
+    domain::UserId user_id;
+    domain::AccountId account_id;
+    std::int64_t expected_version = 0;
+    std::string name;
+    domain::AccountType type = domain::AccountType::Other;
+    std::string subtype;
+    domain::AccountCategory category = domain::AccountCategory::Asset;
+    std::string currency_code;
+    std::string description;
 };
 
 struct ArchiveAccountCommand {
     domain::UserId user_id;
     domain::AccountId account_id;
+    std::int64_t expected_version = 0;
     std::optional<std::chrono::system_clock::time_point> archived_at;
+};
+
+struct RestoreAccountCommand {
+    domain::UserId user_id;
+    domain::AccountId account_id;
+    std::int64_t expected_version = 0;
+    std::optional<std::chrono::system_clock::time_point> restored_at;
 };
 
 struct BalanceDto {

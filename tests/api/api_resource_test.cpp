@@ -211,39 +211,181 @@ protected:
     std::uint64_t request_sequence_ = 0;
 };
 
-TEST_F(ResourceApiTest, AccountLifecycleAndTenantIsolationAreEnforced) {
+TEST_F(ResourceApiTest, AccountLifecycleFiltersAndOptimisticConcurrencyAreEnforced) {
     const auto alice = register_user("alice-resources@example.com");
     const auto bob = register_user("bob-resources@example.com");
     const auto alice_token = alice["accessToken"].get<std::string>();
     const auto bob_token = bob["accessToken"].get<std::string>();
     const auto account = create_account(alice_token);
     const auto id = account["id"].get<std::int64_t>();
+    const auto path = "/api/v1/accounts/" + std::to_string(id);
 
-    const auto list = request(
-        HttpMethod::Get, "/api/v1/accounts", {}, alice_token);
-    ASSERT_EQ(list.status, 200) << list.body;
-    ASSERT_EQ(nlohmann::json::parse(list.body).size(), 1U);
+    const auto detail = request(HttpMethod::Get, path, {}, alice_token);
+    ASSERT_EQ(detail.status, 200) << detail.body;
+    EXPECT_EQ(detail.headers.at("ETag"), R"("1")");
+    const auto detail_body = nlohmann::json::parse(detail.body);
+    EXPECT_EQ(detail_body["version"], 1);
+    EXPECT_FALSE(detail_body["createdAt"].get<std::string>().empty());
+    EXPECT_FALSE(detail_body["updatedAt"].get<std::string>().empty());
+    EXPECT_TRUE(detail_body["archivedAt"].is_null());
+    EXPECT_EQ(request(HttpMethod::Get, path, {}, bob_token).status, 404);
 
     const auto balance = request(
         HttpMethod::Get,
-        "/api/v1/accounts/" + std::to_string(id) + "/balance",
+        path + "/balance",
         {}, alice_token);
     ASSERT_EQ(balance.status, 200) << balance.body;
     EXPECT_EQ(nlohmann::json::parse(balance.body)["balance"], "0");
 
-    const auto foreign = request(
-        HttpMethod::Get,
-        "/api/v1/accounts/" + std::to_string(id) + "/balance",
-        {}, bob_token);
-    EXPECT_EQ(foreign.status, 404);
+    const nlohmann::json update_body{
+        {"name", "Primary Wallet"},
+        {"type", "digital_wallet"},
+        {"subtype", "mobile wallet"},
+        {"category", "asset"},
+        {"currencyCode", "USD"},
+        {"description", "Daily spending"}};
+    auto missing_description = update_body;
+    missing_description.erase("description");
+    EXPECT_EQ(request(
+        HttpMethod::Put, path, missing_description, alice_token, {},
+        {{"If-Match", R"("1")"}}).status, 400);
+
+    const auto updated = request(
+        HttpMethod::Put, path, update_body, alice_token, {},
+        {{"If-Match", R"("1")"}});
+    ASSERT_EQ(updated.status, 200) << updated.body;
+    EXPECT_EQ(updated.headers.at("ETag"), R"("2")");
+    const auto updated_body = nlohmann::json::parse(updated.body);
+    EXPECT_EQ(updated_body["name"], "Primary Wallet");
+    EXPECT_EQ(updated_body["currencyCode"], "USD");
+    EXPECT_EQ(updated_body["version"], 2);
+    EXPECT_EQ(store_.outbox.back().event_name, "AccountUpdated");
+    EXPECT_EQ(store_.audit_logs.back().action, AuditAction::Update);
+
+    EXPECT_EQ(request(
+        HttpMethod::Put, path, update_body, alice_token, {},
+        {{"If-Match", R"("1")"}}).status, 409);
+    EXPECT_EQ(request(
+        HttpMethod::Put, path, update_body, bob_token, {},
+        {{"If-Match", R"("2")"}}).status, 404);
 
     const auto archive = request(
         HttpMethod::Post,
-        "/api/v1/accounts/" + std::to_string(id) + "/archive",
-        {}, alice_token);
+        path + "/archive", {}, alice_token, {},
+        {{"If-Match", R"("2")"}});
     EXPECT_EQ(archive.status, 204) << archive.body;
-    EXPECT_FALSE(store_.audit_logs.empty());
+    ASSERT_TRUE(store_.accounts.contains(id));
+    EXPECT_TRUE(store_.accounts.at(id).is_archived());
+    EXPECT_EQ(store_.accounts.at(id).version(), 3);
+    EXPECT_EQ(store_.audit_logs.back().action, AuditAction::Archive);
     EXPECT_EQ(store_.outbox.back().event_name, "AccountArchived");
+
+    const auto active = request(
+        HttpMethod::Get, "/api/v1/accounts", {}, alice_token,
+        {{"status", "active"}});
+    const auto archived = request(
+        HttpMethod::Get, "/api/v1/accounts", {}, alice_token,
+        {{"status", "archived"}});
+    const auto all = request(
+        HttpMethod::Get, "/api/v1/accounts", {}, alice_token,
+        {{"status", "all"}});
+    ASSERT_EQ(active.status, 200) << active.body;
+    ASSERT_EQ(archived.status, 200) << archived.body;
+    ASSERT_EQ(all.status, 200) << all.body;
+    EXPECT_TRUE(nlohmann::json::parse(active.body).empty());
+    ASSERT_EQ(nlohmann::json::parse(archived.body).size(), 1U);
+    ASSERT_EQ(nlohmann::json::parse(all.body).size(), 1U);
+    EXPECT_EQ(request(
+        HttpMethod::Get, "/api/v1/accounts", {}, alice_token,
+        {{"status", "unknown"}}).status, 400);
+
+    EXPECT_EQ(request(
+        HttpMethod::Post, path + "/restore", {}, alice_token, {},
+        {{"If-Match", R"("2")"}}).status, 409);
+    const auto restore = request(
+        HttpMethod::Post, path + "/restore", {}, alice_token, {},
+        {{"If-Match", R"("3")"}});
+    ASSERT_EQ(restore.status, 204) << restore.body;
+    EXPECT_FALSE(store_.accounts.at(id).is_archived());
+    EXPECT_EQ(store_.accounts.at(id).version(), 4);
+    EXPECT_EQ(store_.audit_logs.back().action, AuditAction::Update);
+    EXPECT_EQ(store_.outbox.back().event_name, "AccountRestored");
+
+    const auto restored_detail = request(HttpMethod::Get, path, {}, alice_token);
+    ASSERT_EQ(restored_detail.status, 200) << restored_detail.body;
+    EXPECT_EQ(restored_detail.headers.at("ETag"), R"("4")");
+    EXPECT_EQ(request(
+        HttpMethod::Post, path + "/restore", {}, alice_token, {},
+        {{"If-Match", R"("4")"}}).status, 409);
+}
+
+TEST_F(ResourceApiTest, AccountCurrencyFreezesAfterDeletedTransactionHistory) {
+    const auto user = register_user("account-currency@example.com");
+    const auto token = user["accessToken"].get<std::string>();
+    const auto account = create_account(token);
+    const auto id = account["id"].get<std::int64_t>();
+    const auto path = "/api/v1/accounts/" + std::to_string(id);
+    const nlohmann::json usd_update{
+        {"name", "Dollar Wallet"},
+        {"type", "digital_wallet"},
+        {"subtype", "wallet"},
+        {"category", "asset"},
+        {"currencyCode", "USD"},
+        {"description", ""}};
+
+    const auto updated = request(
+        HttpMethod::Put, path, usd_update, token, {},
+        {{"If-Match", R"("1")"}});
+    ASSERT_EQ(updated.status, 200) << updated.body;
+    ASSERT_EQ(nlohmann::json::parse(updated.body)["version"], 2);
+
+    const auto created = request(
+        HttpMethod::Post, "/api/v1/transactions",
+        {{"accountId", id}, {"type", "income"}, {"amount", "10"},
+         {"currencyCode", "USD"}}, token);
+    ASSERT_EQ(created.status, 201) << created.body;
+    const auto transaction_id =
+        nlohmann::json::parse(created.body)["id"].get<std::int64_t>();
+    ASSERT_EQ(request(
+        HttpMethod::Delete,
+        "/api/v1/transactions/" + std::to_string(transaction_id),
+        {}, token).status, 204);
+    ASSERT_TRUE(store_.transactions.at(transaction_id).is_deleted());
+
+    auto cny_update = usd_update;
+    cny_update["currencyCode"] = "CNY";
+    const auto rejected = request(
+        HttpMethod::Put, path, cny_update, token, {},
+        {{"If-Match", R"("2")"}});
+    ASSERT_EQ(rejected.status, 422) << rejected.body;
+    EXPECT_EQ(store_.accounts.at(id).currency().code(), "USD");
+    EXPECT_EQ(store_.accounts.at(id).version(), 2);
+}
+
+TEST_F(ResourceApiTest, ArchivedAccountsRejectTransactionsAndTransfers) {
+    const auto user = register_user("archived-account-writes@example.com");
+    const auto token = user["accessToken"].get<std::string>();
+    const auto archived = create_account(token);
+    const auto archived_id = archived["id"].get<std::int64_t>();
+    const auto archived_path =
+        "/api/v1/accounts/" + std::to_string(archived_id);
+    ASSERT_EQ(request(
+        HttpMethod::Post, archived_path + "/archive", {}, token, {},
+        {{"If-Match", R"("1")"}}).status, 204);
+
+    const auto transaction = request(
+        HttpMethod::Post, "/api/v1/transactions",
+        {{"accountId", archived_id}, {"type", "income"},
+         {"amount", "1"}, {"currencyCode", "CNY"}}, token);
+    EXPECT_EQ(transaction.status, 422) << transaction.body;
+
+    const auto active = create_account(token);
+    const auto transfer = request(
+        HttpMethod::Post, "/api/v1/transfers",
+        {{"sourceAccountId", archived_id}, {"targetAccountId", active["id"]},
+         {"mode", "BothAmounts"}, {"outgoingAmount", "1"},
+         {"incomingAmount", "1"}}, token);
+    EXPECT_EQ(transfer.status, 422) << transfer.body;
 }
 
 TEST_F(ResourceApiTest, DangerousDeleteRequiresExactConfirmationCount) {

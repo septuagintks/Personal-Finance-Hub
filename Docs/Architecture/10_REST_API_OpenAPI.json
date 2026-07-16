@@ -186,9 +186,24 @@
     },
     "/api/v1/accounts": {
       "get": {
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "active",
+                "archived",
+                "all"
+              ],
+              "default": "active"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "Active accounts",
+            "description": "Accounts matching the requested archive state",
             "content": {
               "application/json": {
                 "schema": {
@@ -199,6 +214,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -233,6 +251,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "$ref": "#/components/responses/RuleViolation"
           }
         },
         "operationId": "createAccount"
@@ -258,6 +279,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           }
         },
         "operationId": "getAccountBalance"
@@ -268,11 +292,20 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/AccountId"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
           }
         ],
         "responses": {
           "204": {
             "description": "Account archived"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -284,7 +317,125 @@
         "operationId": "archiveAccount"
       }
     },
+    "/api/v1/accounts/{accountId}/restore": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AccountId"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Account restored"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        },
+        "operationId": "restoreAccount"
+      }
+    },
     "/api/v1/accounts/{accountId}": {
+      "get": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AccountId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Account detail",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Account"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "operationId": "getAccount"
+      },
+      "put": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AccountId"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAccountRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Account updated",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Account"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/RuleViolation"
+          }
+        },
+        "operationId": "updateAccount"
+      },
       "delete": {
         "parameters": [
           {
@@ -306,6 +457,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -1416,6 +1570,17 @@
             "type": "string",
             "maxLength": 64
           },
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "asset",
+              "liability",
+              null
+            ]
+          },
           "currencyCode": {
             "$ref": "#/components/schemas/CurrencyCode"
           },
@@ -1424,6 +1589,54 @@
               "string",
               "null"
             ],
+            "maxLength": 4096
+          }
+        }
+      },
+      "UpdateAccountRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "type",
+          "subtype",
+          "category",
+          "currencyCode",
+          "description"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "cash",
+              "savings",
+              "credit",
+              "digital_wallet",
+              "investment",
+              "crypto",
+              "other"
+            ]
+          },
+          "subtype": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "asset",
+              "liability"
+            ]
+          },
+          "currencyCode": {
+            "$ref": "#/components/schemas/CurrencyCode"
+          },
+          "description": {
+            "type": "string",
             "maxLength": 4096
           }
         }
@@ -1440,6 +1653,9 @@
           "currencyCode",
           "description",
           "isArchived",
+          "archivedAt",
+          "createdAt",
+          "updatedAt",
           "version"
         ],
         "properties": {
@@ -1450,7 +1666,16 @@
             "type": "string"
           },
           "type": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "cash",
+              "savings",
+              "credit",
+              "digital_wallet",
+              "investment",
+              "crypto",
+              "other"
+            ]
           },
           "subtype": {
             "type": "string"
@@ -1470,6 +1695,21 @@
           },
           "isArchived": {
             "type": "boolean"
+          },
+          "archivedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
           },
           "version": {
             "type": "integer",

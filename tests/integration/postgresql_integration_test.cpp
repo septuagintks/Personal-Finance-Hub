@@ -1010,7 +1010,7 @@ TEST_F(PostgreSQLIntegrationTest, TransferThreeAccountLockConflictRollsBackWhole
 
     ASSERT_TRUE(holder_result.has_value()) << holder_result.error().message;
     ASSERT_FALSE(conflicted.has_value());
-    EXPECT_EQ(conflicted.error().status, RepositoryStatus::DatabaseError);
+    EXPECT_EQ(conflicted.error().status, RepositoryStatus::Conflict);
     EXPECT_EQ(scalar_count(database->admin, "SELECT count(*) FROM transfer_groups"), 0);
     EXPECT_EQ(scalar_count(database->admin, "SELECT count(*) FROM transactions"), 0);
 }

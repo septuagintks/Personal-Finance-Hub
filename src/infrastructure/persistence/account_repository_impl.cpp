@@ -104,6 +104,12 @@ domain::RepositoryError account_not_found() {
     return domain::RepositoryError::not_found("Account not found for user");
 }
 
+bool is_lock_conflict(const drogon::orm::DrogonDbException& error) {
+    const std::string detail = error.base().what();
+    return detail.find("55P03") != std::string::npos ||
+           detail.find("could not obtain lock on row") != std::string::npos;
+}
+
 }  // namespace
 
 domain::RepositoryResult<domain::Account> AccountRepositoryImpl::find_by_id(
@@ -156,6 +162,10 @@ AccountRepositoryImpl::find_by_id_for_update(
         }
         return map_account_row(result[0]);
     } catch (const drogon::orm::DrogonDbException& error) {
+        if (is_lock_conflict(error)) {
+            return std::unexpected(domain::RepositoryError::conflict(
+                "Account is being changed by another request"));
+        }
         return std::unexpected(postgres::database_error("lock account", error));
     } catch (const std::exception& error) {
         return std::unexpected(postgres::unexpected_error("lock account", error));
@@ -164,15 +174,25 @@ AccountRepositoryImpl::find_by_id_for_update(
 
 domain::RepositoryResult<std::vector<domain::Account>>
 AccountRepositoryImpl::find_active_by_user(domain::UserId user_id) {
+    return find_by_user(user_id, false);
+}
+
+domain::RepositoryResult<std::vector<domain::Account>>
+AccountRepositoryImpl::find_by_user(
+    domain::UserId user_id,
+    std::optional<bool> archived) {
     if (user_id != tenant_user_id_) {
         return std::unexpected(account_not_found());
     }
     return postgres::execute_tenant_read<std::vector<domain::Account>>(
         db_, tenant_user_id_, "list accounts", [&](const auto& transaction) {
             const std::string sql = std::string("SELECT ") + kAccountColumns +
-                " FROM accounts WHERE user_id = $1 AND is_archived = FALSE "
-                "ORDER BY id";
-            const auto result = transaction->execSqlSync(sql, user_id.value());
+                " FROM accounts WHERE user_id = $1" +
+                (archived.has_value() ? " AND is_archived = $2" : "") +
+                " ORDER BY id";
+            const auto result = archived.has_value()
+                ? transaction->execSqlSync(sql, user_id.value(), *archived)
+                : transaction->execSqlSync(sql, user_id.value());
             std::vector<domain::Account> accounts;
             accounts.reserve(result.size());
             for (const auto& row : result) {
@@ -186,6 +206,26 @@ AccountRepositoryImpl::find_active_by_user(domain::UserId user_id) {
             return domain::RepositoryResult<std::vector<domain::Account>>(
                 std::move(accounts));
         });
+}
+
+domain::RepositoryResult<bool> AccountRepositoryImpl::has_transactions(
+    domain::ITransactionContext& tx_iface,
+    domain::AccountId id) {
+    auto context = postgres::require_transaction(tx_iface, tenant_user_id_);
+    if (!context.has_value()) return std::unexpected(context.error());
+    try {
+        const auto result = (*context)->transaction().execSqlSync(
+            "SELECT 1 FROM transactions "
+            "WHERE account_id = $1 AND user_id = $2 LIMIT 1",
+            id.value(), tenant_user_id_.value());
+        return !result.empty();
+    } catch (const drogon::orm::DrogonDbException& error) {
+        return std::unexpected(postgres::database_error(
+            "check account history", error));
+    } catch (const std::exception& error) {
+        return std::unexpected(postgres::unexpected_error(
+            "check account history", error));
+    }
 }
 
 domain::RepositoryResult<domain::BalanceSnapshot>

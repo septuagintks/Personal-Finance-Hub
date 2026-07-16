@@ -3,6 +3,7 @@
 #include "pfh/presentation/controllers/resource_controllers.h"
 
 #include "pfh/application/use_cases/delete_account_use_case.h"
+#include "pfh/presentation/http/concurrency.h"
 #include "pfh/presentation/http/http_response_mapper.h"
 #include "pfh/presentation/http/json_request_parser.h"
 #include "pfh/presentation/http/time_codec.h"
@@ -96,6 +97,14 @@ using Json = nlohmann::json;
     return value == domain::AccountCategory::Asset ? "asset" : "liability";
 }
 
+[[nodiscard]] application::Result<domain::AccountCategory> parse_account_category(
+    const std::string& value) {
+    if (value == "asset") return domain::AccountCategory::Asset;
+    if (value == "liability") return domain::AccountCategory::Liability;
+    return application::err(application::Error::validation(
+        "category must be asset or liability"));
+}
+
 [[nodiscard]] std::string board_text(domain::CategoryBoard value) {
     return value == domain::CategoryBoard::Income ? "income" : "expense";
 }
@@ -122,6 +131,10 @@ using Json = nlohmann::json;
         {"currencyCode", value.currency_code},
         {"description", value.description},
         {"isArchived", value.is_archived},
+        {"archivedAt", value.archived_at.has_value()
+            ? Json(TimeCodec::format_rfc3339(*value.archived_at)) : Json(nullptr)},
+        {"createdAt", TimeCodec::format_rfc3339(value.created_at)},
+        {"updatedAt", TimeCodec::format_rfc3339(value.updated_at)},
         {"version", value.version}};
 }
 
@@ -251,7 +264,20 @@ template <typename Enum>
 HttpResponse AccountController::list(const HttpRequest& request) {
     auto user = require_user(request);
     if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
-    auto result = service_.list_accounts(*user);
+    application::AccountListStatus status = application::AccountListStatus::Active;
+    if (const auto found = request.query.find("status"); found != request.query.end()) {
+        if (found->second == "archived") {
+            status = application::AccountListStatus::Archived;
+        } else if (found->second == "all") {
+            status = application::AccountListStatus::All;
+        } else if (found->second != "active") {
+            return HttpResponseMapper::error(
+                application::Error::validation(
+                    "status must be active, archived, or all"),
+                request.trace_id);
+        }
+    }
+    auto result = service_.list_accounts(*user, status);
     if (!result) return HttpResponseMapper::error(result.error(), request.trace_id);
     Json body = Json::array();
     for (const auto& account : *result) body.push_back(account_json(account));
@@ -264,7 +290,8 @@ HttpResponse AccountController::create(const HttpRequest& request) {
     auto body = JsonRequestParser::parse_object(request);
     if (!body) return HttpResponseMapper::error(body.error(), request.trace_id);
     if (auto fields = JsonRequestParser::reject_unknown_fields(
-            *body, {"name", "type", "subtype", "currencyCode", "description"});
+            *body, {"name", "type", "subtype", "category",
+                    "currencyCode", "description"});
         !fields) {
         return HttpResponseMapper::error(fields.error(), request.trace_id);
     }
@@ -274,19 +301,83 @@ HttpResponse AccountController::create(const HttpRequest& request) {
     auto currency = JsonRequestParser::required_string(*body, "currencyCode", 10);
     auto description = JsonRequestParser::optional_string_allow_empty(
         *body, "description", 4096);
+    auto category_text = JsonRequestParser::optional_string(*body, "category", 16);
     if (!name) return HttpResponseMapper::error(name.error(), request.trace_id);
     if (!type_text) return HttpResponseMapper::error(type_text.error(), request.trace_id);
     if (!subtype) return HttpResponseMapper::error(subtype.error(), request.trace_id);
     if (!currency) return HttpResponseMapper::error(currency.error(), request.trace_id);
     if (!description) return HttpResponseMapper::error(description.error(), request.trace_id);
+    if (!category_text) return HttpResponseMapper::error(category_text.error(), request.trace_id);
     auto type = parse_account_type(*type_text);
     if (!type) return HttpResponseMapper::error(type.error(), request.trace_id);
+    std::optional<domain::AccountCategory> category;
+    if (category_text->has_value()) {
+        auto parsed = parse_account_category(**category_text);
+        if (!parsed) return HttpResponseMapper::error(parsed.error(), request.trace_id);
+        category = *parsed;
+    }
 
     auto result = service_.create_account(application::CreateAccountCommand{
-        *user, *name, *type, *subtype, *currency, description->value_or("")});
+        *user, *name, *type, *subtype, *currency,
+        description->value_or(""), category});
     return result
         ? HttpResponseMapper::json(201, account_json(*result))
         : HttpResponseMapper::error(result.error(), request.trace_id);
+}
+
+HttpResponse AccountController::get(
+    const HttpRequest& request, std::string_view account_id) {
+    auto user = require_user(request);
+    auto id = JsonRequestParser::path_id<domain::AccountId>(account_id, "accountId");
+    if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
+    if (!id) return HttpResponseMapper::error(id.error(), request.trace_id);
+    auto result = service_.get_account(*user, *id);
+    if (!result) return HttpResponseMapper::error(result.error(), request.trace_id);
+    auto response = HttpResponseMapper::json(200, account_json(*result));
+    response.headers.emplace("ETag", version_etag(result->version));
+    return response;
+}
+
+HttpResponse AccountController::update(
+    const HttpRequest& request, std::string_view account_id) {
+    auto user = require_user(request);
+    auto id = JsonRequestParser::path_id<domain::AccountId>(account_id, "accountId");
+    if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
+    if (!id) return HttpResponseMapper::error(id.error(), request.trace_id);
+    auto version = parse_if_match_version(request.header("If-Match").value_or(""));
+    if (!version) return HttpResponseMapper::error(version.error(), request.trace_id);
+    auto body = JsonRequestParser::parse_object(request);
+    if (!body) return HttpResponseMapper::error(body.error(), request.trace_id);
+    if (auto fields = JsonRequestParser::reject_unknown_fields(
+            *body, {"name", "type", "subtype", "category",
+                    "currencyCode", "description"});
+        !fields) {
+        return HttpResponseMapper::error(fields.error(), request.trace_id);
+    }
+    auto name = JsonRequestParser::required_string(*body, "name", 128);
+    auto type_text = JsonRequestParser::required_string(*body, "type", 32);
+    auto subtype = JsonRequestParser::required_string(*body, "subtype", 64);
+    auto category_text = JsonRequestParser::required_string(*body, "category", 16);
+    auto currency = JsonRequestParser::required_string(*body, "currencyCode", 10);
+    auto description = JsonRequestParser::required_string_allow_empty(
+        *body, "description", 4096);
+    if (!name) return HttpResponseMapper::error(name.error(), request.trace_id);
+    if (!type_text) return HttpResponseMapper::error(type_text.error(), request.trace_id);
+    if (!subtype) return HttpResponseMapper::error(subtype.error(), request.trace_id);
+    if (!category_text) return HttpResponseMapper::error(category_text.error(), request.trace_id);
+    if (!currency) return HttpResponseMapper::error(currency.error(), request.trace_id);
+    if (!description) return HttpResponseMapper::error(description.error(), request.trace_id);
+    auto type = parse_account_type(*type_text);
+    auto category = parse_account_category(*category_text);
+    if (!type) return HttpResponseMapper::error(type.error(), request.trace_id);
+    if (!category) return HttpResponseMapper::error(category.error(), request.trace_id);
+    auto result = service_.update_account(application::UpdateAccountCommand{
+        *user, *id, *version, *name, *type, *subtype, *category, *currency,
+        *description});
+    if (!result) return HttpResponseMapper::error(result.error(), request.trace_id);
+    auto response = HttpResponseMapper::json(200, account_json(*result));
+    response.headers.emplace("ETag", version_etag(result->version));
+    return response;
 }
 
 HttpResponse AccountController::balance(
@@ -312,8 +403,24 @@ HttpResponse AccountController::archive(
     auto id = JsonRequestParser::path_id<domain::AccountId>(account_id, "accountId");
     if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
     if (!id) return HttpResponseMapper::error(id.error(), request.trace_id);
+    auto version = parse_if_match_version(request.header("If-Match").value_or(""));
+    if (!version) return HttpResponseMapper::error(version.error(), request.trace_id);
     auto result = service_.archive_account(
-        application::ArchiveAccountCommand{*user, *id, std::nullopt});
+        application::ArchiveAccountCommand{*user, *id, *version, std::nullopt});
+    return result ? HttpResponseMapper::no_content()
+                  : HttpResponseMapper::error(result.error(), request.trace_id);
+}
+
+HttpResponse AccountController::restore(
+    const HttpRequest& request, std::string_view account_id) {
+    auto user = require_user(request);
+    auto id = JsonRequestParser::path_id<domain::AccountId>(account_id, "accountId");
+    if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
+    if (!id) return HttpResponseMapper::error(id.error(), request.trace_id);
+    auto version = parse_if_match_version(request.header("If-Match").value_or(""));
+    if (!version) return HttpResponseMapper::error(version.error(), request.trace_id);
+    auto result = service_.restore_account(
+        application::RestoreAccountCommand{*user, *id, *version, std::nullopt});
     return result ? HttpResponseMapper::no_content()
                   : HttpResponseMapper::error(result.error(), request.trace_id);
 }

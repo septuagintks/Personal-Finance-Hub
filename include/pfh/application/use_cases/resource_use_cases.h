@@ -48,6 +48,40 @@ private:
     IUnitOfWork& uow_;
 };
 
+class UpdateAccountUseCase {
+public:
+    UpdateAccountUseCase(
+        domain::IAccountRepository& accounts,
+        domain::IAuditLogRepository& audit_logs,
+        IUnitOfWork& uow)
+        : accounts_(accounts),
+          audit_logs_(audit_logs),
+          uow_(uow) {}
+
+    [[nodiscard]] Result<AccountDto> execute(const UpdateAccountCommand& command);
+
+private:
+    domain::IAccountRepository& accounts_;
+    domain::IAuditLogRepository& audit_logs_;
+    IUnitOfWork& uow_;
+};
+
+class RestoreAccountUseCase {
+public:
+    RestoreAccountUseCase(
+        domain::IAccountRepository& accounts,
+        domain::IAuditLogRepository& audit_logs,
+        IUnitOfWork& uow)
+        : accounts_(accounts), audit_logs_(audit_logs), uow_(uow) {}
+
+    [[nodiscard]] VoidResult execute(const RestoreAccountCommand& command);
+
+private:
+    domain::IAccountRepository& accounts_;
+    domain::IAuditLogRepository& audit_logs_;
+    IUnitOfWork& uow_;
+};
+
 class ListCategoriesUseCase {
 public:
     explicit ListCategoriesUseCase(domain::ICategoryRepository& categories)

@@ -61,6 +61,31 @@ application::Result<std::string> JsonRequestParser::required_string(
     return value;
 }
 
+application::Result<std::string>
+JsonRequestParser::required_string_allow_empty(
+    const Json& object,
+    std::string_view field,
+    std::size_t max_length) {
+    const auto key = std::string(field);
+    const auto it = object.find(key);
+    if (it == object.end()) {
+        return application::err(application::Error(
+            application::ErrorCode::MissingRequiredField,
+            key + " is required"));
+    }
+    if (!it->is_string()) {
+        return application::err(application::Error(
+            application::ErrorCode::InvalidFormat,
+            key + " must be a string"));
+    }
+    auto value = it->get<std::string>();
+    if (value.size() > max_length) {
+        return application::err(application::Error::validation(
+            key + " exceeds the maximum length"));
+    }
+    return value;
+}
+
 application::Result<std::optional<std::string>>
 JsonRequestParser::optional_string(
     const Json& object,
@@ -88,17 +113,9 @@ JsonRequestParser::optional_string_allow_empty(
     if (it == object.end() || it->is_null()) {
         return std::optional<std::string>{};
     }
-    if (!it->is_string()) {
-        return application::err(application::Error(
-            application::ErrorCode::InvalidFormat,
-            key + " must be a string"));
-    }
-    auto value = it->get<std::string>();
-    if (value.size() > max_length) {
-        return application::err(application::Error::validation(
-            key + " exceeds the maximum length"));
-    }
-    return std::optional<std::string>(std::move(value));
+    auto value = required_string_allow_empty(object, field, max_length);
+    if (!value) return application::err(value.error());
+    return std::optional<std::string>(std::move(*value));
 }
 
 application::Result<std::int64_t> JsonRequestParser::positive_integer(

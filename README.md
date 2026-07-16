@@ -20,6 +20,7 @@ Personal Finance Hub 是仓库、后端和 API 的工程名称；面向用户的
 - FreeCurrencyAPI 主源、exchangerate.fun 整批备用与历史降级。
 - Ubuntu 24.04 Docker 镜像、non-root、healthcheck 和优雅停止。
 - Candy's Ledger 公开入口、同源 Web 会话、认证页面和应用 Shell。
+- Candy's Ledger 账户列表、详情、余额、编辑、归档、恢复和危险删除。
 
 金额与汇率不使用二进制浮点：金额使用 `NUMERIC(20,8)`，汇率使用 `NUMERIC(20,10)`，JSON 金额使用十进制字符串。
 
@@ -127,8 +128,8 @@ Docs/                 Architecture, plans, guides, standards and archive
 | Flyway V1-V6 | migrate/info/validate/no-op PASS |
 | Docker | cold build、healthy、non-root、RLS、Outbox/Scheduler PASS |
 | Phase 2 S01-S02 Windows Debug/Release | 358/358 PASS |
-| Frontend contract/lint/typecheck/unit/build | PASS（20 tests） |
-| Frontend Edge Desktop/Mobile contract E2E + axe | 17/17 PASS |
+| Frontend contract/lint/typecheck/unit/build | PASS（28 tests） |
+| Frontend Edge Desktop/Mobile contract E2E + axe | 21/21 PASS |
 
 ---
 

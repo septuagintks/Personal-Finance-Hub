@@ -210,6 +210,14 @@ def main() -> int:
         failures,
     )
     require(
+        "55P03" in account
+        and "could not obtain lock on row" in account
+        and "RepositoryError::conflict" in account
+        and "WHERE account_id = $1 AND user_id = $2 LIMIT 1" in account,
+        "Account writes must map row-lock contention to conflict and check all transaction history",
+        failures,
+    )
+    require(
         "FOR UPDATE" in idempotency
         and "ON CONFLICT (user_id, operation, idempotency_key) DO NOTHING"
         in idempotency

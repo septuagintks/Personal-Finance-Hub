@@ -40,6 +40,17 @@ public:
     [[nodiscard]] virtual RepositoryResult<std::vector<Account>> find_active_by_user(
         UserId user_id) = 0;
 
+    /// @brief List owned accounts by archive state. nullopt returns all rows.
+    [[nodiscard]] virtual RepositoryResult<std::vector<Account>> find_by_user(
+        UserId user_id,
+        std::optional<bool> archived) = 0;
+
+    /// @brief Check whether any active or deleted transaction references the
+    /// account inside the current write transaction.
+    [[nodiscard]] virtual RepositoryResult<bool> has_transactions(
+        ITransactionContext& tx,
+        AccountId id) = 0;
+
     /// @brief Return balance snapshot. Implementation owns cache hit/miss/rebuild.
     [[nodiscard]] virtual RepositoryResult<BalanceSnapshot> balance_of(AccountId id) = 0;
 

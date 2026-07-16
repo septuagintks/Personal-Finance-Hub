@@ -16,9 +16,15 @@ public:
 
     [[nodiscard]] HttpResponse list(const HttpRequest& request);
     [[nodiscard]] HttpResponse create(const HttpRequest& request);
+    [[nodiscard]] HttpResponse get(
+        const HttpRequest& request, std::string_view account_id);
+    [[nodiscard]] HttpResponse update(
+        const HttpRequest& request, std::string_view account_id);
     [[nodiscard]] HttpResponse balance(
         const HttpRequest& request, std::string_view account_id);
     [[nodiscard]] HttpResponse archive(
+        const HttpRequest& request, std::string_view account_id);
+    [[nodiscard]] HttpResponse restore(
         const HttpRequest& request, std::string_view account_id);
     [[nodiscard]] HttpResponse dangerous_delete(
         const HttpRequest& request, std::string_view account_id);
