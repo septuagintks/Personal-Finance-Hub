@@ -172,8 +172,8 @@ private:
 
                 // Stamp current time when the caller omitted a business time,
                 // so a missing REST field never lands the record in 1970.
-                const auto occurred_at =
-                    cmd.occurred_at.value_or(std::chrono::system_clock::now());
+                const auto occurred_at = normalize_persisted_time(
+                    cmd.occurred_at.value_or(std::chrono::system_clock::now()));
                 domain::Transaction tx(
                     domain::TransactionId{},
                     cmd.user_id,

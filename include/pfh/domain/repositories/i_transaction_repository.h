@@ -80,7 +80,8 @@ public:
         UserId user_id,
         bool include_deleted = false) = 0;
 
-    /// @brief Find user transactions in the half-open range [from, to).
+    /// @brief Find user transactions in the half-open range [from, to), ordered
+    /// by occurred_at and then id so report consumers can process one pass.
     [[nodiscard]] virtual RepositoryResult<std::vector<Transaction>>
     find_by_user_in_range(
         UserId user_id,

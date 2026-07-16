@@ -75,6 +75,7 @@ def main() -> int:
         failures.append("Phase 1 must not publish a transfer delete operation")
 
     operation_ids: list[str] = []
+    overload_ref = "#/components/responses/ServiceUnavailable"
     for path, path_item in paths.items():
         for method, operation in path_item.items():
             if method not in {"get", "post", "put", "delete", "patch"}:
@@ -84,6 +85,10 @@ def main() -> int:
                 failures.append(f"{method.upper()} {path} has no operationId")
             else:
                 operation_ids.append(operation_id)
+            if operation.get("responses", {}).get("503", {}).get("$ref") != overload_ref:
+                failures.append(
+                    f"{method.upper()} {path} must publish the bounded-queue 503 response"
+                )
     if len(operation_ids) != len(set(operation_ids)):
         failures.append("OpenAPI operationId values must be unique")
 
@@ -110,6 +115,18 @@ def main() -> int:
 
     schemas = document.get("components", {}).get("schemas", {})
     components = document.get("components", {})
+    service_unavailable = components.get("responses", {}).get(
+        "ServiceUnavailable", {}
+    )
+    if (
+        "Retry-After" not in service_unavailable.get("headers", {})
+        or service_unavailable.get("content", {})
+        .get("application/json", {})
+        .get("schema", {})
+        .get("$ref")
+        != "#/components/schemas/ErrorResponse"
+    ):
+        failures.append("ServiceUnavailable must define Retry-After and ErrorResponse")
     security_schemes = components.get("securitySchemes", {})
     cookie_auth = security_schemes.get("cookieAuth", {})
     if cookie_auth != {

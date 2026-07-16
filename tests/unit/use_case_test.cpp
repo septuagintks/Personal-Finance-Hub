@@ -2310,6 +2310,40 @@ TEST_F(UseCaseTest, CreateTransfer_WhenNoOccurredAt_StampsRecentTime) {
     EXPECT_LE(leg->occurred_at(), after);
 }
 
+TEST_F(UseCaseTest, FinancialCreatesNormalizeBusinessTimeToMicroseconds) {
+    auto s = seed();
+    const auto precise = sample_time() + std::chrono::nanoseconds(123456789);
+    const auto expected = normalize_persisted_time(precise);
+
+    CreateTransactionUseCase transaction_uc(
+        *account_repo_, *category_repo_, *tx_repo_, *uow_);
+    CreateTransactionCommand income;
+    income.user_id = s.user;
+    income.account_id = s.cash;
+    income.type = TransactionType::Income;
+    income.amount = "10";
+    income.currency_code = "USD";
+    income.occurred_at = precise;
+    auto transaction = transaction_uc.execute(income);
+    ASSERT_TRUE(transaction.has_value()) << transaction.error().message;
+    EXPECT_EQ(transaction->occurred_at, expected);
+
+    CreateTransferUseCase transfer_uc(*account_repo_, *tx_repo_, *uow_);
+    CreateTransferCommand transfer;
+    transfer.user_id = s.user;
+    transfer.source_account_id = s.cash;
+    transfer.target_account_id = s.savings;
+    transfer.mode = TransferInputMode::BothAmounts;
+    transfer.outgoing_amount = "1";
+    transfer.incoming_amount = "1";
+    transfer.occurred_at = precise;
+    auto transferred = transfer_uc.execute(transfer);
+    ASSERT_TRUE(transferred.has_value()) << transferred.error().message;
+    auto outgoing = tx_repo_->find_by_id(transferred->outgoing_transaction_id);
+    ASSERT_TRUE(outgoing.has_value()) << outgoing.error().message;
+    EXPECT_EQ(outgoing->occurred_at(), expected);
+}
+
 // ---- Group A: report follow-ups (timezone month window + root-category rollup) ----
 
 // Dashboard month window honors the user's timezone: a transaction stamped at

@@ -656,7 +656,8 @@ TEST_F(ResourceApiTest, TransactionCreateIsIdempotentAndTenantScoped) {
     const auto alice_body = nlohmann::json{
         {"accountId", alice_account}, {"type", "expense"},
         {"amount", "12.50"}, {"currencyCode", "CNY"},
-        {"description", "idempotent lunch"}};
+        {"description", "idempotent lunch"},
+        {"occurredAt", "2026-07-16T12:34:56.123456789Z"}};
     const std::map<std::string, std::string> key{
         {"Idempotency-Key", "same-operation-key"}};
     const auto transactions_before = store_.transactions.size();
@@ -671,6 +672,9 @@ TEST_F(ResourceApiTest, TransactionCreateIsIdempotentAndTenantScoped) {
     ASSERT_EQ(first.status, 201) << first.body;
     ASSERT_EQ(replay.status, 201) << replay.body;
     EXPECT_EQ(replay.body, first.body);
+    EXPECT_EQ(
+        nlohmann::json::parse(first.body)["occurredAt"],
+        "2026-07-16T12:34:56.123456Z");
     EXPECT_EQ(store_.transactions.size(), transactions_before + 1U);
     EXPECT_EQ(store_.outbox.size(), outbox_before + 1U);
 

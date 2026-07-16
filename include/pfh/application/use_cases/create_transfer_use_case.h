@@ -367,8 +367,8 @@ private:
 
         // Stamp current time when the caller omitted a business time, so a
         // missing REST field never lands the transfer legs in 1970.
-        const auto occurred_at =
-            cmd.occurred_at.value_or(std::chrono::system_clock::now());
+        const auto occurred_at = normalize_persisted_time(
+            cmd.occurred_at.value_or(std::chrono::system_clock::now()));
 
         auto parse_money = [](const std::string& amount,
                               const domain::Currency& currency)

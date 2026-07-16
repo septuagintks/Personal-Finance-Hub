@@ -45,6 +45,9 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         },
         "operationId": "registerTokenUser"
@@ -79,6 +82,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         },
         "operationId": "loginTokenUser"
@@ -113,6 +119,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         },
         "operationId": "refreshTokenSession"
@@ -139,6 +148,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         },
         "operationId": "logoutTokenSession"
@@ -179,6 +191,9 @@
           },
           "304": {
             "description": "Catalog unchanged"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         },
         "operationId": "listCurrencies"
@@ -220,6 +235,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         },
         "operationId": "listAccounts"
@@ -254,6 +272,9 @@
           },
           "422": {
             "$ref": "#/components/responses/RuleViolation"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         },
         "operationId": "createAccount"
@@ -277,11 +298,14 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         },
         "operationId": "getAccountBalance"
@@ -312,6 +336,9 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         },
         "operationId": "archiveAccount"
@@ -342,6 +369,9 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         },
         "operationId": "restoreAccount"
@@ -372,11 +402,14 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         },
         "operationId": "getAccount"
@@ -432,6 +465,9 @@
           },
           "422": {
             "$ref": "#/components/responses/RuleViolation"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         },
         "operationId": "updateAccount"
@@ -463,6 +499,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         },
         "operationId": "deleteAccount"
@@ -492,6 +531,9 @@
                 }
               }
             }
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         },
         "operationId": "listCategories"
@@ -526,6 +568,9 @@
           },
           "422": {
             "$ref": "#/components/responses/RuleViolation"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         },
         "operationId": "createCategory"
@@ -547,6 +592,9 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         },
         "operationId": "deleteCategory"
@@ -567,6 +615,9 @@
                 }
               }
             }
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         },
         "operationId": "listTags"
@@ -598,6 +649,9 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         },
         "operationId": "createTag"
@@ -616,6 +670,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         },
         "operationId": "deleteTag"
@@ -633,6 +690,9 @@
                 }
               }
             }
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         },
         "operationId": "getUserPreferences"
@@ -661,6 +721,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         },
         "operationId": "updateUserPreferences"
@@ -700,6 +763,9 @@
           },
           "422": {
             "$ref": "#/components/responses/RuleViolation"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         },
         "operationId": "createTransaction",
@@ -729,6 +795,9 @@
           },
           "422": {
             "$ref": "#/components/responses/RuleViolation"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         },
         "operationId": "deleteTransaction"
@@ -770,6 +839,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         },
         "operationId": "replaceTransactionTags"
@@ -809,6 +881,9 @@
           },
           "422": {
             "$ref": "#/components/responses/RuleViolation"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         },
         "operationId": "createTransfer",
@@ -839,6 +914,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         },
         "operationId": "getTransfer"
@@ -859,6 +937,9 @@
           },
           "422": {
             "$ref": "#/components/responses/RuleViolation"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         },
         "operationId": "getNetWorth"
@@ -911,6 +992,9 @@
           },
           "422": {
             "$ref": "#/components/responses/RuleViolation"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         },
         "operationId": "getCashFlow"
@@ -931,6 +1015,9 @@
           },
           "422": {
             "$ref": "#/components/responses/RuleViolation"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         },
         "operationId": "getDashboardSummary"
@@ -991,6 +1078,9 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         }
       }
@@ -1050,6 +1140,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         }
       }
@@ -1100,6 +1193,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         }
       }
@@ -1144,6 +1240,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         }
       }
@@ -1316,6 +1415,25 @@
       },
       "Forbidden": {
         "description": "Request is not permitted",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "ServiceUnavailable": {
+        "description": "The bounded HTTP request queue is full",
+        "headers": {
+          "Retry-After": {
+            "description": "Seconds before the client should retry",
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*$"
+            }
+          }
+        },
         "content": {
           "application/json": {
             "schema": {

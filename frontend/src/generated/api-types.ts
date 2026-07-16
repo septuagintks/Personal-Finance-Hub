@@ -751,6 +751,17 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
+        /** @description The bounded HTTP request queue is full */
+        ServiceUnavailable: {
+            headers: {
+                /** @description Seconds before the client should retry */
+                "Retry-After"?: string;
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
     };
     parameters: {
         AccountId: components["schemas"]["Id"];
@@ -796,6 +807,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     loginTokenUser: {
@@ -822,6 +834,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     refreshTokenSession: {
@@ -848,6 +861,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     logoutTokenSession: {
@@ -872,6 +886,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     listCurrencies: {
@@ -902,6 +917,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     listAccounts: {
@@ -926,6 +942,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     createAccount: {
@@ -953,6 +970,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             422: components["responses"]["RuleViolation"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getAccountBalance: {
@@ -977,6 +995,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     archiveAccount: {
@@ -1004,6 +1023,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     restoreAccount: {
@@ -1031,6 +1051,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getAccount: {
@@ -1056,6 +1077,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     updateAccount: {
@@ -1091,6 +1113,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     deleteAccount: {
@@ -1116,6 +1139,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     listCategories: {
@@ -1138,6 +1162,7 @@ export interface operations {
                     "application/json": components["schemas"]["CategoryTree"][];
                 };
             };
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     createCategory: {
@@ -1165,6 +1190,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     deleteCategory: {
@@ -1187,6 +1213,7 @@ export interface operations {
             };
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     listTags: {
@@ -1207,6 +1234,7 @@ export interface operations {
                     "application/json": components["schemas"]["Tag"][];
                 };
             };
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     createTag: {
@@ -1233,6 +1261,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     deleteTag: {
@@ -1254,6 +1283,7 @@ export interface operations {
                 content?: never;
             };
             404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getUserPreferences: {
@@ -1274,6 +1304,7 @@ export interface operations {
                     "application/json": components["schemas"]["UserPreference"];
                 };
             };
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     updateUserPreferences: {
@@ -1299,6 +1330,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     createTransaction: {
@@ -1329,6 +1361,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     deleteTransaction: {
@@ -1352,6 +1385,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     replaceTransactionTags: {
@@ -1380,6 +1414,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     createTransfer: {
@@ -1410,6 +1445,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getTransfer: {
@@ -1433,6 +1469,7 @@ export interface operations {
                 };
             };
             404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getNetWorth: {
@@ -1454,6 +1491,7 @@ export interface operations {
                 };
             };
             422: components["responses"]["RuleViolation"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getCashFlow: {
@@ -1480,6 +1518,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             422: components["responses"]["RuleViolation"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getDashboardSummary: {
@@ -1501,6 +1540,7 @@ export interface operations {
                 };
             };
             422: components["responses"]["RuleViolation"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     registerWebUser: {
@@ -1534,6 +1574,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     loginWebUser: {
@@ -1567,6 +1608,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     refreshWebSession: {
@@ -1595,6 +1637,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     logoutWebSession: {
@@ -1621,6 +1664,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
 }

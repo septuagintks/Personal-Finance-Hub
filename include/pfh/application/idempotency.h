@@ -26,6 +26,17 @@ struct IdempotencyRequest {
 
 using IdempotencyValues = std::map<std::string, std::string>;
 
+/// @brief Match the precision retained by PostgreSQL TIMESTAMPTZ and the
+/// idempotency response codec before a business timestamp is persisted.
+[[nodiscard]] inline std::chrono::system_clock::time_point
+normalize_persisted_time(
+    std::chrono::system_clock::time_point value) noexcept {
+    const auto micros = std::chrono::duration_cast<std::chrono::microseconds>(
+        value.time_since_epoch());
+    return std::chrono::system_clock::time_point(
+        std::chrono::duration_cast<std::chrono::system_clock::duration>(micros));
+}
+
 [[nodiscard]] inline VoidResult validate_idempotency_input(
     std::string_view key,
     std::string_view fingerprint) {
@@ -82,7 +93,7 @@ inline void append_canonical_field(std::string& output, std::string_view value) 
 [[nodiscard]] inline std::string encode_idempotency_time(
     std::chrono::system_clock::time_point value) {
     return std::to_string(std::chrono::duration_cast<std::chrono::microseconds>(
-        value.time_since_epoch()).count());
+        normalize_persisted_time(value).time_since_epoch()).count());
 }
 
 [[nodiscard]] inline std::optional<std::chrono::system_clock::time_point>
