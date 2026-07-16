@@ -89,9 +89,9 @@ Phase 1 后端基线已经完成并通过：
 - FreeCurrencyAPI 主源、exchangerate.fun 整批备用和历史降级。
 - Ubuntu 24.04 Docker 冷构建、non-root、双角色、FORCE RLS、Outbox/Scheduler 与优雅停止。
 
-Phase 2 当前分支已完成 S01-S02，Windows Debug/Release PostgreSQL OFF 全量门禁为 `358/358 PASS`；Linux production ON、真实 PostgreSQL 和 Docker 仍按 Phase 2 交付矩阵复核。
+Phase 2 当前分支已完成 S01-S03，Windows Debug/Release PostgreSQL OFF 全量门禁为 `358/358 PASS`；Linux production ON、真实 PostgreSQL 和 Docker 仍按 Phase 2 交付矩阵复核。
 
-Phase 2 正在开发，P2-S01 至 P2-S03 已完成，P2-S04 已完成本机契约切片并等待真实后端会话验收。Phase 3 保留给账单导入与支付平台生态。
+P2-S04 浏览器客户端实现与本机契约验收已完成，真实 Drogon/PostgreSQL 会话及三浏览器结果保留到目标环境验收。Phase 3 保留给账单导入与支付平台生态。
 
 汇率实时能力当前覆盖 20 种法币与 BTC。其他 12 种加密货币没有实时保证，系统会返回完整历史降级或明确不可用；完整加密货币定价不在当前计划内。
 

@@ -22,33 +22,76 @@ import {
   serializeRefresh,
 } from '../services/refresh-coordinator';
 import { ApiError } from '../services/api-error';
+import { useUserContextStore } from './user-context';
 
 type RegisterRequest = components['schemas']['RegisterRequest'];
 type LoginRequest = components['schemas']['LoginRequest'];
+const availableHomeRoutes: Record<string, string> = { dashboard: '/dashboard' };
 
 installRefreshHandler();
 
 export const useSessionStore = defineStore('session', () => {
+  const userContext = useUserContextStore();
   const status = ref<'idle' | 'restoring' | 'authenticated' | 'anonymous'>('idle');
   const userId = ref<number | null>(null);
   const expiresAt = ref<number | null>(null);
   let restorePromise: Promise<void> | null = null;
   let stopChannel: (() => void) | null = null;
+  let lifecycleGeneration = 0;
+  let lifecycleController: AbortController | null = null;
 
   const isAuthenticated = computed(
     () => status.value === 'authenticated' && getAccessToken() !== null,
   );
   const isBusy = computed(() => status.value === 'restoring');
 
-  function applyToken(pair: WebTokenPair | WebRegisterResponse): void {
+  const defaultHomeRoute = computed(() => {
+    const configured = userContext.preference?.defaultHomePage ?? 'dashboard';
+    return availableHomeRoutes[configured] ?? '/dashboard';
+  });
+
+  function beginAuthentication(): { generation: number; controller: AbortController } {
+    lifecycleGeneration += 1;
+    lifecycleController?.abort();
+    const controller = new AbortController();
+    lifecycleController = controller;
+    setAccessToken(null);
+    clearRefreshState();
+    userContext.clear();
+    userId.value = null;
+    expiresAt.value = null;
+    status.value = 'restoring';
+    return { generation: lifecycleGeneration, controller };
+  }
+
+  function isCurrent(generation: number, controller: AbortController): boolean {
+    return lifecycleGeneration === generation && !controller.signal.aborted;
+  }
+
+  async function completeAuthentication(
+    attempt: { generation: number; controller: AbortController },
+    pair: WebTokenPair | WebRegisterResponse,
+    nextUserId: number | null = null,
+  ): Promise<boolean> {
+    if (!isCurrent(attempt.generation, attempt.controller)) return false;
     setAccessToken(pair.accessToken);
     expiresAt.value = Date.now() + pair.expiresIn * 1000;
+    const contextLoaded = await userContext.load();
+    if (!contextLoaded || !isCurrent(attempt.generation, attempt.controller)) return false;
+
+    userId.value = nextUserId;
     status.value = 'authenticated';
+    lifecycleController = null;
+    return true;
   }
 
   function clear(): void {
+    lifecycleGeneration += 1;
+    lifecycleController?.abort();
+    lifecycleController = null;
     setAccessToken(null);
     clearRefreshState();
+    userContext.clear();
     userId.value = null;
     expiresAt.value = null;
     status.value = 'anonymous';
@@ -57,37 +100,55 @@ export const useSessionStore = defineStore('session', () => {
   async function restore(): Promise<void> {
     if (status.value === 'authenticated') return;
     if (restorePromise) return restorePromise;
-    status.value = 'restoring';
-    restorePromise = serializeRefresh(async () => {
+    const attempt = beginAuthentication();
+    restorePromise = (async () => {
       try {
-        const pair = await refreshWeb();
-        applyToken(pair);
-        broadcastSessionState('authenticated');
+        const pair = await serializeRefresh(() => refreshWeb(attempt.controller.signal));
+        if (await completeAuthentication(attempt, pair)) {
+          broadcastSessionState('authenticated');
+        }
       } catch {
-        clear();
+        if (isCurrent(attempt.generation, attempt.controller)) clear();
       }
-    }).finally(() => {
+    })().finally(() => {
       restorePromise = null;
     });
     await restorePromise;
   }
 
   async function register(payload: RegisterRequest): Promise<void> {
-    const result = await registerWeb(payload);
-    userId.value = result.userId;
-    applyToken(result);
-    broadcastSessionState('authenticated');
+    const attempt = beginAuthentication();
+    try {
+      const result = await registerWeb(payload, attempt.controller.signal);
+      if (await completeAuthentication(attempt, result, result.userId)) {
+        broadcastSessionState('authenticated');
+      }
+    } catch (error) {
+      if (!isCurrent(attempt.generation, attempt.controller)) return;
+      clear();
+      throw error;
+    }
   }
 
   async function login(payload: LoginRequest): Promise<void> {
-    const result = await loginWeb(payload);
-    applyToken(result);
-    broadcastSessionState('authenticated');
+    const attempt = beginAuthentication();
+    try {
+      const result = await loginWeb(payload, attempt.controller.signal);
+      if (await completeAuthentication(attempt, result)) {
+        broadcastSessionState('authenticated');
+      }
+    } catch (error) {
+      if (!isCurrent(attempt.generation, attempt.controller)) return;
+      clear();
+      throw error;
+    }
   }
 
   async function logout(): Promise<void> {
+    const shouldRevokeServerSession = isAuthenticated.value;
+    clearRefreshState();
     try {
-      if (isAuthenticated.value) await logoutWeb();
+      if (shouldRevokeServerSession) await logoutWeb();
     } finally {
       clear();
       broadcastSessionState('anonymous');
@@ -118,6 +179,7 @@ export const useSessionStore = defineStore('session', () => {
     expiresAt,
     isAuthenticated,
     isBusy,
+    defaultHomeRoute,
     restore,
     register,
     login,

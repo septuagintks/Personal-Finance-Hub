@@ -17,7 +17,9 @@ declare module 'axios' {
 
 let accessToken: string | null = null;
 let refreshPromise: Promise<string | null> | null = null;
-let refreshHandler: (() => Promise<string>) | null = null;
+let refreshGeneration = 0;
+let refreshController: AbortController | null = null;
+let refreshHandler: ((signal: AbortSignal) => Promise<string>) | null = null;
 let sessionExpiredHandler: (() => void) | null = null;
 
 export const http: AxiosInstance = axios.create({
@@ -35,7 +37,7 @@ export function getAccessToken(): string | null {
   return accessToken;
 }
 
-export function registerRefreshHandler(handler: () => Promise<string>): void {
+export function registerRefreshHandler(handler: (signal: AbortSignal) => Promise<string>): void {
   refreshHandler = handler;
 }
 
@@ -44,6 +46,9 @@ export function registerSessionExpiredHandler(handler: () => void): void {
 }
 
 export function clearRefreshState(): void {
+  refreshGeneration += 1;
+  refreshController?.abort();
+  refreshController = null;
   refreshPromise = null;
 }
 
@@ -57,15 +62,23 @@ function withBearer(config: InternalAxiosRequestConfig): InternalAxiosRequestCon
 async function refreshOnce(): Promise<string | null> {
   if (!refreshHandler) return null;
   if (!refreshPromise) {
-    refreshPromise = refreshHandler()
+    const generation = refreshGeneration;
+    const controller = new AbortController();
+    refreshController = controller;
+    const pending = refreshHandler(controller.signal)
       .then((token) => {
+        if (generation !== refreshGeneration) return null;
         setAccessToken(token);
         return token;
       })
       .catch(() => null)
       .finally(() => {
-        refreshPromise = null;
+        if (refreshPromise === pending) {
+          refreshPromise = null;
+          if (refreshController === controller) refreshController = null;
+        }
       });
+    refreshPromise = pending;
   }
   return refreshPromise;
 }
@@ -91,12 +104,15 @@ http.interceptors.response.use(
       !String(config.url).includes('/api/v1/web/auth/refresh')
     ) {
       config._pfhRetry = true;
+      const generation = refreshGeneration;
       const token = await refreshOnce();
       if (token) {
         return http(config);
       }
-      setAccessToken(null);
-      sessionExpiredHandler?.();
+      if (generation === refreshGeneration) {
+        setAccessToken(null);
+        sessionExpiredHandler?.();
+      }
     }
     throw new ApiError(toApiError(error));
   },

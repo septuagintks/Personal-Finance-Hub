@@ -16,7 +16,7 @@ const pending = ref(false);
 const errorMessage = ref('');
 
 const redirectTarget = computed(() =>
-  typeof route.query.redirect === 'string' ? route.query.redirect : '/dashboard',
+  typeof route.query.redirect === 'string' ? route.query.redirect : session.defaultHomeRoute,
 );
 
 async function submit(): Promise<void> {

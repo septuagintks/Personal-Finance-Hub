@@ -127,8 +127,8 @@ Docs/                 Architecture, plans, guides, standards and archive
 | Flyway V1-V6 | migrate/info/validate/no-op PASS |
 | Docker | cold build、healthy、non-root、RLS、Outbox/Scheduler PASS |
 | Phase 2 S01-S02 Windows Debug/Release | 358/358 PASS |
-| Frontend contract/lint/typecheck/unit/build | PASS（13 tests） |
-| Frontend Edge Desktop/Mobile E2E + axe | 8/8 PASS |
+| Frontend contract/lint/typecheck/unit/build | PASS（20 tests） |
+| Frontend Edge Desktop/Mobile contract E2E + axe | 17/17 PASS |
 
 ---
 

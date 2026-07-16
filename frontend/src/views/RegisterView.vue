@@ -33,7 +33,7 @@ async function submit(): Promise<void> {
       baseCurrency: 'CNY',
       preferredLocale: 'en-US',
     });
-    await router.push('/dashboard');
+    await router.push(session.defaultHomeRoute);
   } catch (error) {
     errorMessage.value =
       error instanceof ApiError ? error.details.message : session.errorMessage(error);
