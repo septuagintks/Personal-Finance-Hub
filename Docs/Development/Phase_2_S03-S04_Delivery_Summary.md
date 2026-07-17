@@ -12,7 +12,7 @@ Product Name: `Candy's Ledger`（暂定）
 - 建立内存 Access Token、HttpOnly Refresh Cookie、启动恢复、单页 single-flight、跨标签页 Web Locks/租约互斥、状态广播与安全请求重放边界。
 - 会话失效会清除内存状态并退出受保护路由；非幂等写请求只有显式允许或携带 `Idempotency-Key` 时才会在 refresh 后重放。
 - 认证就绪前并行预载用户偏好与公共货币元数据；退出、重登、用户切换和迟到响应由 `AbortController` 与 generation 隔离，预载失败不会留下伪认证状态。
-- logout 会使在途 refresh 结果失效，跨标签页只广播 `authenticated` / `anonymous` 状态，不传递 Token；尚未落地的用户默认首页稳定回退 `/dashboard`。
+- logout 与 refresh 使用同一跨标签页串行边界；在途 rotation 完成后使用新 Access Token 撤销完整 session，跨标签页只广播 `authenticated` / `anonymous` 状态，不传递 Token；尚未落地的用户默认首页稳定回退 `/dashboard`。
 - 建立 OpenAPI 生成类型、统一错误投影、十进制/时区/枚举/图表共享适配器和 MSW 契约测试。
 
 ## 2. 本机验证

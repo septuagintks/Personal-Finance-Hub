@@ -10,7 +10,8 @@ Branch: `feature/phase2-product-experience`
 - 归档与恢复均执行所有权、状态和版本检查，并在同一 Unit of Work 写入 Account、Audit 与 Outbox；归档账户继续保留历史，但不能参与新流水或转账。
 - PostgreSQL 账户行锁竞争稳定映射为 `409 Conflict`，其他数据库异常继续脱敏为基础设施错误。
 - Web 端交付账户列表、状态与类型/币种筛选、创建、详情、余额、编辑、归档、恢复和危险删除；危险删除展示依赖影响，执行三阶段确认并校验账户名。
-- Account Store 使用 AbortController 与 generation 隔离列表、详情、余额和写操作；Logout、session 撤销和用户切换会清除账户数据，迟到响应不能重新写回。
+- 创建表单默认使用用户基准币种，并把分类留给领域按账户类型推导；详情按用户 locale、IANA timezone 和 dateFormat 展示时间。
+- Account Store 使用 AbortController 与 generation 隔离列表、详情、余额和写操作；列表与详情跨路由互相作废，Logout、session 撤销和用户切换会清除账户数据，迟到响应不能重新写回。
 
 ## 2. 持续规则
 
@@ -19,12 +20,20 @@ Branch: `feature/phase2-product-experience`
 - 前端不提交初始余额，不复制币种冻结、所有权、归档写入禁令或危险删除级联规则。
 - 危险删除的 UI 三阶段门槛不替代服务端 `confirmations=3`、租户归属、事务与审计约束。
 
-## 3. 本机验证
+## 3. S01-S05 审查收口
 
-- Windows Debug、PostgreSQL OFF：C++ 构建与全量 CTest 通过。
+- logout 改为撤销完整 session，并与 refresh 共享跨标签页串行边界；旧 Refresh Token、轮换后的替代 Token 和当前 Access Token 不会留下可继续使用的会话窗口。
+- 认证资源和令牌端点统一返回 `Cache-Control: no-store`；OpenAPI 为所有受保护 operation 声明 `401`，静态契约门禁防止回退。
+- 账户创建、修改、归档、恢复和危险删除时间统一到 PostgreSQL 微秒精度；账户审计 before/after 覆盖名称、类型、子类型、分类、币种、描述和归档状态。
+- 前端校验强 ETag 必须与响应 `version` 相等，拒绝详情/余额币种不一致的组合；Dashboard 刷新失败时立即移除旧总计，Nginx 转发保留公开 Host 端口。
+- 账户、分类和标签创建幂等及 `request_idempotency` 过期清理明确纳入 P2-S10；Linux/Docker、真实 PostgreSQL/RLS 和多浏览器矩阵仍由 P2-S12 验收。
+
+## 4. 本机验证
+
+- Windows Debug、PostgreSQL OFF：C++ 构建与全量 CTest `367/367 PASS`。
 - OpenAPI JSON、Python 契约、PostgreSQL adapter structural contract 与生成类型 drift：PASS。
-- Vitest/MSW：`28/28 PASS`。
-- Playwright 本机 Edge：Desktop 1440x900 与 Mobile 390x844 账户切片 `4/4 PASS`；axe 零自动化违规，页面无横向溢出。
+- Vitest/MSW：`35/35 PASS`。
+- Playwright 本机 Edge：Desktop 1440x900 与 Mobile 390x844 全套 `21/21 PASS`，其中账户切片 `4/4 PASS`；axe 零自动化违规，页面无横向溢出。
 - ESLint 零告警、Prettier、TypeScript Strict 与 production build：PASS。
 
 真实 Drogon/PostgreSQL 账户 fixture、RLS 连接复用、Linux/Docker 和 Chromium/Firefox/WebKit 复核按计划保留到 P2-S12；本机 mock-contract 浏览器结果不替代目标环境结论。
