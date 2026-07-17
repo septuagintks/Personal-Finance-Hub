@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { server } from '../test/server';
 import {
   archiveAccount,
+  createAccount,
   deleteAccount,
   getAccount,
   listAccounts,
@@ -37,6 +38,31 @@ const update: UpdateAccountRequest = {
 };
 
 describe('account API contract', () => {
+  it('assigns a new replay-safe intent key to each account create', async () => {
+    const keys: string[] = [];
+    server.use(
+      mockHttp.post('*/api/v1/accounts', ({ request }) => {
+        keys.push(request.headers.get('idempotency-key') ?? '');
+        return HttpResponse.json(account, { status: 201 });
+      }),
+    );
+
+    const payload = {
+      name: account.name,
+      type: account.type,
+      subtype: account.subtype,
+      category: account.category,
+      currencyCode: account.currencyCode,
+      description: account.description,
+    };
+    await createAccount(payload);
+    await createAccount(payload);
+
+    expect(keys[0]).toMatch(/^account-\S+$/);
+    expect(keys[1]).toMatch(/^account-\S+$/);
+    expect(keys[0]).not.toBe(keys[1]);
+  });
+
   it('passes the requested archive status to the list endpoint', async () => {
     let status = '';
     server.use(

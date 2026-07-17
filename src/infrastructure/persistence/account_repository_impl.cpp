@@ -305,6 +305,112 @@ AccountRepositoryImpl::balance_of(domain::AccountId id) {
         });
 }
 
+domain::RepositoryResult<std::vector<domain::BalanceCacheRebuildResult>>
+AccountRepositoryImpl::rebuild_balance_cache(
+    domain::ITransactionContext& tx_iface,
+    domain::UserId user_id,
+    std::optional<domain::AccountId> account_id,
+    std::chrono::system_clock::time_point rebuilt_at) {
+    if (user_id != tenant_user_id_ ||
+        (account_id.has_value() && !account_id->is_valid())) {
+        return std::unexpected(domain::RepositoryError::validation(
+            "Balance cache rebuild request is invalid"));
+    }
+    auto context = postgres::require_transaction(tx_iface, tenant_user_id_);
+    if (!context) return std::unexpected(context.error());
+
+    try {
+        constexpr const char* kSql = R"SQL(
+            WITH target_accounts AS MATERIALIZED (
+                SELECT id, user_id, currency_code
+                FROM accounts
+                WHERE user_id = $1
+                  AND ($2::bigint IS NULL OR id = $2)
+                ORDER BY id
+                FOR UPDATE
+            ), aggregated AS (
+                SELECT target.id AS account_id,
+                       target.user_id,
+                       target.currency_code,
+                       COALESCE(SUM(entry.amount), 0)::text AS balance,
+                       COALESCE(MAX(entry.version), 0) AS source_version,
+                       MAX(entry.id) AS last_transaction_id
+                FROM target_accounts AS target
+                LEFT JOIN transactions AS entry
+                  ON entry.account_id = target.id
+                 AND entry.user_id = target.user_id
+                 AND entry.deleted_at IS NULL
+                GROUP BY target.id, target.user_id, target.currency_code
+            ), upserted AS (
+                INSERT INTO account_balance_cache (
+                    account_id, user_id, balance, last_transaction_id,
+                    source_version, cache_version, updated_at)
+                SELECT account_id, user_id, balance::numeric(20,8),
+                       last_transaction_id, source_version, 1, $3
+                FROM aggregated
+                ON CONFLICT (account_id) DO UPDATE SET
+                    user_id = EXCLUDED.user_id,
+                    balance = EXCLUDED.balance,
+                    last_transaction_id = EXCLUDED.last_transaction_id,
+                    source_version = EXCLUDED.source_version,
+                    cache_version = account_balance_cache.cache_version + 1,
+                    updated_at = EXCLUDED.updated_at
+                RETURNING account_id, balance::text, last_transaction_id,
+                          source_version, cache_version, updated_at
+            )
+            SELECT upserted.account_id, aggregated.currency_code,
+                   upserted.balance, upserted.last_transaction_id,
+                   upserted.source_version, upserted.cache_version,
+                   upserted.updated_at
+            FROM upserted
+            JOIN aggregated USING (account_id)
+            ORDER BY upserted.account_id
+        )SQL";
+        const std::optional<std::int64_t> raw_account_id =
+            account_id.has_value()
+                ? std::optional<std::int64_t>(account_id->value())
+                : std::nullopt;
+        const auto rows = (*context)->transaction().execSqlSync(
+            kSql,
+            user_id.value(),
+            raw_account_id,
+            pg::toDbTimestamp(rebuilt_at));
+        if (account_id.has_value() && rows.empty()) {
+            return std::unexpected(account_not_found());
+        }
+
+        std::vector<domain::BalanceCacheRebuildResult> results;
+        results.reserve(rows.size());
+        for (const auto& row : rows) {
+            const domain::AccountId id(pg::getBigInt(row, 0));
+            auto currency = domain::Currency::create(pg::getString(row, 1));
+            auto amount = domain::Decimal::parse_numeric_20_8(
+                pg::getNumericAsString(row, 2));
+            if (!currency || !amount) {
+                return std::unexpected(domain::RepositoryError::database(
+                    "Rebuilt balance cache row is invalid"));
+            }
+            const auto last_id = pg::getOptionalBigInt(row, 3);
+            const auto updated_at = pg::getTimestamp(row, 6);
+            results.push_back(domain::BalanceCacheRebuildResult{
+                domain::BalanceSnapshot(
+                    id,
+                    domain::Money(*amount, *currency),
+                    updated_at,
+                    domain::TransactionId(last_id.value_or(0))),
+                pg::getBigInt(row, 4),
+                pg::getBigInt(row, 5)});
+        }
+        return results;
+    } catch (const drogon::orm::DrogonDbException& error) {
+        return std::unexpected(postgres::database_error(
+            "rebuild balance cache", error));
+    } catch (const std::exception& error) {
+        return std::unexpected(postgres::unexpected_error(
+            "rebuild balance cache", error));
+    }
+}
+
 domain::RepositoryResult<std::vector<domain::AccountBalanceAt>>
 AccountRepositoryImpl::balances_at(
     domain::UserId user_id,

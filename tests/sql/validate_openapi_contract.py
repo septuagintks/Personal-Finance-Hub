@@ -12,6 +12,8 @@ ADAPTER = ROOT / "src/presentation/drogon_http_adapter.cpp"
 
 
 EXPECTED = {
+    "/livez": {"get"},
+    "/readyz": {"get"},
     "/api/v1/auth/register": {"post"},
     "/api/v1/auth/login": {"post"},
     "/api/v1/auth/refresh": {"post"},
@@ -45,6 +47,13 @@ EXPECTED = {
     "/api/v1/reports/dashboard-summary": {"get"},
     "/api/v1/reports/analysis": {"get"},
     "/api/v1/exports/transactions.csv": {"get"},
+    "/api/v1/maintenance/audit-logs": {"get"},
+    "/api/v1/maintenance/accounts/balance-cache/rebuild": {"post"},
+    "/api/v1/maintenance/accounts/{accountId}/balance-cache/rebuild": {"post"},
+    "/api/v1/operations/summary": {"get"},
+    "/api/v1/operations/metrics": {"get"},
+    "/api/v1/operations/dead-letters": {"get"},
+    "/api/v1/operations/dead-letters/{outboxId}/retry": {"post"},
 }
 
 ADAPTER_EXPECTED = {
@@ -52,7 +61,8 @@ ADAPTER_EXPECTED = {
         .replace("{categoryId}", "{1}")
         .replace("{tagId}", "{1}")
         .replace("{transactionId}", "{1}")
-        .replace("{transferGroupId}", "{1}"): methods
+        .replace("{transferGroupId}", "{1}")
+        .replace("{outboxId}", "{1}"): methods
     for path, methods in EXPECTED.items()
 }
 
@@ -89,7 +99,27 @@ def main() -> int:
                 failures.append(f"{method.upper()} {path} has no operationId")
             else:
                 operation_ids.append(operation_id)
-            if operation.get("responses", {}).get("503", {}).get("$ref") != overload_ref:
+            responses = operation.get("responses", {})
+            if path == "/livez":
+                if "503" in responses:
+                    failures.append("GET /livez must not depend on the application queue")
+            elif path == "/readyz":
+                unavailable = responses.get("503", {})
+                unavailable_refs = {
+                    option.get("$ref")
+                    for option in unavailable.get("content", {})
+                    .get("application/json", {})
+                    .get("schema", {})
+                    .get("oneOf", [])
+                }
+                if unavailable_refs != {
+                    "#/components/schemas/HealthStatus",
+                    "#/components/schemas/ErrorResponse",
+                } or "Retry-After" not in unavailable.get("headers", {}):
+                    failures.append(
+                        "GET /readyz must describe not-ready and queue-overload 503 responses"
+                    )
+            elif responses.get("503", {}).get("$ref") != overload_ref:
                 failures.append(
                     f"{method.upper()} {path} must publish the bounded-queue 503 response"
                 )
@@ -120,6 +150,8 @@ def main() -> int:
         failures.append(
             "Drogon route registration differs from the checked-in OpenAPI route table"
         )
+    if 'if (request.path == "/livez")' not in adapter_source:
+        failures.append("Drogon liveness dispatch must bypass the application queue")
     if 'response.headers.insert_or_assign("X-Trace-Id", trace_id)' not in adapter_source:
         failures.append("Drogon exception responses must expose their trace id header")
 
@@ -203,8 +235,18 @@ def main() -> int:
             failures.append(f"{schema_name} contains a JSON number monetary schema")
 
     closed_objects = {
+        "TokenPair": {
+            "accessToken", "refreshToken", "expiresIn", "tokenType", "roles",
+        },
         "RegisterResponse": {
             "userId", "accessToken", "refreshToken", "expiresIn", "tokenType",
+            "roles",
+        },
+        "WebTokenPair": {
+            "accessToken", "expiresIn", "tokenType", "roles",
+        },
+        "WebRegisterResponse": {
+            "userId", "accessToken", "expiresIn", "tokenType", "roles",
         },
         "CategoryTree": {
             "id", "name", "board", "source", "parentId", "templateId",

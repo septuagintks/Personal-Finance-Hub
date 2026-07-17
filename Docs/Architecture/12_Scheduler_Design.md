@@ -82,11 +82,19 @@ Provider 传输、批次和能力边界见 [汇率系统设计](08_Exchange_Rate
 
 过期判断使用 PostgreSQL `NOW()`。任务使用 scheduled-job lease，可重复执行；软删除业务流水不属于该任务。
 
+### 3.4 Idempotency Cleanup
+
+`idempotency-cleanup` 通过 request role 调用 V10 的受限数据库函数，按有界 batch 删除 `request_idempotency.expires_at <= database_clock` 的记录：
+
+- 使用 scheduled-job lease 防止正常情况下多实例重复扫描；函数自身仍以 `FOR UPDATE SKIP LOCKED` 保持并发安全。
+- 只能删除已过期幂等记录，不读取或修改其对应业务事实。
+- `SECURITY DEFINER` 函数固定 `search_path` 且只向 request role 授予执行权限，不扩大普通 Repository 的 RLS 能力。
+
 ---
 
 ## 4. 分布式租约
 
-汇率刷新和 Session cleanup 使用 `scheduled_job_leases`：
+汇率刷新、Session cleanup 和 Idempotency cleanup 使用 `scheduled_job_leases`：
 
 ```sql
 CREATE TABLE scheduled_job_leases (
@@ -129,7 +137,7 @@ CREATE TABLE scheduled_job_leases (
 ## 6. 数据库角色边界
 
 - background role：`BYPASSRLS`、默认只读，只注入 `PostgresActiveCurrencyQuery`。
-- request role：执行汇率 append、Outbox 状态转换、补充审计、Session cleanup 和租约写入。
+- request role：执行汇率 append、Outbox 状态转换、补充审计、Session/Idempotency cleanup 和租约写入。
 - background client 不得注入 Controller、认证服务、普通 Repository 或任何写 adapter。
 - 两个角色必须是不同的非 superuser，production composition root 在启动时验证权限。
 
@@ -137,7 +145,7 @@ CREATE TABLE scheduled_job_leases (
 
 ## 7. 启动与停止
 
-`ProductionCompositionRoot` 构造数据库 client、Provider、Application 服务、线程池、timer 和三个 Job。Drogon beginning advice 调用 `JobManager::start_all()`；任一 Job 启动失败时停止已启动项并退出服务。
+`ProductionCompositionRoot` 构造数据库 client、Provider、Application 服务、线程池、timer 和四个 Job。Drogon beginning advice 调用 `JobManager::start_all()`；任一 Job 启动失败时停止已启动项并退出服务。
 
 关闭顺序：
 
@@ -161,7 +169,8 @@ SIGTERM 必须走同一顺序并以正常状态退出。
 5. Outbox 并发 claim、恢复、退避、dead letter 与 Handler receipt。
 6. 汇率主备切换、双源失败和历史降级。
 7. Session cleanup 的边界时间、batch limit 与事务回滚。
-8. Event Loop 无阻塞工作，以及 SIGTERM 的 timer cancel、drain 和退出。
-9. background role 不进入写路径或请求路径。
+8. Idempotency cleanup 的数据库时钟、有界批次、并发跳锁、未过期保留与租约。
+9. Event Loop 无阻塞工作，以及 SIGTERM 的 timer cancel、drain 和退出。
+10. background role 不进入写路径或请求路径。
 
 运行配置以 [`config/README.md`](../../config/README.md) 为准，跨平台门禁见 [测试策略](16_Testing_Strategy.md)。

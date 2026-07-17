@@ -46,6 +46,7 @@ HttpResponse ApiApplication::handle(HttpRequest request) noexcept {
     }
     const bool prevent_storage =
         !JwtFilter::is_public_route(request.method, request.path) ||
+        request.path == "/livez" || request.path == "/readyz" ||
         request.path.starts_with("/api/v1/auth/") ||
         request.path.starts_with("/api/v1/web/auth/");
     auto finalize = [&](HttpResponse response) {
@@ -63,6 +64,33 @@ HttpResponse ApiApplication::handle(HttpRequest request) noexcept {
                     identity.error(), request.trace_id));
             }
             request.identity = *identity;
+        }
+
+        if (operations_ != nullptr && request.method == HttpMethod::Get) {
+            if (request.path == "/livez") {
+                return finalize(operations_->liveness(request));
+            }
+            if (request.path == "/readyz") {
+                return finalize(operations_->readiness(request));
+            }
+            if (request.path == "/api/v1/operations/summary") {
+                return finalize(operations_->summary(request));
+            }
+            if (request.path == "/api/v1/operations/metrics") {
+                return finalize(operations_->metrics(request));
+            }
+            if (request.path == "/api/v1/operations/dead-letters") {
+                return finalize(operations_->list_dead_letters(request));
+            }
+        }
+        if (operations_ != nullptr && request.method == HttpMethod::Post) {
+            if (const auto id = route_id(
+                    request.path,
+                    "/api/v1/operations/dead-letters/",
+                    "/retry");
+                id.has_value()) {
+                return finalize(operations_->retry_dead_letter(request, *id));
+            }
         }
 
         if (request.method == HttpMethod::Post &&
@@ -264,6 +292,26 @@ HttpResponse ApiApplication::handle(HttpRequest request) noexcept {
             }
             if (request.path == "/api/v1/reports/analysis") {
                 return finalize(reports_->analysis(request));
+            }
+        }
+        if (maintenance_ != nullptr) {
+            if (request.method == HttpMethod::Get &&
+                request.path == "/api/v1/maintenance/audit-logs") {
+                return finalize(maintenance_->list_audit_logs(request));
+            }
+            if (request.method == HttpMethod::Post &&
+                request.path ==
+                    "/api/v1/maintenance/accounts/balance-cache/rebuild") {
+                return finalize(
+                    maintenance_->rebuild_all_balance_caches(request));
+            }
+            if (const auto id = route_id(
+                    request.path,
+                    "/api/v1/maintenance/accounts/",
+                    "/balance-cache/rebuild");
+                id.has_value() && request.method == HttpMethod::Post) {
+                return finalize(
+                    maintenance_->rebuild_account_balance_cache(request, *id));
             }
         }
         return finalize(HttpResponseMapper::not_found(request.trace_id));

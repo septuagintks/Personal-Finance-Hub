@@ -98,4 +98,29 @@ SessionCleanupJob::SessionCleanupJob(
           &leases,
           std::move(owner_id)) {}
 
+IdempotencyCleanupJob::IdempotencyCleanupJob(
+    application::ITimerScheduler& timers,
+    application::IBackgroundExecutor& executor,
+    const application::IClock& clock,
+    application::CleanupExpiredIdempotencyUseCase& use_case,
+    application::IJobLeaseRepository& leases,
+    std::string owner_id,
+    RecurringJobConfig config)
+    : RecurringJob(
+          named(std::move(config), "idempotency-cleanup"),
+          timers,
+          executor,
+          clock,
+          [&use_case] {
+              auto cleaned = use_case.execute();
+              if (!cleaned) {
+                  return JobExecutionResult(std::unexpected(
+                      JobExecutionError{cleaned.error().message}));
+              }
+              return JobExecutionResult(
+                  "request_idempotency=" + std::to_string(*cleaned));
+          },
+          &leases,
+          std::move(owner_id)) {}
+
 } // namespace pfh::infrastructure

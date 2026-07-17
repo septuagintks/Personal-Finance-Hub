@@ -110,6 +110,8 @@ Production runtime 要求：
 - background role：独立、non-superuser、BYPASSRLS、`default_transaction_read_only=on`。
 - background role 只具有批准的跨租户只读权限。
 - 租户表保持 ENABLE/FORCE RLS。
+- USER/OPERATOR 是 `users.role` 中的应用授权事实，不是数据库角色；Operator HTTP 请求仍使用 request role。
+- V10 幂等清理函数只向 request role 授予 EXECUTE，不授予 `request_idempotency` 的跨租户直接读写。
 
 凭据通过环境变量、忽略的本地配置或 secret store 注入。
 
@@ -139,12 +141,13 @@ Production ON 必须实际执行：
 
 验收范围：
 
-- V1-V9、legacy upgrade 和种子数据。
+- V1-V10、legacy upgrade、种子数据和 V10 函数授权。
 - Unit of Work commit/rollback 与 Outbox 原子性。
 - FORCE RLS、两用户隔离和连接池复用。
 - Repository、并发锁、缓存和 NUMERIC 边界。
 - 认证、核心财务 API、报表、响应头和脱敏。
-- Outbox claim/retry/dead letter、Scheduler lease 和优雅停止。
+- 用户维护、USER/OPERATOR 授权、探针、Metrics 和 dead-letter 重试脱敏。
+- Outbox claim/retry/dead letter、四个 Scheduler Job、lease 和优雅停止。
 
 ---
 
@@ -182,6 +185,7 @@ docker compose ps
 - `tzdata`、CA 和生产共享库完整。
 - request/background 角色与 FORCE RLS 正确。
 - 公共 currencies、认证和核心财务 API 可用。
+- `/livez` 与 `/readyz` 语义正确，普通 USER 无法访问 operations API，Operator smoke 不泄露 payload 或内部错误。
 - Outbox/Scheduler 运行并释放 lease。
 - JSON Content-Type 唯一，ETag 与 TraceId 存在。
 - SIGTERM 后优雅停止并 exit 0，无 OOM。

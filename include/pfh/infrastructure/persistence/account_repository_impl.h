@@ -50,6 +50,14 @@ public:
     [[nodiscard]] domain::RepositoryResult<domain::BalanceSnapshot> balance_of(
         domain::AccountId id) override;
 
+    [[nodiscard]] domain::RepositoryResult<
+        std::vector<domain::BalanceCacheRebuildResult>>
+    rebuild_balance_cache(
+        domain::ITransactionContext& tx,
+        domain::UserId user_id,
+        std::optional<domain::AccountId> account_id,
+        std::chrono::system_clock::time_point rebuilt_at) override;
+
     [[nodiscard]] domain::RepositoryResult<std::vector<domain::AccountBalanceAt>>
     balances_at(
         domain::UserId user_id,

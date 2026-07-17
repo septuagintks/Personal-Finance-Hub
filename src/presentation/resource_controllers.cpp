@@ -309,6 +309,13 @@ HttpResponse AccountController::list(const HttpRequest& request) {
 HttpResponse AccountController::create(const HttpRequest& request) {
     auto user = require_user(request);
     if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
+    const auto idempotency_key = request.header("Idempotency-Key");
+    if (!idempotency_key.has_value()) {
+        return HttpResponseMapper::error(
+            application::Error::validation(
+                "Idempotency-Key header is required"),
+            request.trace_id);
+    }
     auto body = JsonRequestParser::parse_object(request);
     if (!body) return HttpResponseMapper::error(body.error(), request.trace_id);
     if (auto fields = JsonRequestParser::reject_unknown_fields(
@@ -341,7 +348,7 @@ HttpResponse AccountController::create(const HttpRequest& request) {
 
     auto result = service_.create_account(application::CreateAccountCommand{
         *user, *name, *type, *subtype, *currency,
-        description->value_or(""), category});
+        description->value_or(""), category}, *idempotency_key);
     return result
         ? HttpResponseMapper::json(201, account_json(*result))
         : HttpResponseMapper::error(result.error(), request.trace_id);
@@ -535,6 +542,13 @@ HttpResponse CategoryController::restore(
 HttpResponse CategoryController::create(const HttpRequest& request) {
     auto user = require_user(request);
     if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
+    const auto idempotency_key = request.header("Idempotency-Key");
+    if (!idempotency_key.has_value()) {
+        return HttpResponseMapper::error(
+            application::Error::validation(
+                "Idempotency-Key header is required"),
+            request.trace_id);
+    }
     auto body = JsonRequestParser::parse_object(request);
     if (!body) return HttpResponseMapper::error(body.error(), request.trace_id);
     if (auto fields = JsonRequestParser::reject_unknown_fields(
@@ -561,7 +575,7 @@ HttpResponse CategoryController::create(const HttpRequest& request) {
         template_id = *value;
     }
     auto result = service_.create_category(application::CreateCategoryCommand{
-        *user, board, *name, *parent, template_id});
+        *user, board, *name, *parent, template_id}, *idempotency_key);
     return result
         ? HttpResponseMapper::json(201, category_json(*result))
         : HttpResponseMapper::error(result.error(), request.trace_id);
@@ -629,6 +643,13 @@ HttpResponse TagController::restore(
 HttpResponse TagController::create(const HttpRequest& request) {
     auto user = require_user(request);
     if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
+    const auto idempotency_key = request.header("Idempotency-Key");
+    if (!idempotency_key.has_value()) {
+        return HttpResponseMapper::error(
+            application::Error::validation(
+                "Idempotency-Key header is required"),
+            request.trace_id);
+    }
     auto body = JsonRequestParser::parse_object(request);
     if (!body) return HttpResponseMapper::error(body.error(), request.trace_id);
     if (auto fields = JsonRequestParser::reject_unknown_fields(*body, {"name"});
@@ -637,7 +658,8 @@ HttpResponse TagController::create(const HttpRequest& request) {
     }
     auto name = JsonRequestParser::required_string(*body, "name", 64);
     if (!name) return HttpResponseMapper::error(name.error(), request.trace_id);
-    auto result = service_.create_tag(application::CreateTagCommand{*user, *name});
+    auto result = service_.create_tag(
+        application::CreateTagCommand{*user, *name}, *idempotency_key);
     return result ? HttpResponseMapper::json(201, tag_json(*result))
                   : HttpResponseMapper::error(result.error(), request.trace_id);
 }

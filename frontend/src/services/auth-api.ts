@@ -44,10 +44,11 @@ export async function logoutWeb(): Promise<void> {
   await http.post('/api/v1/web/auth/logout', undefined, skipRefresh());
 }
 
-export function installRefreshHandler(): void {
+export function installRefreshHandler(onRefreshed?: (pair: WebTokenPair) => void): void {
   registerRefreshHandler((signal) =>
     serializeRefresh(async () => {
       const response = await refreshWeb(signal);
+      onRefreshed?.(response);
       return response.accessToken;
     }),
   );

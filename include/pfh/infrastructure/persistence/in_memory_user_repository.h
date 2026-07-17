@@ -5,6 +5,7 @@
 #pragma once
 
 #include "pfh/application/ports/i_user_credential_reader.h"
+#include "pfh/application/ports/i_user_role_reader.h"
 #include "pfh/application/persistence/i_bootstrap_unit_of_work.h"
 #include "pfh/domain/repositories/i_user_preference_repository.h"
 #include "pfh/domain/repositories/i_user_repository.h"
@@ -15,7 +16,8 @@ namespace pfh::infrastructure {
 
 class InMemoryUserRepository final
     : public domain::IUserRepository,
-      public application::IUserCredentialReader {
+      public application::IUserCredentialReader,
+      public application::IUserRoleReader {
 public:
     explicit InMemoryUserRepository(InMemoryStore& store) : store_(store) {}
 
@@ -87,6 +89,13 @@ public:
         }
         return std::unexpected(domain::RepositoryError::not_found(
             "User credentials not found"));
+    }
+
+    [[nodiscard]] domain::RepositoryResult<domain::UserRole> find_role_by_id(
+        domain::UserId user_id) override {
+        auto user = find_by_id(user_id);
+        if (!user) return std::unexpected(user.error());
+        return user->role();
     }
 
     [[nodiscard]] domain::RepositoryResult<domain::User> find_by_id(

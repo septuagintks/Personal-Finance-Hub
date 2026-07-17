@@ -17,6 +17,15 @@ watch(
     }
   },
 );
+
+watch(
+  () => [session.isOperator, route.meta.requiresOperator] as const,
+  async ([isOperator, requiresOperator]) => {
+    if (requiresOperator && session.isAuthenticated && !isOperator) {
+      await router.replace({ name: 'forbidden' });
+    }
+  },
+);
 </script>
 
 <template>

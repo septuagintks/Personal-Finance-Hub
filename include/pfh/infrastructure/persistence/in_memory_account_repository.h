@@ -11,9 +11,11 @@
 
 #include "pfh/domain/balance_calculation_service.h"
 #include "pfh/application/ports/i_active_currency_query.h"
+#include "pfh/application/persistence/i_bootstrap_unit_of_work.h"
 #include "pfh/domain/repositories/i_account_repository.h"
 #include "pfh/domain/repositories/i_transaction_repository.h"
 #include "pfh/infrastructure/persistence/in_memory_store.h"
+#include <algorithm>
 #include <map>
 #include <set>
 #include <utility>
@@ -172,8 +174,8 @@ public:
         std::int64_t source_version = 0;
         domain::TransactionId last_tx_id;
         for (const auto& tx : txs) {
-            source_version += 1;
-            last_tx_id = tx.id();
+            ++source_version;
+            if (tx.id().value() > last_tx_id.value()) last_tx_id = tx.id();
         }
 
         // Cache hit path.
@@ -194,7 +196,7 @@ public:
             return domain::BalanceSnapshot(
                 id,
                 cache->balance,
-                std::chrono::system_clock::now(),
+                cache->updated_at,
                 cache->last_transaction_id);
         }
 
@@ -214,13 +216,85 @@ public:
             snapshot->balance,
             last_tx_id,
             source_version,
-            cache != nullptr ? cache->cache_version + 1 : 1};
+            cache != nullptr ? cache->cache_version + 1 : 1,
+            snapshot->as_of};
         if (store_.in_transaction) {
             store_.staged_balance_cache.insert_or_assign(id.value(), std::move(rebuilt));
         } else {
             store_.balance_cache.insert_or_assign(id.value(), std::move(rebuilt));
         }
         return *snapshot;
+    }
+
+    [[nodiscard]] domain::RepositoryResult<
+        std::vector<domain::BalanceCacheRebuildResult>>
+    rebuild_balance_cache(
+        domain::ITransactionContext& tx,
+        domain::UserId user_id,
+        std::optional<domain::AccountId> account_id,
+        std::chrono::system_clock::time_point rebuilt_at) override {
+        const auto* tenant_tx =
+            dynamic_cast<const application::ITenantBootstrapTransaction*>(&tx);
+        if (!store_.in_transaction || tenant_tx == nullptr ||
+            tenant_tx->tenant_user_id() != user_id ||
+            (account_id.has_value() && !account_id->is_valid())) {
+            return std::unexpected(domain::RepositoryError::validation(
+                "Balance cache rebuild request is invalid"));
+        }
+        auto accounts = find_by_user(user_id, std::nullopt);
+        if (!accounts) return std::unexpected(accounts.error());
+        if (account_id.has_value()) {
+            std::erase_if(*accounts, [&](const auto& account) {
+                return account.id() != *account_id;
+            });
+            if (accounts->empty()) {
+                return std::unexpected(domain::RepositoryError::not_found(
+                    "Account not found for user"));
+            }
+        }
+
+        std::vector<domain::BalanceCacheRebuildResult> results;
+        results.reserve(accounts->size());
+        for (const auto& account : *accounts) {
+            auto transactions = transaction_repo_.find_by_account(
+                account.id(), std::nullopt, std::nullopt, false);
+            if (!transactions) return std::unexpected(transactions.error());
+            auto snapshot = domain::BalanceCalculationService::calculate_balance(
+                account.id(), *transactions, account.currency(), rebuilt_at);
+            if (!snapshot) {
+                return std::unexpected(domain::RepositoryError::database(
+                    "Balance cache rebuild failed"));
+            }
+            std::int64_t source_version = 0;
+            domain::TransactionId last_transaction_id;
+            for (const auto& transaction : *transactions) {
+                ++source_version;
+                if (transaction.id().value() > last_transaction_id.value()) {
+                    last_transaction_id = transaction.id();
+                }
+            }
+            snapshot->last_transaction_id = last_transaction_id;
+            const auto existing = store_.staged_balance_cache.find(
+                account.id().value());
+            const auto committed = store_.balance_cache.find(account.id().value());
+            const auto previous_version = existing != store_.staged_balance_cache.end()
+                ? existing->second.cache_version
+                : committed != store_.balance_cache.end()
+                    ? committed->second.cache_version
+                    : 0;
+            const auto cache_version = previous_version + 1;
+            store_.staged_balance_cache.insert_or_assign(
+                account.id().value(),
+                InMemoryBalanceCache{
+                    snapshot->balance,
+                    last_transaction_id,
+                    source_version,
+                    cache_version,
+                    rebuilt_at});
+            results.push_back(domain::BalanceCacheRebuildResult{
+                *snapshot, source_version, cache_version});
+        }
+        return results;
     }
 
     [[nodiscard]] domain::RepositoryResult<std::vector<domain::AccountBalanceAt>>

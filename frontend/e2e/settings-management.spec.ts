@@ -52,7 +52,12 @@ function installApi(page: Page): void {
   ];
 
   void page.route('**/api/v1/web/auth/refresh', (route) =>
-    json(route, { accessToken: 'settings-access', expiresIn: 900, tokenType: 'Bearer' }),
+    json(route, {
+      accessToken: 'settings-access',
+      expiresIn: 900,
+      tokenType: 'Bearer',
+      roles: ['USER'],
+    }),
   );
   void page.route('**/api/v1/currencies', (route) => json(route, currencies));
   void page.route('**/api/v1/users/me/preferences', async (route) => {

@@ -1,8 +1,10 @@
 // Personal Finance Hub - Scheduler and Maintenance Tests
 
 #include "pfh/application/maintenance/cleanup_expired_sessions_use_case.h"
+#include "pfh/application/maintenance/cleanup_expired_idempotency_use_case.h"
 #include "pfh/application/scheduler/i_timer_scheduler.h"
 #include "pfh/infrastructure/persistence/in_memory_job_lease_repository.h"
+#include "pfh/infrastructure/persistence/in_memory_idempotency_cleanup_repository.h"
 #include "pfh/infrastructure/persistence/in_memory_session_cleanup_repository.h"
 #include "pfh/infrastructure/scheduler/bounded_thread_pool.h"
 #include "pfh/infrastructure/scheduler/job_manager.h"
@@ -257,6 +259,44 @@ TEST(CleanupExpiredSessionsUseCaseTest,
     EXPECT_EQ(repeated->total_deleted(), 0U);
 }
 
+TEST(CleanupExpiredIdempotencyUseCaseTest,
+     DeletesOnlyExpiredRowsWithinTheGlobalBatch) {
+    const auto now = std::chrono::system_clock::time_point{123456s};
+    InMemoryStore store;
+    store.idempotency.emplace(
+        "oldest",
+        InMemoryIdempotencyRecord{
+            domain::UserId(1), "create_account", "oldest", std::string(64, 'a'),
+            true, {}, now - 2h, now - 2s});
+    store.idempotency.emplace(
+        "expired",
+        InMemoryIdempotencyRecord{
+            domain::UserId(2), "create_tag", "expired", std::string(64, 'b'),
+            true, {}, now - 1h, now});
+    store.idempotency.emplace(
+        "future",
+        InMemoryIdempotencyRecord{
+            domain::UserId(3), "create_category", "future", std::string(64, 'c'),
+            true, {}, now, now + 1h});
+    SchedulerClock clock(now);
+    InMemoryIdempotencyCleanupRepository repository(store);
+    application::CleanupExpiredIdempotencyUseCase use_case(
+        repository, clock, 1);
+
+    auto first = use_case.execute();
+    ASSERT_TRUE(first.has_value());
+    EXPECT_EQ(*first, 1U);
+    EXPECT_FALSE(store.idempotency.contains("oldest"));
+    EXPECT_TRUE(store.idempotency.contains("expired"));
+    EXPECT_TRUE(store.idempotency.contains("future"));
+
+    auto second = use_case.execute();
+    ASSERT_TRUE(second.has_value());
+    EXPECT_EQ(*second, 1U);
+    EXPECT_FALSE(store.idempotency.contains("expired"));
+    EXPECT_TRUE(store.idempotency.contains("future"));
+}
+
 TEST(RecurringJobTest, TimerOnlyEnqueuesAndLocalReentryIsRejected) {
     const auto now = std::chrono::system_clock::time_point{123456s};
     SchedulerClock clock(now);
@@ -284,9 +324,22 @@ TEST(RecurringJobTest, TimerOnlyEnqueuesAndLocalReentryIsRejected) {
 
     timers.fire_all();
     action_started.get_future().wait();
+    const auto running = job->runtime_snapshot();
+    EXPECT_TRUE(running.scheduler_started);
+    EXPECT_TRUE(running.running);
+    EXPECT_EQ(running.execution_sequence, 1U);
     EXPECT_FALSE(job->trigger_now());
     release_action.set_value();
     job->stop();
+
+    const auto completed = job->runtime_snapshot();
+    EXPECT_FALSE(completed.scheduler_started);
+    EXPECT_FALSE(completed.running);
+    EXPECT_EQ(
+        completed.last_result,
+        application::JobLastResult::Succeeded);
+    EXPECT_TRUE(completed.last_started_at.has_value());
+    EXPECT_TRUE(completed.last_finished_at.has_value());
 
     EXPECT_EQ(runs.load(), 1);
     EXPECT_EQ(timers.timer_count(), 0U);

@@ -7,6 +7,8 @@
 #include "pfh/presentation/controllers/transaction_controller.h"
 #include "pfh/presentation/controllers/transfer_controller.h"
 #include "pfh/presentation/controllers/report_controller.h"
+#include "pfh/presentation/controllers/maintenance_controller.h"
+#include "pfh/presentation/controllers/operations_controller.h"
 #include "pfh/presentation/http/http_types.h"
 #include "pfh/presentation/security/jwt_filter.h"
 
@@ -30,7 +32,9 @@ public:
         CurrencyController& currencies,
         TransactionController& transactions,
         TransferController& transfers,
-        ReportController& reports)
+        ReportController& reports,
+        MaintenanceController* maintenance = nullptr,
+        OperationsController* operations = nullptr)
         : auth_(auth),
           jwt_filter_(jwt_filter),
           accounts_(&accounts),
@@ -40,7 +44,9 @@ public:
           currencies_(&currencies),
           transactions_(&transactions),
           transfers_(&transfers),
-          reports_(&reports) {}
+          reports_(&reports),
+          maintenance_(maintenance),
+          operations_(operations) {}
 
     [[nodiscard]] HttpResponse handle(HttpRequest request) noexcept;
     [[nodiscard]] static std::string generate_trace_id();
@@ -56,6 +62,8 @@ private:
     TransactionController* transactions_ = nullptr;
     TransferController* transfers_ = nullptr;
     ReportController* reports_ = nullptr;
+    MaintenanceController* maintenance_ = nullptr;
+    OperationsController* operations_ = nullptr;
 };
 
 } // namespace pfh::presentation

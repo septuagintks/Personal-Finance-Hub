@@ -62,6 +62,19 @@ std::string_view RecurringJob::name() const noexcept {
     return config_.name;
 }
 
+application::JobRuntimeSnapshot RecurringJob::runtime_snapshot() const {
+    std::scoped_lock lock(mutex_);
+    return application::JobRuntimeSnapshot{
+        config_.name,
+        started_,
+        running_,
+        execution_sequence_.load(std::memory_order_relaxed),
+        last_result_,
+        last_started_at_,
+        last_finished_at_,
+        last_duration_milliseconds_};
+}
+
 domain::RepositoryVoidResult RecurringJob::validate() const {
     if (config_.name.empty() || config_.name.size() > 128 ||
         config_.interval <= std::chrono::seconds::zero() ||
@@ -209,6 +222,11 @@ void RecurringJob::execute(std::uint64_t sequence) noexcept {
 void RecurringJob::execute_run(std::uint64_t sequence) {
     const std::string job_id = config_.name + "-" + std::to_string(sequence);
     const auto started_at = std::chrono::steady_clock::now();
+    const auto wall_started_at = clock_.now();
+    {
+        std::scoped_lock lock(mutex_);
+        last_started_at_ = wall_started_at;
+    }
     log_noexcept([&] {
         spdlog::info(
             "Background job started job={} job_id={} trace_id={}",
@@ -219,6 +237,8 @@ void RecurringJob::execute_run(std::uint64_t sequence) {
 
     std::optional<application::JobLease> lease;
     bool should_execute = true;
+    bool lease_skipped = false;
+    bool lease_failed = false;
     if (leases_ != nullptr) {
         auto acquired = leases_->try_acquire(
             config_.name,
@@ -227,6 +247,7 @@ void RecurringJob::execute_run(std::uint64_t sequence) {
             config_.lease_duration);
         if (!acquired) {
             should_execute = false;
+            lease_failed = true;
             log_noexcept([&] {
                 spdlog::error(
                     "Background job lease failed job={} job_id={} error={}",
@@ -236,6 +257,7 @@ void RecurringJob::execute_run(std::uint64_t sequence) {
             });
         } else if (!acquired->has_value()) {
             should_execute = false;
+            lease_skipped = true;
             log_noexcept([&] {
                 spdlog::debug(
                     "Background job skipped because another instance owns "
@@ -312,6 +334,20 @@ void RecurringJob::execute_run(std::uint64_t sequence) {
                     elapsed.count(),
                     safe_log_summary(result->error().summary));
             });
+        }
+    }
+    {
+        std::scoped_lock lock(mutex_);
+        last_finished_at_ = clock_.now();
+        last_duration_milliseconds_ = elapsed.count();
+        if (result.has_value()) {
+            last_result_ = *result
+                ? application::JobLastResult::Succeeded
+                : application::JobLastResult::Failed;
+        } else if (lease_skipped) {
+            last_result_ = application::JobLastResult::Skipped;
+        } else if (lease_failed) {
+            last_result_ = application::JobLastResult::Failed;
         }
     }
 }

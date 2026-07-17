@@ -19,7 +19,12 @@ async function json(route: Route, body: unknown, status = 200): Promise<void> {
 function installApi(page: Page): { dimensions: string[] } {
   const state = { dimensions: [] as string[] };
   void page.route('**/api/v1/web/auth/refresh', (route) =>
-    json(route, { accessToken: 'report-access', expiresIn: 900, tokenType: 'Bearer' }),
+    json(route, {
+      accessToken: 'report-access',
+      expiresIn: 900,
+      tokenType: 'Bearer',
+      roles: ['USER'],
+    }),
   );
   void page.route('**/api/v1/users/me/preferences', (route) => json(route, preference));
   void page.route('**/api/v1/currencies', (route) =>

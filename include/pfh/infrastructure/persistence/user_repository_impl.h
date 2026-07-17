@@ -5,6 +5,7 @@
 #pragma once
 
 #include "pfh/application/ports/i_user_credential_reader.h"
+#include "pfh/application/ports/i_user_role_reader.h"
 #include "pfh/domain/repositories/i_user_repository.h"
 
 #ifdef PFH_HAS_POSTGRESQL
@@ -23,7 +24,8 @@ namespace pfh::infrastructure {
 /// transaction bound to the same user id.
 class UserRepositoryImpl final
     : public domain::IUserRepository,
-      public application::IUserCredentialReader {
+      public application::IUserCredentialReader,
+      public application::IUserRoleReader {
 public:
     explicit UserRepositoryImpl(drogon::orm::DbClientPtr db) : db_(std::move(db)) {}
 
@@ -35,6 +37,9 @@ public:
 
     [[nodiscard]] domain::RepositoryResult<application::UserCredentialRecord>
     find_credentials_by_username(const std::string& normalized_username) override;
+
+    [[nodiscard]] domain::RepositoryResult<domain::UserRole> find_role_by_id(
+        domain::UserId user_id) override;
 
     [[nodiscard]] domain::RepositoryResult<domain::User> find_by_id(
         domain::ITransactionContext& tx,

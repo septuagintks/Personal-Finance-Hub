@@ -102,7 +102,12 @@ function installApi(page: Page): { intents: string[]; transactions: Transaction[
     transactions: [makeTransaction(1), makeTransaction(2)],
   };
   void page.route('**/api/v1/web/auth/refresh', (route) =>
-    json(route, { accessToken: 'transaction-access', expiresIn: 900, tokenType: 'Bearer' }),
+    json(route, {
+      accessToken: 'transaction-access',
+      expiresIn: 900,
+      tokenType: 'Bearer',
+      roles: ['USER'],
+    }),
   );
   void page.route('**/api/v1/users/me/preferences', (route) => json(route, preference));
   void page.route('**/api/v1/currencies', (route) =>

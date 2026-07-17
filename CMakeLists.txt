@@ -148,6 +148,7 @@ set(PFH_APPLICATION_SOURCES
     src/application/resource_use_cases.cpp
     src/application/finance_application_service.cpp
     src/application/report_analysis_query_service.cpp
+    src/application/maintenance_use_cases.cpp
     src/application/transaction_query_use_cases.cpp
     src/application/correct_transaction_use_case.cpp
     src/application/transfer_query_use_cases.cpp
@@ -156,6 +157,8 @@ set(PFH_APPLICATION_SOURCES
     src/application/local_event_bus.cpp
     src/application/outbox_publisher.cpp
     src/application/supplemental_audit_handler.cpp
+    src/application/cleanup_expired_idempotency_use_case.cpp
+    src/application/operations_application_service.cpp
 )
 
 # Infrastructure Layer - External services, persistence, etc.
@@ -184,6 +187,8 @@ set(PFH_POSTGRESQL_SOURCES
     src/infrastructure/persistence/postgres_supplemental_audit_store.cpp
     src/infrastructure/persistence/postgres_session_cleanup_repository.cpp
     src/infrastructure/persistence/postgres_job_lease_repository.cpp
+    src/infrastructure/persistence/postgres_idempotency_cleanup_repository.cpp
+    src/infrastructure/persistence/postgres_operations_repository.cpp
     src/infrastructure/external/curl_http_transport.cpp
     src/infrastructure/scheduler/drogon_timer_scheduler.cpp
 )
@@ -219,6 +224,8 @@ set(PFH_PRESENTATION_SOURCES
     src/presentation/transaction_controller.cpp
     src/presentation/transfer_controller.cpp
     src/presentation/report_controller.cpp
+    src/presentation/maintenance_controller.cpp
+    src/presentation/operations_controller.cpp
     src/presentation/api_application.cpp
 )
 

@@ -18,13 +18,18 @@ namespace {
 constexpr std::string_view kRefreshCookieName = "pfh_refresh";
 constexpr std::string_view kRefreshCookiePath = "/api/v1/web/auth";
 
+[[nodiscard]] const char* role_name(domain::UserRole role) noexcept {
+    return role == domain::UserRole::Operator ? "OPERATOR" : "USER";
+}
+
 [[nodiscard]] nlohmann::json token_json(
     const application::TokenPairDto& tokens) {
     return nlohmann::json{
         {"accessToken", tokens.access_token},
         {"refreshToken", tokens.refresh_token},
         {"expiresIn", tokens.expires_in_seconds},
-        {"tokenType", tokens.token_type}};
+        {"tokenType", tokens.token_type},
+        {"roles", nlohmann::json::array({role_name(tokens.role)})}};
 }
 
 [[nodiscard]] nlohmann::json web_token_json(
@@ -32,7 +37,8 @@ constexpr std::string_view kRefreshCookiePath = "/api/v1/web/auth";
     return nlohmann::json{
         {"accessToken", tokens.access_token},
         {"expiresIn", tokens.expires_in_seconds},
-        {"tokenType", tokens.token_type}};
+        {"tokenType", tokens.token_type},
+        {"roles", nlohmann::json::array({role_name(tokens.role)})}};
 }
 
 [[nodiscard]] application::VoidResult validate_web_origin(

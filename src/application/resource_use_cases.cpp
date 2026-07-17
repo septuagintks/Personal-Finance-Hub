@@ -8,6 +8,7 @@
 #include "pfh/domain/events/domain_events.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <exception>
 #include <functional>
@@ -178,10 +179,242 @@ using TimePoint = std::chrono::system_clock::time_point;
     return valid_theme && valid_home && valid_period;
 }
 
+[[nodiscard]] std::optional<std::string_view> required_value(
+    const IdempotencyValues& values,
+    std::string_view name) {
+    return idempotency_value(values, name);
+}
+
+[[nodiscard]] std::string optional_id_value(
+    const auto& value) {
+    return value.has_value() ? value->to_string() : "null";
+}
+
+[[nodiscard]] std::string optional_integer_value(
+    const std::optional<std::int64_t>& value) {
+    return value.has_value() ? std::to_string(*value) : "null";
+}
+
+[[nodiscard]] std::string optional_time_value(
+    const std::optional<TimePoint>& value) {
+    return value.has_value() ? encode_idempotency_time(*value) : "null";
+}
+
+[[nodiscard]] IdempotencyValues account_values(const AccountDto& value) {
+    return {
+        {"id", value.id.to_string()},
+        {"owner", value.owner.to_string()},
+        {"name", value.name},
+        {"type", std::to_string(static_cast<int>(value.type))},
+        {"subtype", value.subtype},
+        {"category", std::to_string(static_cast<int>(value.category))},
+        {"currency", value.currency_code},
+        {"description", value.description},
+        {"archived", value.is_archived ? "true" : "false"},
+        {"archivedAt", optional_time_value(value.archived_at)},
+        {"createdAt", encode_idempotency_time(value.created_at)},
+        {"updatedAt", encode_idempotency_time(value.updated_at)},
+        {"version", std::to_string(value.version)}};
+}
+
+[[nodiscard]] Result<AccountDto> account_from_values(
+    const IdempotencyValues& values) {
+    const auto id = required_value(values, "id");
+    const auto owner = required_value(values, "owner");
+    const auto name = required_value(values, "name");
+    const auto type = required_value(values, "type");
+    const auto subtype = required_value(values, "subtype");
+    const auto category = required_value(values, "category");
+    const auto currency = required_value(values, "currency");
+    const auto description = required_value(values, "description");
+    const auto archived = required_value(values, "archived");
+    const auto archived_at = required_value(values, "archivedAt");
+    const auto created_at = required_value(values, "createdAt");
+    const auto updated_at = required_value(values, "updatedAt");
+    const auto version = required_value(values, "version");
+    if (!id || !owner || !name || !type || !subtype || !category ||
+        !currency || !description || !archived || !archived_at || !created_at ||
+        !updated_at || !version) {
+        return err(Error::infrastructure_failure(
+            "Stored account idempotency response is invalid"));
+    }
+    const auto id_value = parse_idempotency_integer(*id);
+    const auto owner_value = parse_idempotency_integer(*owner);
+    const auto type_value = parse_idempotency_integer(*type);
+    const auto category_value = parse_idempotency_integer(*category);
+    const auto version_value = parse_idempotency_integer(*version);
+    const auto created_value = decode_idempotency_time(*created_at);
+    const auto updated_value = decode_idempotency_time(*updated_at);
+    std::optional<TimePoint> archived_value;
+    if (*archived_at != "null") archived_value = decode_idempotency_time(*archived_at);
+    if (!id_value || !owner_value || !type_value || !category_value ||
+        !version_value || !created_value || !updated_value ||
+        (*archived_at != "null" && !archived_value.has_value())) {
+        return err(Error::infrastructure_failure(
+            "Stored account idempotency response is invalid"));
+    }
+    const auto account_type = static_cast<domain::AccountType>(*type_value);
+    const auto account_category =
+        static_cast<domain::AccountCategory>(*category_value);
+    if (!domain::AccountId(*id_value).is_valid() ||
+        !domain::UserId(*owner_value).is_valid() ||
+        !valid_account_type(account_type) ||
+        (account_category != domain::AccountCategory::Asset &&
+         account_category != domain::AccountCategory::Liability) ||
+        (*archived != "true" && *archived != "false")) {
+        return err(Error::infrastructure_failure(
+            "Stored account idempotency response is invalid"));
+    }
+    return AccountDto{
+        domain::AccountId(*id_value), domain::UserId(*owner_value),
+        std::string(*name), account_type, std::string(*subtype),
+        account_category, std::string(*currency), std::string(*description),
+        *archived == "true", archived_value, *created_value, *updated_value,
+        *version_value};
+}
+
+[[nodiscard]] IdempotencyValues category_values(const CategoryDto& value) {
+    return {
+        {"id", value.id.to_string()},
+        {"name", value.name},
+        {"board", std::to_string(static_cast<int>(value.board))},
+        {"source", std::to_string(static_cast<int>(value.source))},
+        {"parentId", optional_id_value(value.parent_id)},
+        {"templateId", optional_integer_value(value.template_id)},
+        {"sortOrder", std::to_string(value.sort_order)},
+        {"deleted", value.is_deleted ? "true" : "false"},
+        {"deletedAt", optional_time_value(value.deleted_at)},
+        {"createdAt", encode_idempotency_time(value.created_at)},
+        {"updatedAt", encode_idempotency_time(value.updated_at)}};
+}
+
+[[nodiscard]] Result<CategoryDto> category_from_values(
+    const IdempotencyValues& values) {
+    const std::array names{
+        "id", "name", "board", "source", "parentId", "templateId",
+        "sortOrder", "deleted", "deletedAt", "createdAt", "updatedAt"};
+    for (const auto* name : names) {
+        if (!required_value(values, name)) {
+            return err(Error::infrastructure_failure(
+                "Stored category idempotency response is invalid"));
+        }
+    }
+    const auto id = parse_idempotency_integer(*required_value(values, "id"));
+    const auto board = parse_idempotency_integer(*required_value(values, "board"));
+    const auto source = parse_idempotency_integer(*required_value(values, "source"));
+    const auto sort = parse_idempotency_integer(*required_value(values, "sortOrder"));
+    const auto created = decode_idempotency_time(
+        *required_value(values, "createdAt"));
+    const auto updated = decode_idempotency_time(
+        *required_value(values, "updatedAt"));
+    const auto parent_text = *required_value(values, "parentId");
+    const auto template_text = *required_value(values, "templateId");
+    const auto deleted_text = *required_value(values, "deleted");
+    const auto deleted_at_text = *required_value(values, "deletedAt");
+    std::optional<domain::CategoryId> parent;
+    std::optional<std::int64_t> template_id;
+    std::optional<TimePoint> deleted_at;
+    if (parent_text != "null") {
+        const auto parsed = parse_idempotency_integer(parent_text);
+        if (parsed) parent = domain::CategoryId(*parsed);
+    }
+    if (template_text != "null") template_id = parse_idempotency_integer(template_text);
+    if (deleted_at_text != "null") deleted_at = decode_idempotency_time(deleted_at_text);
+    const auto board_value = board.has_value()
+        ? static_cast<domain::CategoryBoard>(*board)
+        : domain::CategoryBoard::Expense;
+    const auto source_value = source.has_value()
+        ? static_cast<domain::CategorySource>(*source)
+        : domain::CategorySource::User;
+    if (!id || !domain::CategoryId(*id).is_valid() || !board ||
+        !valid_category_board(board_value) || !source ||
+        (source_value != domain::CategorySource::System &&
+         source_value != domain::CategorySource::User) || !sort || !created ||
+        !updated || (parent_text != "null" && !parent.has_value()) ||
+        (template_text != "null" && !template_id.has_value()) ||
+        (deleted_text != "true" && deleted_text != "false") ||
+        (deleted_at_text != "null" && !deleted_at.has_value())) {
+        return err(Error::infrastructure_failure(
+            "Stored category idempotency response is invalid"));
+    }
+    return CategoryDto{
+        domain::CategoryId(*id),
+        std::string(*required_value(values, "name")),
+        board_value,
+        source_value,
+        parent,
+        template_id,
+        static_cast<int>(*sort),
+        deleted_text == "true",
+        deleted_at,
+        *created,
+        *updated};
+}
+
+[[nodiscard]] IdempotencyValues tag_values(const TagDto& value) {
+    return {
+        {"id", value.id.to_string()},
+        {"name", value.name},
+        {"deleted", value.is_deleted ? "true" : "false"},
+        {"deletedAt", optional_time_value(value.deleted_at)},
+        {"createdAt", encode_idempotency_time(value.created_at)},
+        {"updatedAt", encode_idempotency_time(value.updated_at)}};
+}
+
+[[nodiscard]] Result<TagDto> tag_from_values(const IdempotencyValues& values) {
+    const auto id = required_value(values, "id");
+    const auto name = required_value(values, "name");
+    const auto deleted = required_value(values, "deleted");
+    const auto deleted_at = required_value(values, "deletedAt");
+    const auto created = required_value(values, "createdAt");
+    const auto updated = required_value(values, "updatedAt");
+    if (!id || !name || !deleted || !deleted_at || !created || !updated) {
+        return err(Error::infrastructure_failure(
+            "Stored tag idempotency response is invalid"));
+    }
+    const auto id_value = parse_idempotency_integer(*id);
+    const auto created_value = decode_idempotency_time(*created);
+    const auto updated_value = decode_idempotency_time(*updated);
+    std::optional<TimePoint> deleted_value;
+    if (*deleted_at != "null") deleted_value = decode_idempotency_time(*deleted_at);
+    if (!id_value || !domain::TagId(*id_value).is_valid() || !created_value ||
+        !updated_value || (*deleted != "true" && *deleted != "false") ||
+        (*deleted_at != "null" && !deleted_value.has_value())) {
+        return err(Error::infrastructure_failure(
+            "Stored tag idempotency response is invalid"));
+    }
+    return TagDto{
+        domain::TagId(*id_value), std::string(*name), *deleted == "true",
+        deleted_value, *created_value, *updated_value};
+}
+
 } // namespace
 
 Result<AccountDto> CreateAccountUseCase::execute(
     const CreateAccountCommand& command) {
+    return execute_impl(command, std::nullopt);
+}
+
+Result<AccountDto> CreateAccountUseCase::execute(
+    const CreateAccountCommand& command,
+    const IdempotencyRequest& idempotency) {
+    return execute_impl(command, idempotency);
+}
+
+Result<AccountDto> CreateAccountUseCase::execute_impl(
+    const CreateAccountCommand& command,
+    const std::optional<IdempotencyRequest>& idempotency) {
+    if (idempotency.has_value()) {
+        if (idempotency_ == nullptr) {
+            return err(Error::infrastructure_failure(
+                "Account idempotency is unavailable"));
+        }
+        if (auto valid = validate_idempotency_input(
+                idempotency->key, idempotency->request_fingerprint);
+            !valid) {
+            return err(valid.error());
+        }
+    }
     if (!command.user_id.is_valid() || !valid_account_type(command.type) ||
         !valid_text(command.name, 128) ||
         !valid_text(command.subtype, 64) ||
@@ -200,14 +433,38 @@ Result<AccountDto> CreateAccountUseCase::execute(
         command.subtype, *currency, command.description, false, std::nullopt,
         now, now, 1, command.category);
     domain::AccountId persisted_id;
+    std::optional<AccountDto> result_dto;
+    std::optional<Error> app_error;
     auto write = uow_.execute_in_transaction(
         [&](domain::ITransactionContext& tx) -> domain::RepositoryVoidResult {
+            if (idempotency.has_value()) {
+                auto started = idempotency_->begin(
+                    tx,
+                    command.user_id,
+                    "create_account",
+                    idempotency->key,
+                    idempotency->request_fingerprint,
+                    idempotency->created_at,
+                    idempotency->created_at + kIdempotencyLifetime);
+                if (!started) return std::unexpected(started.error());
+                if (started->replay) {
+                    auto restored = account_from_values(started->response_values);
+                    if (!restored) {
+                        app_error = restored.error();
+                        return std::unexpected(domain::RepositoryError::database(
+                            "Stored account idempotency response is invalid"));
+                    }
+                    result_dto = std::move(*restored);
+                    return {};
+                }
+            }
             auto saved = accounts_.save(tx, account);
             if (!saved) {
                 return std::unexpected(saved.error());
             }
             persisted_id = *saved;
-            return audit_logs_.append(
+            result_dto = account_dto(account, persisted_id);
+            if (auto audited = audit_logs_.append(
                 tx,
                 audit_entry(
                     command.user_id,
@@ -217,11 +474,28 @@ Result<AccountDto> CreateAccountUseCase::execute(
                     {},
                     account_audit_snapshot(account),
                     now));
+                !audited) {
+                return audited;
+            }
+            if (idempotency.has_value()) {
+                return idempotency_->complete(
+                    tx,
+                    command.user_id,
+                    "create_account",
+                    idempotency->key,
+                    account_values(*result_dto));
+            }
+            return {};
         });
     if (!write) {
+        if (app_error.has_value()) return err(*app_error);
         return err(from_repository(write.error()));
     }
-    return account_dto(account, persisted_id);
+    if (!result_dto.has_value()) {
+        return err(Error::infrastructure_failure(
+            "Account result was not produced"));
+    }
+    return *result_dto;
 }
 
 VoidResult ArchiveAccountUseCase::execute(
@@ -476,6 +750,29 @@ Result<std::vector<CategoryTreeDto>> ListCategoriesUseCase::execute(
 
 Result<CategoryDto> CreateCategoryUseCase::execute(
     const CreateCategoryCommand& command) {
+    return execute_impl(command, std::nullopt);
+}
+
+Result<CategoryDto> CreateCategoryUseCase::execute(
+    const CreateCategoryCommand& command,
+    const IdempotencyRequest& idempotency) {
+    return execute_impl(command, idempotency);
+}
+
+Result<CategoryDto> CreateCategoryUseCase::execute_impl(
+    const CreateCategoryCommand& command,
+    const std::optional<IdempotencyRequest>& idempotency) {
+    if (idempotency.has_value()) {
+        if (idempotency_ == nullptr) {
+            return err(Error::infrastructure_failure(
+                "Category idempotency is unavailable"));
+        }
+        if (auto valid = validate_idempotency_input(
+                idempotency->key, idempotency->request_fingerprint);
+            !valid) {
+            return err(valid.error());
+        }
+    }
     if (!command.user_id.is_valid()) {
         return err(Error::validation("User id is invalid"));
     }
@@ -540,8 +837,30 @@ Result<CategoryDto> CreateCategoryUseCase::execute(
     domain::Category persisted_category = requested_category;
     bool restored = false;
     std::optional<Error> app_error;
+    std::optional<CategoryDto> result_dto;
     auto write = uow_.execute_in_transaction(
         [&](domain::ITransactionContext& tx) -> domain::RepositoryVoidResult {
+            if (idempotency.has_value()) {
+                auto started = idempotency_->begin(
+                    tx,
+                    command.user_id,
+                    "create_category",
+                    idempotency->key,
+                    idempotency->request_fingerprint,
+                    idempotency->created_at,
+                    idempotency->created_at + kIdempotencyLifetime);
+                if (!started) return std::unexpected(started.error());
+                if (started->replay) {
+                    auto replayed = category_from_values(started->response_values);
+                    if (!replayed) {
+                        app_error = replayed.error();
+                        return std::unexpected(domain::RepositoryError::database(
+                            "Stored category idempotency response is invalid"));
+                    }
+                    result_dto = std::move(*replayed);
+                    return {};
+                }
+            }
             if (category_template.has_value()) {
                 const bool template_has_parent =
                     category_template->parent_id.has_value();
@@ -604,6 +923,7 @@ Result<CategoryDto> CreateCategoryUseCase::execute(
                 return std::unexpected(saved.error());
             }
             persisted_id = *saved;
+            result_dto = category_dto(persisted_category, persisted_id);
             if (auto audited = audit_logs_.append(
                     tx,
                     audit_entry(
@@ -625,13 +945,25 @@ Result<CategoryDto> CreateCategoryUseCase::execute(
                 uow_.register_event(std::make_shared<domain::CategoryCreatedEvent>(
                     command.user_id, persisted_id, *board, now));
             }
+            if (idempotency.has_value()) {
+                return idempotency_->complete(
+                    tx,
+                    command.user_id,
+                    "create_category",
+                    idempotency->key,
+                    category_values(*result_dto));
+            }
             return {};
         });
     if (!write) {
         return app_error.has_value() ? err(*app_error)
                                      : err(from_repository(write.error()));
     }
-    return category_dto(persisted_category, persisted_id);
+    if (!result_dto.has_value()) {
+        return err(Error::infrastructure_failure(
+            "Category result was not produced"));
+    }
+    return *result_dto;
 }
 
 VoidResult DeleteCategoryUseCase::execute(
@@ -783,6 +1115,29 @@ Result<std::vector<TagDto>> ListTagsUseCase::execute(
 }
 
 Result<TagDto> CreateTagUseCase::execute(const CreateTagCommand& command) {
+    return execute_impl(command, std::nullopt);
+}
+
+Result<TagDto> CreateTagUseCase::execute(
+    const CreateTagCommand& command,
+    const IdempotencyRequest& idempotency) {
+    return execute_impl(command, idempotency);
+}
+
+Result<TagDto> CreateTagUseCase::execute_impl(
+    const CreateTagCommand& command,
+    const std::optional<IdempotencyRequest>& idempotency) {
+    if (idempotency.has_value()) {
+        if (idempotency_ == nullptr) {
+            return err(Error::infrastructure_failure(
+                "Tag idempotency is unavailable"));
+        }
+        if (auto valid = validate_idempotency_input(
+                idempotency->key, idempotency->request_fingerprint);
+            !valid) {
+            return err(valid.error());
+        }
+    }
     if (!command.user_id.is_valid() || !valid_text(command.name, 64)) {
         return err(Error::validation("Tag name is invalid"));
     }
@@ -793,8 +1148,31 @@ Result<TagDto> CreateTagUseCase::execute(const CreateTagCommand& command) {
     domain::TagId persisted_id;
     domain::Tag persisted_tag = requested_tag;
     bool restored = false;
+    std::optional<TagDto> result_dto;
+    std::optional<Error> app_error;
     auto write = uow_.execute_in_transaction(
         [&](domain::ITransactionContext& tx) -> domain::RepositoryVoidResult {
+            if (idempotency.has_value()) {
+                auto started = idempotency_->begin(
+                    tx,
+                    command.user_id,
+                    "create_tag",
+                    idempotency->key,
+                    idempotency->request_fingerprint,
+                    idempotency->created_at,
+                    idempotency->created_at + kIdempotencyLifetime);
+                if (!started) return std::unexpected(started.error());
+                if (started->replay) {
+                    auto replayed = tag_from_values(started->response_values);
+                    if (!replayed) {
+                        app_error = replayed.error();
+                        return std::unexpected(domain::RepositoryError::database(
+                            "Stored tag idempotency response is invalid"));
+                    }
+                    result_dto = std::move(*replayed);
+                    return {};
+                }
+            }
             auto existing = tags_.find_by_name_for_update(
                 tx, command.user_id, command.name);
             if (existing) {
@@ -814,6 +1192,11 @@ Result<TagDto> CreateTagUseCase::execute(const CreateTagCommand& command) {
                 return std::unexpected(saved.error());
             }
             persisted_id = *saved;
+            result_dto = tag_dto(persisted_tag.id().is_valid()
+                ? persisted_tag
+                : domain::Tag(
+                      persisted_id, command.user_id, command.name,
+                      std::nullopt, now, now));
             auto audited = audit_logs_.append(
                 tx,
                 audit_entry(
@@ -833,16 +1216,24 @@ Result<TagDto> CreateTagUseCase::execute(const CreateTagCommand& command) {
                 uow_.register_event(std::make_shared<domain::TagCreatedEvent>(
                     command.user_id, persisted_id, now));
             }
+            if (idempotency.has_value()) {
+                return idempotency_->complete(
+                    tx,
+                    command.user_id,
+                    "create_tag",
+                    idempotency->key,
+                    tag_values(*result_dto));
+            }
             return {};
         });
     if (!write) {
+        if (app_error.has_value()) return err(*app_error);
         return err(from_repository(write.error()));
     }
-    return tag_dto(persisted_tag.id().is_valid()
-        ? persisted_tag
-        : domain::Tag(
-              persisted_id, command.user_id, command.name,
-              std::nullopt, now, now));
+    if (!result_dto.has_value()) {
+        return err(Error::infrastructure_failure("Tag result was not produced"));
+    }
+    return *result_dto;
 }
 
 VoidResult DeleteTagUseCase::execute(const DeleteTagCommand& command) {

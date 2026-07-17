@@ -15,6 +15,7 @@
 #include "pfh/application/use_cases/delete_transfer_use_case.h"
 #include "pfh/application/query/report_query_service.h"
 #include "pfh/application/use_cases/resource_use_cases.h"
+#include "pfh/application/use_cases/maintenance_use_cases.h"
 #include "pfh/application/use_cases/transaction_query_use_cases.h"
 
 #include <utility>
@@ -22,6 +23,64 @@
 namespace pfh::application {
 
 namespace {
+
+[[nodiscard]] std::string account_fingerprint_input(
+    const CreateAccountCommand& command) {
+    std::string result;
+    result.reserve(256 + command.name.size() + command.description.size());
+    append_canonical_field(result, "create_account:v1");
+    append_canonical_field(result, command.user_id.to_string());
+    append_canonical_field(result, command.name);
+    append_canonical_field(result, std::to_string(static_cast<int>(command.type)));
+    append_canonical_field(result, command.subtype);
+    append_canonical_field(result, command.currency_code);
+    append_canonical_field(result, command.description);
+    append_canonical_field(
+        result,
+        command.category.has_value()
+            ? std::to_string(static_cast<int>(*command.category))
+            : "null");
+    return result;
+}
+
+[[nodiscard]] std::string category_fingerprint_input(
+    const CreateCategoryCommand& command) {
+    std::string result;
+    result.reserve(192 + command.name.value_or("").size());
+    append_canonical_field(result, "create_category:v1");
+    append_canonical_field(result, command.user_id.to_string());
+    append_canonical_field(
+        result,
+        command.board.has_value()
+            ? std::to_string(static_cast<int>(*command.board))
+            : "null");
+    append_canonical_field(
+        result, command.name.has_value() ? "present" : "null");
+    if (command.name.has_value()) {
+        append_canonical_field(result, *command.name);
+    }
+    append_canonical_field(
+        result,
+        command.parent_id.has_value()
+            ? command.parent_id->to_string()
+            : "null");
+    append_canonical_field(
+        result,
+        command.template_id.has_value()
+            ? std::to_string(*command.template_id)
+            : "null");
+    return result;
+}
+
+[[nodiscard]] std::string tag_fingerprint_input(
+    const CreateTagCommand& command) {
+    std::string result;
+    result.reserve(96 + command.name.size());
+    append_canonical_field(result, "create_tag:v1");
+    append_canonical_field(result, command.user_id.to_string());
+    append_canonical_field(result, command.name);
+    return result;
+}
 
 void append_optional_time(
     std::string& output,
@@ -221,6 +280,39 @@ Result<CategoryDto> FinanceApplicationService::update_category(
         .execute(command);
 }
 
+Result<CategoryDto> FinanceApplicationService::create_category(
+    const CreateCategoryCommand& command,
+    std::string_view idempotency_key) {
+    auto fingerprint = request_hasher_.sha256(category_fingerprint_input(command));
+    if (!fingerprint) return err(fingerprint.error());
+    auto scope = open_scope(command.user_id);
+    if (!scope) return err(scope.error());
+    return CreateCategoryUseCase(
+        (*scope)->categories(),
+        (*scope)->preferences(),
+        (*scope)->audit_logs(),
+        (*scope)->unit_of_work(),
+        &(*scope)->idempotency())
+        .execute(command, IdempotencyRequest{
+            std::string(idempotency_key), *fingerprint, clock_.now()});
+}
+
+Result<AccountDto> FinanceApplicationService::create_account(
+    const CreateAccountCommand& command,
+    std::string_view idempotency_key) {
+    auto fingerprint = request_hasher_.sha256(account_fingerprint_input(command));
+    if (!fingerprint) return err(fingerprint.error());
+    auto scope = open_scope(command.user_id);
+    if (!scope) return err(scope.error());
+    return CreateAccountUseCase(
+        (*scope)->accounts(),
+        (*scope)->audit_logs(),
+        (*scope)->unit_of_work(),
+        &(*scope)->idempotency())
+        .execute(command, IdempotencyRequest{
+            std::string(idempotency_key), *fingerprint, clock_.now()});
+}
+
 Result<CategoryDto> FinanceApplicationService::restore_category(
     const RestoreCategoryCommand& command) {
     auto scope = open_scope(command.user_id);
@@ -298,6 +390,22 @@ Result<TransactionDto> FinanceApplicationService::create_transaction(
         nullptr,
         &(*scope)->tags())
         .execute(command);
+}
+
+Result<TagDto> FinanceApplicationService::create_tag(
+    const CreateTagCommand& command,
+    std::string_view idempotency_key) {
+    auto fingerprint = request_hasher_.sha256(tag_fingerprint_input(command));
+    if (!fingerprint) return err(fingerprint.error());
+    auto scope = open_scope(command.user_id);
+    if (!scope) return err(scope.error());
+    return CreateTagUseCase(
+        (*scope)->tags(),
+        (*scope)->audit_logs(),
+        (*scope)->unit_of_work(),
+        &(*scope)->idempotency())
+        .execute(command, IdempotencyRequest{
+            std::string(idempotency_key), *fingerprint, clock_.now()});
 }
 
 Result<CursorPage<TransactionDto>> FinanceApplicationService::list_transactions(
@@ -546,6 +654,28 @@ Result<CsvExportDto> FinanceApplicationService::export_transactions_csv(
         (*scope)->preferences(),
         &(*scope)->categories());
     return reports.export_transactions_csv(query);
+}
+
+Result<UserAuditLogPageDto> FinanceApplicationService::list_user_audit_logs(
+    const UserAuditLogQueryDto& query) {
+    auto scope = open_scope(query.user_id);
+    if (!scope) return err(scope.error());
+    return ListUserAuditLogsUseCase(
+        (*scope)->audit_logs(), (*scope)->unit_of_work())
+        .execute(query);
+}
+
+Result<BalanceCacheRebuildDto>
+FinanceApplicationService::rebuild_balance_cache(
+    const RebuildBalanceCacheCommand& command) {
+    auto scope = open_scope(command.user_id);
+    if (!scope) return err(scope.error());
+    return RebuildBalanceCacheUseCase(
+        (*scope)->accounts(),
+        (*scope)->audit_logs(),
+        (*scope)->unit_of_work(),
+        clock_)
+        .execute(command);
 }
 
 } // namespace pfh::application

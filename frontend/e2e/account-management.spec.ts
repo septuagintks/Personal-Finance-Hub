@@ -70,6 +70,7 @@ async function installSession(page: Page): Promise<void> {
       accessToken: 'accounts-e2e-access',
       expiresIn: 900,
       tokenType: 'Bearer',
+      roles: ['USER'],
     }),
   );
   await page.route('**/api/v1/users/me/preferences', (route) => fulfillJson(route, preference));

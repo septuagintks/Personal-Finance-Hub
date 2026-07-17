@@ -6,11 +6,13 @@
 
 #include "pfh/application/services/auth_service.h"
 #include "pfh/application/services/finance_application_service.h"
+#include "pfh/application/services/operations_application_service.h"
 #include "pfh/application/error_mapping.h"
 #include "pfh/application/events/local_event_bus.h"
 #include "pfh/application/events/outbox_publisher.h"
 #include "pfh/application/events/supplemental_audit_handler.h"
 #include "pfh/application/maintenance/cleanup_expired_sessions_use_case.h"
+#include "pfh/application/maintenance/cleanup_expired_idempotency_use_case.h"
 #include "pfh/application/use_cases/refresh_exchange_rates_use_case.h"
 #include "pfh/bootstrap/database_client_factory.h"
 #include "pfh/infrastructure/external/curl_http_transport.h"
@@ -22,7 +24,9 @@
 #include "pfh/infrastructure/persistence/exchange_rate_repository_impl.h"
 #include "pfh/infrastructure/persistence/postgres_active_currency_query.h"
 #include "pfh/infrastructure/persistence/postgres_job_lease_repository.h"
+#include "pfh/infrastructure/persistence/postgres_idempotency_cleanup_repository.h"
 #include "pfh/infrastructure/persistence/postgres_outbox_repository.h"
+#include "pfh/infrastructure/persistence/postgres_operations_repository.h"
 #include "pfh/infrastructure/persistence/postgres_request_scope.h"
 #include "pfh/infrastructure/persistence/postgres_session_cleanup_repository.h"
 #include "pfh/infrastructure/persistence/postgres_supplemental_audit_store.h"
@@ -42,6 +46,8 @@
 #include "pfh/presentation/controllers/transaction_controller.h"
 #include "pfh/presentation/controllers/transfer_controller.h"
 #include "pfh/presentation/controllers/report_controller.h"
+#include "pfh/presentation/controllers/maintenance_controller.h"
+#include "pfh/presentation/controllers/operations_controller.h"
 #include "pfh/presentation/drogon_http_adapter.h"
 #include "pfh/presentation/security/jwt_filter.h"
 
@@ -54,6 +60,7 @@
 #include <spdlog/spdlog.h>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace pfh::bootstrap {
 
@@ -304,6 +311,13 @@ application::VoidResult ProductionCompositionRoot::initialize() {
                 *session_cleanup_repository_,
                 *clock_,
                 config_.scheduler.session_cleanup_batch_size);
+        idempotency_cleanup_repository_ = std::make_unique<
+            infrastructure::PostgresIdempotencyCleanupRepository>(request_db_);
+        cleanup_idempotency_use_case_ = std::make_unique<
+            application::CleanupExpiredIdempotencyUseCase>(
+                *idempotency_cleanup_repository_,
+                *clock_,
+                config_.scheduler.session_cleanup_batch_size);
         job_lease_repository_ =
             std::make_unique<infrastructure::PostgresJobLeaseRepository>(
                 request_db_);
@@ -358,12 +372,23 @@ application::VoidResult ProductionCompositionRoot::initialize() {
                 *job_lease_repository_,
                 scheduler_instance_id_,
                 cleanup_config);
+        idempotency_cleanup_job_ =
+            std::make_shared<infrastructure::IdempotencyCleanupJob>(
+                *timer_scheduler_,
+                *background_executor_,
+                *clock_,
+                *cleanup_idempotency_use_case_,
+                *job_lease_repository_,
+                scheduler_instance_id_,
+                cleanup_config);
         job_manager_ = std::make_unique<infrastructure::JobManager>();
         for (const auto& job : {
                  std::static_pointer_cast<application::IJob>(outbox_job_),
                  std::static_pointer_cast<application::IJob>(rate_refresh_job_),
                  std::static_pointer_cast<application::IJob>(
-                     session_cleanup_job_)}) {
+                     session_cleanup_job_),
+                 std::static_pointer_cast<application::IJob>(
+                     idempotency_cleanup_job_)}) {
             auto registered = job_manager_->register_job(job);
             if (!registered) {
                 return application::err(
@@ -396,6 +421,24 @@ application::VoidResult ProductionCompositionRoot::initialize() {
         std::make_unique<infrastructure::PostgresRequestScopeFactory>(request_db_);
     finance_service_ = std::make_unique<application::FinanceApplicationService>(
         *request_scope_factory_, *clock_, *request_hasher_);
+    operations_repository_ =
+        std::make_unique<infrastructure::PostgresOperationsRepository>(
+            request_db_);
+    std::vector<const application::IJobRuntimeStatusReader*> operation_jobs;
+    if (config_.scheduler.enabled) {
+        operation_jobs = {
+            outbox_job_.get(),
+            rate_refresh_job_.get(),
+            session_cleanup_job_.get(),
+            idempotency_cleanup_job_.get()};
+    }
+    operations_service_ =
+        std::make_unique<application::OperationsApplicationService>(
+            *operations_repository_,
+            *clock_,
+            std::move(operation_jobs),
+            config_.scheduler.enabled,
+            10);
     auth_controller_ = std::make_unique<presentation::AuthController>(
         *auth_service_);
     account_controller_ = std::make_unique<presentation::AccountController>(
@@ -414,8 +457,13 @@ application::VoidResult ProductionCompositionRoot::initialize() {
         std::make_unique<presentation::TransferController>(*finance_service_);
     report_controller_ =
         std::make_unique<presentation::ReportController>(*finance_service_);
+    maintenance_controller_ =
+        std::make_unique<presentation::MaintenanceController>(*finance_service_);
+    operations_controller_ =
+        std::make_unique<presentation::OperationsController>(
+            *operations_service_);
     jwt_filter_ = std::make_unique<presentation::JwtFilter>(
-        *token_service_, *sessions_, *clock_);
+        *token_service_, *sessions_, *users_, *clock_);
     api_application_ = std::make_unique<presentation::ApiApplication>(
         *auth_controller_,
         *jwt_filter_,
@@ -426,7 +474,9 @@ application::VoidResult ProductionCompositionRoot::initialize() {
         *currency_controller_,
         *transaction_controller_,
         *transfer_controller_,
-        *report_controller_);
+        *report_controller_,
+        maintenance_controller_.get(),
+        operations_controller_.get());
     request_executor_ =
         std::make_unique<infrastructure::BoundedThreadPool>(
             config_.server.request_worker_threads,

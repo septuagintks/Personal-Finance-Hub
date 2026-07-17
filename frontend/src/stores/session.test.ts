@@ -26,6 +26,7 @@ function installSessionHandlers(): void {
         accessToken: `access-${user}`,
         expiresIn: 900,
         tokenType: 'Bearer',
+        roles: ['USER'],
       });
     }),
     mockHttp.post('*/api/v1/web/auth/logout', () => new HttpResponse(null, { status: 204 })),
@@ -71,6 +72,8 @@ describe('session context lifecycle', () => {
     await session.login({ username: 'user-a@example.com', password: 'correct password' });
     await accounts.loadList('active');
     expect(session.isAuthenticated).toBe(true);
+    expect(session.roles).toEqual(['USER']);
+    expect(session.isOperator).toBe(false);
     expect(context.preference?.baseCurrency).toBe('USD');
     expect(accounts.items).toHaveLength(1);
 
@@ -131,6 +134,7 @@ describe('session context lifecycle', () => {
           accessToken: 'access-rotated',
           expiresIn: 900,
           tokenType: 'Bearer',
+          roles: ['USER'],
         });
       }),
       mockHttp.post('*/api/v1/web/auth/logout', ({ request }) => {
@@ -151,5 +155,34 @@ describe('session context lifecycle', () => {
     expect(logoutAuthorization).toBe('Bearer access-rotated');
     expect(session.status).toBe('anonymous');
     expect(getAccessToken()).toBeNull();
+  });
+
+  it('updates the current role from a rotated server session', async () => {
+    installSessionHandlers();
+    const session = useSessionStore();
+    await session.login({ username: 'user-a@example.com', password: 'correct password' });
+
+    let probeCalls = 0;
+    server.use(
+      mockHttp.get('*/api/v1/role-probe', () => {
+        probeCalls += 1;
+        return probeCalls === 1
+          ? HttpResponse.json({}, { status: 401 })
+          : HttpResponse.json({ ok: true });
+      }),
+      mockHttp.post('*/api/v1/web/auth/refresh', () =>
+        HttpResponse.json({
+          accessToken: 'operator-access',
+          expiresIn: 900,
+          tokenType: 'Bearer',
+          roles: ['OPERATOR'],
+        }),
+      ),
+    );
+
+    await expect(http.get('/api/v1/role-probe')).resolves.toBeDefined();
+    expect(session.roles).toEqual(['OPERATOR']);
+    expect(session.isOperator).toBe(true);
+    expect(getAccessToken()).toBe('operator-access');
   });
 });

@@ -50,12 +50,14 @@ class ApiTokenService final : public ITokenService {
 public:
     [[nodiscard]] Result<IssuedAccessToken> issue_access_token(
         UserId user_id,
+        UserRole role,
         std::string_view session_id,
         AuthTimePoint issued_at) const override {
         AccessTokenClaims claims;
         claims.issuer = "pfh-api";
         claims.audience = "pfh-client";
         claims.user_id = user_id;
+        claims.role = role;
         claims.session_id = std::string(session_id);
         claims.token_id = "jti-" + std::to_string(++access_sequence_);
         claims.issued_at = issued_at;
@@ -114,7 +116,7 @@ protected:
               users_, users_, defaults_, sessions_, audits_, uow_factory_,
               hasher_, tokens_, clock_),
           auth_controller_(auth_service_),
-          jwt_filter_(tokens_, sessions_, clock_),
+          jwt_filter_(tokens_, sessions_, users_, clock_),
           app_(auth_controller_, jwt_filter_) {}
 
     [[nodiscard]] HttpResponse post(

@@ -59,6 +59,7 @@ Repository fixture 至少覆盖：
 - Account optimistic lock 和余额缓存 `source_version = MAX(version)` 语义。
 - Dangerous Delete 的锁定、同步 AuditLog、完整关联清理与 Outbox。
 - Outbox claim token、`SKIP LOCKED`、租约恢复、退避、dead letter 和 Handler receipt。
+- V10 USER/OPERATOR、Operator retry command、TraceId、受限幂等清理函数与角色授权。
 - `NUMERIC` round-trip、边界舍入和超界拒绝。
 
 租户隔离测试必须使用 request/background 两个独立非 superuser 角色，并验证：
@@ -83,6 +84,7 @@ API 测试同时覆盖 framework-neutral 应用边界与真实 Drogon runtime。
 - Balance、Net Worth、Cash Flow 与 Dashboard Summary。
 - 币种目录、ETag、TraceId 和统一错误响应。
 - 幂等键同请求重放、不同指纹冲突、租户隔离、过期回收和业务/Outbox 原子性。
+- 当前用户 Audit、余额缓存重建、liveness/readiness、Operator summary/Metrics、脱敏 dead letter 与并发安全重试。
 
 持续规则：
 
@@ -93,6 +95,7 @@ API 测试同时覆盖 framework-neutral 应用边界与真实 Drogon runtime。
 - 生产响应和日志不得暴露 SQL、文件路径、Token、密码、Provider key 或底层异常正文。
 - 结构化错误必须包含 `retryable` 与受控 `field_errors`；强 `If-Match` 只接受单一正版本 ETag。
 - Refresh Token 只存 hash；旧 Token 复用撤销整个 session；Logout 后当前 Access Token 立即失效。
+- 公共注册不能授予 Operator；登录/refresh 使用当前持久化角色，JWT role 伪造或角色变更后的旧 Token 必须被拒绝。
 
 ---
 
@@ -114,6 +117,7 @@ API 测试同时覆盖 framework-neutral 应用边界与真实 Drogon runtime。
 - scheduled lease 使用数据库时钟和 token-guarded release。
 - Outbox 多 worker claim、失败重试、dead letter 与幂等副作用。
 - 认证清理只删除已过期记录。
+- 幂等清理使用数据库时钟、有界批次和并发跳锁，只删除已过期记录且不扩大 request role 的租户访问能力。
 - SIGTERM 依次停止 timer、drain 已接收任务并正常退出。
 
 ---
@@ -126,7 +130,9 @@ Phase 分支合并前，根据改动范围执行以下门禁：
 2. Linux Debug/Release production ON 构建与完整 CTest。
 3. PostgreSQL 空库迁移、Repository fixture、RLS 与真实 API smoke。
 4. Docker 冷构建、healthcheck、non-root、双角色、后台任务与优雅停止。
-5. Markdown 链接、格式、旧路径和秘密模式扫描。
+5. 前端 generated-type drift、TypeScript、lint、format、unit/component、production build 与当前纵向切片 E2E。
+6. Release Candidate 的 Chromium、Firefox、WebKit、Accessibility 与固定数据集性能矩阵。
+7. Markdown 链接、格式、旧路径和秘密模式扫描。
 
 代码改动至少运行仓库根目录的 `quality_check.ps1` 或平台等价命令。涉及 migration、PostgreSQL adapter、Drogon、Provider、Scheduler、Outbox、Docker 或生产装配的改动，必须补对应真实环境门禁，不能只依赖 PostgreSQL OFF 结果。
 

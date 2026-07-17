@@ -27,9 +27,8 @@ struct IdempotencyRequest {
 
 using IdempotencyValues = std::map<std::string, std::string>;
 
-[[nodiscard]] inline VoidResult validate_idempotency_input(
-    std::string_view key,
-    std::string_view fingerprint) {
+[[nodiscard]] inline VoidResult validate_idempotency_key(
+    std::string_view key) {
     if (key.empty() || key.size() > kMaxIdempotencyKeyLength) {
         return err(Error::validation(
             "Idempotency-Key must contain 1 to 128 characters"));
@@ -40,6 +39,15 @@ using IdempotencyValues = std::map<std::string, std::string>;
             return err(Error::validation(
                 "Idempotency-Key must contain visible ASCII characters"));
         }
+    }
+    return ok();
+}
+
+[[nodiscard]] inline VoidResult validate_idempotency_input(
+    std::string_view key,
+    std::string_view fingerprint) {
+    if (auto valid = validate_idempotency_key(key); !valid) {
+        return valid;
     }
     if (fingerprint.size() != 64U) {
         return err(Error::validation("Request fingerprint is invalid"));

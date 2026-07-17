@@ -243,6 +243,11 @@
         "operationId": "listAccounts"
       },
       "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -549,6 +554,11 @@
         "operationId": "listCategories"
       },
       "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -730,6 +740,11 @@
         "operationId": "listTags"
       },
       "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -1712,6 +1727,352 @@
         }
       }
     },
+    "/livez": {
+      "get": {
+        "operationId": "getLiveness",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Process is alive",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/readyz": {
+      "get": {
+        "operationId": "getReadiness",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Process is ready to serve traffic",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthStatus"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Process is alive but not ready, or the bounded request queue is full",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/HealthStatus"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/maintenance/audit-logs": {
+      "get": {
+        "operationId": "listUserAuditLogs",
+        "parameters": [
+          {
+            "name": "action",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/UserAuditAction"
+            }
+          },
+          {
+            "name": "resourceType",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*$"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current user's sanitized audit facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserAuditLogPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/maintenance/accounts/balance-cache/rebuild": {
+      "post": {
+        "operationId": "rebuildAllBalanceCaches",
+        "responses": {
+          "200": {
+            "description": "All current-user account caches rebuilt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BalanceCacheRebuildResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/maintenance/accounts/{accountId}/balance-cache/rebuild": {
+      "post": {
+        "operationId": "rebuildAccountBalanceCache",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AccountId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owned account cache rebuilt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BalanceCacheRebuildResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/operations/summary": {
+      "get": {
+        "operationId": "getOperationsSummary",
+        "responses": {
+          "200": {
+            "description": "Data-minimized operational summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationsSummary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/operations/metrics": {
+      "get": {
+        "operationId": "getOperationsMetrics",
+        "responses": {
+          "200": {
+            "description": "Bounded Prometheus metrics for an authenticated operator",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/operations/dead-letters": {
+      "get": {
+        "operationId": "listDeadLetters",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Dead-letter metadata without event payload or raw error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeadLetterPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/operations/dead-letters/{outboxId}/retry": {
+      "post": {
+        "operationId": "retryDeadLetter",
+        "parameters": [
+          {
+            "name": "outboxId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Retry scheduled or replayed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeadLetterRetryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
     "/api/v1/web/auth/register": {
       "post": {
         "operationId": "registerWebUser",
@@ -2276,6 +2637,13 @@
           }
         }
       },
+      "Role": {
+        "type": "string",
+        "enum": [
+          "USER",
+          "OPERATOR"
+        ]
+      },
       "TokenPair": {
         "type": "object",
         "additionalProperties": false,
@@ -2283,7 +2651,8 @@
           "accessToken",
           "refreshToken",
           "expiresIn",
-          "tokenType"
+          "tokenType",
+          "roles"
         ],
         "properties": {
           "accessToken": {
@@ -2298,6 +2667,14 @@
           "tokenType": {
             "type": "string",
             "const": "Bearer"
+          },
+          "roles": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/Role"
+            }
           }
         }
       },
@@ -2309,7 +2686,8 @@
           "accessToken",
           "refreshToken",
           "expiresIn",
-          "tokenType"
+          "tokenType",
+          "roles"
         ],
         "properties": {
           "userId": {
@@ -2327,6 +2705,14 @@
           "tokenType": {
             "type": "string",
             "const": "Bearer"
+          },
+          "roles": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/Role"
+            }
           }
         }
       },
@@ -3750,6 +4136,453 @@
           }
         }
       },
+      "HealthStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "alive",
+              "ready",
+              "not_ready"
+            ]
+          }
+        }
+      },
+      "UserAuditAction": {
+        "type": "string",
+        "enum": [
+          "create",
+          "update",
+          "archive",
+          "delete",
+          "dangerous_delete",
+          "sync_import",
+          "refresh",
+          "register",
+          "login",
+          "logout",
+          "token_refresh",
+          "security_event"
+        ]
+      },
+      "UserAuditLogItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "action",
+          "resourceType",
+          "resourceId",
+          "result",
+          "traceId",
+          "occurredAt"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "action": {
+            "$ref": "#/components/schemas/UserAuditAction"
+          },
+          "resourceType": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "resourceId": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "result": {
+            "type": "string",
+            "const": "success"
+          },
+          "traceId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 128
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "UserAuditLogPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/UserAuditLogItem"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[1-9][0-9]*$"
+          }
+        }
+      },
+      "BalanceCacheRebuildItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "accountId",
+          "currencyCode",
+          "balance",
+          "lastTransactionId",
+          "sourceVersion",
+          "cacheVersion",
+          "rebuiltAt"
+        ],
+        "properties": {
+          "accountId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "currencyCode": {
+            "$ref": "#/components/schemas/CurrencyCode"
+          },
+          "balance": {
+            "$ref": "#/components/schemas/DecimalString"
+          },
+          "lastTransactionId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Id"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sourceVersion": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "cacheVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "rebuiltAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "BalanceCacheRebuildResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "accounts"
+        ],
+        "properties": {
+          "accounts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BalanceCacheRebuildItem"
+            }
+          }
+        }
+      },
+      "OutboxCounts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "pending",
+          "processing",
+          "published",
+          "failed",
+          "deadLetter"
+        ],
+        "properties": {
+          "pending": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "processing": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "published": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "failed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "deadLetter": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "HandlerReceiptSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "count",
+          "latestAt"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "latestAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "OperationalLease": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "jobName",
+          "active",
+          "leaseUntil"
+        ],
+        "properties": {
+          "jobName": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "leaseUntil": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "JobRuntime": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "schedulerStarted",
+          "running",
+          "executionSequence",
+          "lastResult",
+          "lastStartedAt",
+          "lastFinishedAt",
+          "lastDurationMs"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "schedulerStarted": {
+            "type": "boolean"
+          },
+          "running": {
+            "type": "boolean"
+          },
+          "executionSequence": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "lastResult": {
+            "type": "string",
+            "enum": [
+              "neverRun",
+              "succeeded",
+              "failed",
+              "skipped"
+            ]
+          },
+          "lastStartedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "lastFinishedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "lastDurationMs": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "OperationsSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "generatedAt",
+          "outbox",
+          "handlerReceipts",
+          "expiredIdempotency",
+          "leases",
+          "jobs"
+        ],
+        "properties": {
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "outbox": {
+            "$ref": "#/components/schemas/OutboxCounts"
+          },
+          "handlerReceipts": {
+            "$ref": "#/components/schemas/HandlerReceiptSummary"
+          },
+          "expiredIdempotency": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "leases": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperationalLease"
+            }
+          },
+          "jobs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/JobRuntime"
+            }
+          }
+        }
+      },
+      "DeadLetterItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "eventName",
+          "aggregateType",
+          "aggregateId",
+          "retryCount",
+          "maxRetryCount",
+          "lastFailedHandler",
+          "lastFailedAt",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "eventName": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "aggregateType": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          },
+          "aggregateId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 128
+          },
+          "retryCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maxRetryCount": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "lastFailedHandler": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 128
+          },
+          "lastFailedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "DeadLetterPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/DeadLetterItem"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          }
+        }
+      },
+      "DeadLetterRetryResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "outboxId",
+          "replayed",
+          "status"
+        ],
+        "properties": {
+          "outboxId": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "replayed": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "const": "retry_scheduled"
+          }
+        }
+      },
       "FieldError": {
         "type": "object",
         "additionalProperties": false,
@@ -3776,7 +4609,8 @@
         "required": [
           "accessToken",
           "expiresIn",
-          "tokenType"
+          "tokenType",
+          "roles"
         ],
         "properties": {
           "accessToken": {
@@ -3788,6 +4622,14 @@
           "tokenType": {
             "type": "string",
             "const": "Bearer"
+          },
+          "roles": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/Role"
+            }
           }
         }
       },
@@ -3798,7 +4640,8 @@
           "userId",
           "accessToken",
           "expiresIn",
-          "tokenType"
+          "tokenType",
+          "roles"
         ],
         "properties": {
           "userId": {
@@ -3813,6 +4656,14 @@
           "tokenType": {
             "type": "string",
             "const": "Bearer"
+          },
+          "roles": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/Role"
+            }
           }
         }
       },

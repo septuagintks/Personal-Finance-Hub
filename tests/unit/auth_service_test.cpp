@@ -48,6 +48,7 @@ class TestTokenService final : public ITokenService {
 public:
     [[nodiscard]] Result<IssuedAccessToken> issue_access_token(
         UserId user_id,
+        UserRole role,
         std::string_view session_id,
         AuthTimePoint issued_at) const override {
         const auto token_id = "jti-" + std::to_string(++token_counter_);
@@ -55,6 +56,7 @@ public:
         claims.issuer = "pfh-api";
         claims.audience = "pfh-client";
         claims.user_id = user_id;
+        claims.role = role;
         claims.session_id = std::string(session_id);
         claims.token_id = token_id;
         claims.issued_at = issued_at;

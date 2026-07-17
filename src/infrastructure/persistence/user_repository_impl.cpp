@@ -10,10 +10,18 @@
 #include "pfh/infrastructure/persistence/postgres_result_set.h"
 
 #include <string>
+#include <stdexcept>
+#include <string_view>
 
 namespace pfh::infrastructure {
 
 namespace {
+
+domain::UserRole parse_user_role(std::string_view value) {
+    if (value == "user") return domain::UserRole::User;
+    if (value == "operator") return domain::UserRole::Operator;
+    throw std::invalid_argument("unknown user role");
+}
 
 bool is_username_conflict(const drogon::orm::DrogonDbException& error) {
     const std::string detail = error.base().what();
@@ -30,7 +38,8 @@ domain::RepositoryResult<domain::User> map_user_result(
     try {
         return domain::User(
             domain::UserId(pg::getBigInt(result[0], 0)),
-            pg::getString(result[0], 1));
+            pg::getString(result[0], 1),
+            parse_user_role(pg::getString(result[0], 2)));
     } catch (const std::exception&) {
         return std::unexpected(domain::RepositoryError::database(
             "Stored user row is invalid"));
@@ -47,7 +56,7 @@ domain::RepositoryResult<domain::User> UserRepositoryImpl::find_by_id(
     }
     try {
         constexpr const char* kSql =
-            "SELECT id, username FROM users WHERE id = $1";
+            "SELECT id, username, role::text FROM users WHERE id = $1";
         return map_user_result(db_->execSqlSync(kSql, id.value()));
     } catch (const drogon::orm::DrogonDbException& error) {
         return std::unexpected(postgres::database_error("find user", error));
@@ -64,7 +73,7 @@ domain::RepositoryResult<domain::User> UserRepositoryImpl::find_by_username(
     }
     try {
         constexpr const char* kSql =
-            "SELECT id, username FROM users WHERE username = $1";
+            "SELECT id, username, role::text FROM users WHERE username = $1";
         return map_user_result(db_->execSqlSync(kSql, username));
     } catch (const drogon::orm::DrogonDbException& error) {
         return std::unexpected(
@@ -85,7 +94,7 @@ UserRepositoryImpl::find_credentials_by_username(
     try {
         constexpr const char* kSql = R"SQL(
             SELECT id, username, password_hash, base_currency_code,
-                   categories_initialized
+                   categories_initialized, role::text
             FROM users
             WHERE username = $1
         )SQL";
@@ -102,7 +111,8 @@ UserRepositoryImpl::find_credentials_by_username(
         return application::UserCredentialRecord{
             domain::User(
                 domain::UserId(pg::getBigInt(result[0], 0)),
-                pg::getString(result[0], 1)),
+                pg::getString(result[0], 1),
+                parse_user_role(pg::getString(result[0], 5))),
             pg::getString(result[0], 2),
             *currency,
             pg::getBool(result[0], 4)};
@@ -112,6 +122,29 @@ UserRepositoryImpl::find_credentials_by_username(
     } catch (const std::exception& error) {
         return std::unexpected(postgres::unexpected_error(
             "find user credentials", error));
+    }
+}
+
+domain::RepositoryResult<domain::UserRole> UserRepositoryImpl::find_role_by_id(
+    domain::UserId user_id) {
+    if (!db_ || !user_id.is_valid()) {
+        return std::unexpected(domain::RepositoryError::validation(
+            "User role query is invalid"));
+    }
+    try {
+        const auto result = db_->execSqlSync(
+            "SELECT role::text FROM users WHERE id = $1", user_id.value());
+        if (result.empty()) {
+            return std::unexpected(domain::RepositoryError::not_found(
+                "User role not found"));
+        }
+        return parse_user_role(pg::getString(result[0], 0));
+    } catch (const drogon::orm::DrogonDbException& error) {
+        return std::unexpected(postgres::database_error(
+            "find user role", error));
+    } catch (const std::exception& error) {
+        return std::unexpected(postgres::unexpected_error(
+            "find user role", error));
     }
 }
 
@@ -129,7 +162,7 @@ domain::RepositoryResult<domain::User> UserRepositoryImpl::find_by_id(
     }
     try {
         constexpr const char* kSql =
-            "SELECT id, username FROM users WHERE id = $1";
+            "SELECT id, username, role::text FROM users WHERE id = $1";
         return map_user_result(
             (*context)->transaction().execSqlSync(kSql, id.value()));
     } catch (const drogon::orm::DrogonDbException& error) {
@@ -150,7 +183,7 @@ domain::RepositoryResult<domain::User> UserRepositoryImpl::find_by_username(
     }
     try {
         constexpr const char* kSql =
-            "SELECT id, username FROM users WHERE username = $1";
+            "SELECT id, username, role::text FROM users WHERE username = $1";
         auto user = map_user_result(
             (*context)->transaction().execSqlSync(kSql, username));
         if (!user.has_value()) {

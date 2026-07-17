@@ -15,10 +15,12 @@
 namespace pfh::application {
 class AuthService;
 class CleanupExpiredSessionsUseCase;
+class CleanupExpiredIdempotencyUseCase;
 class LocalEventBus;
 class OutboxPublisher;
 class RefreshExchangeRatesUseCase;
 class SupplementalAuditHandler;
+class OperationsApplicationService;
 }
 
 namespace pfh::infrastructure {
@@ -40,13 +42,16 @@ class OpenSslTokenService;
 class OpenSslRequestHasher;
 class PostgresActiveCurrencyQuery;
 class PostgresJobLeaseRepository;
+class PostgresIdempotencyCleanupRepository;
 class PostgresOutboxRepository;
+class PostgresOperationsRepository;
 class PostgresRequestScopeFactory;
 class PostgresSessionCleanupRepository;
 class PostgresSupplementalAuditStore;
 class RegistrationDefaultsRepositoryImpl;
 class OutboxPublisherJob;
 class SessionCleanupJob;
+class IdempotencyCleanupJob;
 class SystemClock;
 class UserRepositoryImpl;
 }
@@ -64,6 +69,8 @@ class TagController;
 class TransactionController;
 class TransferController;
 class ReportController;
+class MaintenanceController;
+class OperationsController;
 }
 
 namespace pfh::application {
@@ -125,6 +132,10 @@ private:
         session_cleanup_repository_;
     std::unique_ptr<application::CleanupExpiredSessionsUseCase>
         cleanup_sessions_use_case_;
+    std::unique_ptr<infrastructure::PostgresIdempotencyCleanupRepository>
+        idempotency_cleanup_repository_;
+    std::unique_ptr<application::CleanupExpiredIdempotencyUseCase>
+        cleanup_idempotency_use_case_;
     std::unique_ptr<infrastructure::PostgresJobLeaseRepository>
         job_lease_repository_;
     std::unique_ptr<infrastructure::BoundedThreadPool> request_executor_;
@@ -133,12 +144,18 @@ private:
     std::shared_ptr<infrastructure::OutboxPublisherJob> outbox_job_;
     std::shared_ptr<infrastructure::ExchangeRateRefreshJob> rate_refresh_job_;
     std::shared_ptr<infrastructure::SessionCleanupJob> session_cleanup_job_;
+    std::shared_ptr<infrastructure::IdempotencyCleanupJob>
+        idempotency_cleanup_job_;
     std::unique_ptr<infrastructure::JobManager> job_manager_;
     std::string scheduler_instance_id_;
     std::unique_ptr<application::AuthService> auth_service_;
     std::unique_ptr<infrastructure::PostgresRequestScopeFactory>
         request_scope_factory_;
     std::unique_ptr<application::FinanceApplicationService> finance_service_;
+    std::unique_ptr<infrastructure::PostgresOperationsRepository>
+        operations_repository_;
+    std::unique_ptr<application::OperationsApplicationService>
+        operations_service_;
     std::unique_ptr<presentation::AuthController> auth_controller_;
     std::unique_ptr<presentation::AccountController> account_controller_;
     std::unique_ptr<presentation::CategoryController> category_controller_;
@@ -148,6 +165,9 @@ private:
     std::unique_ptr<presentation::TransactionController> transaction_controller_;
     std::unique_ptr<presentation::TransferController> transfer_controller_;
     std::unique_ptr<presentation::ReportController> report_controller_;
+    std::unique_ptr<presentation::MaintenanceController>
+        maintenance_controller_;
+    std::unique_ptr<presentation::OperationsController> operations_controller_;
     std::unique_ptr<presentation::JwtFilter> jwt_filter_;
     std::unique_ptr<presentation::ApiApplication> api_application_;
     std::unique_ptr<presentation::DrogonHttpAdapter> http_adapter_;

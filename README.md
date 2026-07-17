@@ -15,7 +15,7 @@ Personal Finance Hub 是仓库、后端和 API 的工程名称；面向用户的
 - 三种跨币种转账输入模式和三种手续费来源。
 - Balance、Net Worth、Cash Flow 与 Dashboard Summary。
 - JWT、Refresh Token rotation/reuse detection 与 session 撤销。
-- PostgreSQL 16+、Flyway V1-V9、FORCE RLS 与双数据库角色。
+- PostgreSQL 16+、Flyway V1-V10、FORCE RLS 与隔离的 request/background 数据库角色。
 - Transactional Outbox、重试、dead letter、幂等 Handler 和 Scheduler。
 - FreeCurrencyAPI 主源、exchangerate.fun 整批备用与历史降级。
 - Ubuntu 24.04 Docker 镜像、non-root、healthcheck 和优雅停止。
@@ -24,6 +24,8 @@ Personal Finance Hub 是仓库、后端和 API 的工程名称；面向用户的
 - Candy's Ledger 流水筛选、稳定分页、创建、历史详情、原子更正和软删除。
 - Candy's Ledger 转账聚合列表、三模式创建、历史详情、原子更正和软删除。
 - Candy's Ledger Dashboard、净资产趋势、分类/账户/标签维度和服务端 CSV 导出。
+- Candy's Ledger 个人审计、余额缓存维护、持久化 USER/OPERATOR 授权和受控运行可见性。
+- Queue-independent liveness、脱敏 readiness、认证 Metrics 与幂等 dead-letter 重试。
 
 金额与汇率不使用二进制浮点：金额使用 `NUMERIC(20,8)`，汇率使用 `NUMERIC(20,10)`，JSON 金额使用十进制字符串。
 
@@ -112,7 +114,7 @@ tests/integration/    In-Memory and PostgreSQL scenarios
 tests/api/            HTTP contract and resource tests
 tests/sql/            Migration and adapter gates
 config/               Runtime configuration templates
-migrations/           Flyway V1-V9
+migrations/           Flyway V1-V10
 frontend/             Candy's Ledger Vue 3 Web client
 Docs/                 Architecture, plans, guides, standards and archive
 ```
@@ -130,9 +132,9 @@ Docs/                 Architecture, plans, guides, standards and archive
 | PostgreSQL fixture | 12/12 scenarios PASS |
 | Flyway V1-V6 | migrate/info/validate/no-op PASS |
 | Docker | cold build、healthy、non-root、RLS、Outbox/Scheduler PASS |
-| Phase 2 S01-S09 Windows Debug | 375/375 PASS |
-| Frontend contract/lint/typecheck/unit/build | PASS（52 tests） |
-| Frontend Edge Desktop/Mobile contract E2E + axe | 29/29 PASS |
+| Phase 2 S01-S10 Windows Debug | 380/380 PASS |
+| Frontend contract/lint/typecheck/unit/build | PASS（59 tests） |
+| Frontend Edge Desktop/Mobile contract E2E + axe | 34/34 PASS |
 
 ---
 

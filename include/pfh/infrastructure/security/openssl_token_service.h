@@ -32,6 +32,7 @@ public:
     [[nodiscard]] application::Result<application::IssuedAccessToken>
     issue_access_token(
         domain::UserId user_id,
+        domain::UserRole role,
         std::string_view session_id,
         application::AuthTimePoint issued_at) const override;
 

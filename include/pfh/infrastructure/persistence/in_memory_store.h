@@ -57,16 +57,19 @@ struct InMemoryBalanceCache {
     domain::TransactionId last_transaction_id;
     std::int64_t source_version = 0;
     std::int64_t cache_version = 1;
+    std::chrono::system_clock::time_point updated_at{};
 
     InMemoryBalanceCache(
         domain::Money balance_in,
         domain::TransactionId last_transaction_id_in,
         std::int64_t source_version_in,
-        std::int64_t cache_version_in)
+        std::int64_t cache_version_in,
+        std::chrono::system_clock::time_point updated_at_in)
         : balance(std::move(balance_in)),
           last_transaction_id(last_transaction_id_in),
           source_version(source_version_in),
-          cache_version(cache_version_in) {}
+          cache_version(cache_version_in),
+          updated_at(updated_at_in) {}
 };
 
 struct InMemoryTransferGroup {
@@ -140,6 +143,14 @@ struct InMemoryIdempotencyRecord {
     std::chrono::system_clock::time_point expires_at{};
 };
 
+struct InMemoryOutboxRetryCommand {
+    domain::UserId operator_user_id;
+    std::string idempotency_key;
+    std::string outbox_id;
+    std::string trace_id;
+    std::chrono::system_clock::time_point created_at{};
+};
+
 /// @brief Process-local store. UoW and outbox operations serialize on mutex;
 /// test setup and direct inspection must not race with repository calls.
 struct InMemoryStore {
@@ -153,6 +164,7 @@ struct InMemoryStore {
     std::uint64_t next_outbox_claim_token = 1;
     std::uint64_t next_job_lease_token = 1;
     std::int64_t next_refresh_token_id = 1;
+    std::int64_t next_audit_log_id = 1;
 
     std::int64_t next_category_id = 1;
     std::int64_t next_tag_id = 1;
@@ -179,6 +191,7 @@ struct InMemoryStore {
     std::set<std::pair<std::string, std::string>> outbox_handler_receipts;
     std::map<std::string, InMemoryJobLeaseRecord> scheduled_job_leases;
     std::map<std::string, InMemoryIdempotencyRecord> idempotency;
+    std::map<std::string, InMemoryOutboxRetryCommand> outbox_retry_commands;
 
     // Repository helpers can re-enter while a UoW owns the store lock. A
     // recursive mutex lets the UoW report nested transactions explicitly

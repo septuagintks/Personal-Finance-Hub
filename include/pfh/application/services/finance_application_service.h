@@ -35,6 +35,9 @@ public:
         domain::UserId user_id,
         domain::AccountId account_id);
     [[nodiscard]] Result<AccountDto> create_account(const CreateAccountCommand& command);
+    [[nodiscard]] Result<AccountDto> create_account(
+        const CreateAccountCommand& command,
+        std::string_view idempotency_key);
     [[nodiscard]] Result<AccountDto> update_account(const UpdateAccountCommand& command);
     [[nodiscard]] Result<BalanceDto> account_balance(
         domain::UserId user_id,
@@ -49,6 +52,9 @@ public:
         MetadataListStatus status = MetadataListStatus::Active);
     [[nodiscard]] Result<CategoryDto> create_category(
         const CreateCategoryCommand& command);
+    [[nodiscard]] Result<CategoryDto> create_category(
+        const CreateCategoryCommand& command,
+        std::string_view idempotency_key);
     [[nodiscard]] VoidResult delete_category(const DeleteCategoryCommand& command);
     [[nodiscard]] Result<CategoryDto> update_category(
         const UpdateCategoryCommand& command);
@@ -59,6 +65,9 @@ public:
         domain::UserId user_id,
         MetadataListStatus status = MetadataListStatus::Active);
     [[nodiscard]] Result<TagDto> create_tag(const CreateTagCommand& command);
+    [[nodiscard]] Result<TagDto> create_tag(
+        const CreateTagCommand& command,
+        std::string_view idempotency_key);
     [[nodiscard]] VoidResult delete_tag(const DeleteTagCommand& command);
     [[nodiscard]] Result<TagDto> update_tag(const UpdateTagCommand& command);
     [[nodiscard]] Result<TagDto> restore_tag(const RestoreTagCommand& command);
@@ -112,6 +121,11 @@ public:
         const ReportAnalysisQuery& query);
     [[nodiscard]] Result<CsvExportDto> export_transactions_csv(
         const TransactionListQuery& query);
+
+    [[nodiscard]] Result<UserAuditLogPageDto> list_user_audit_logs(
+        const UserAuditLogQueryDto& query);
+    [[nodiscard]] Result<BalanceCacheRebuildDto> rebuild_balance_cache(
+        const RebuildBalanceCacheCommand& command);
 
 private:
     [[nodiscard]] Result<std::unique_ptr<IRequestScope>> open_scope(

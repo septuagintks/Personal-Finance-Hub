@@ -16,21 +16,28 @@ namespace pfh::domain {
 /// @brief Strongly-typed user identifier.
 using UserId = TypedId<UserIdTag>;
 
+enum class UserRole {
+    User,
+    Operator
+};
+
 /// @brief User entity — minimal identity holder.
 ///
 /// Responsible for identity only. All preferences (base currency, locale, etc.)
 /// are handled by UserPreference.
 class User {
 public:
-    User(UserId id, std::string username)
-        : id_(id), username_(std::move(username)) {}
+    User(UserId id, std::string username, UserRole role = UserRole::User)
+        : id_(id), username_(std::move(username)), role_(role) {}
 
     [[nodiscard]] UserId id() const noexcept { return id_; }
     [[nodiscard]] const std::string& username() const noexcept { return username_; }
+    [[nodiscard]] UserRole role() const noexcept { return role_; }
 
 private:
     UserId id_;
     std::string username_;
+    UserRole role_ = UserRole::User;
 };
 
 } // namespace pfh::domain

@@ -75,6 +75,11 @@ void dispatch_request(
     application::IBackgroundExecutor& executor,
     HttpRequest request,
     ResponseCallback callback) {
+    // Liveness must remain independent of the bounded application worker queue.
+    if (request.path == "/livez") {
+        callback(to_drogon(application.handle(std::move(request))));
+        return;
+    }
     const auto trace_id = request.trace_id;
     auto response_callback =
         std::make_shared<ResponseCallback>(std::move(callback));
@@ -130,6 +135,8 @@ void DrogonHttpAdapter::configure() {
     register_static("/api/v1/auth/login", HttpMethod::Post, drogon::Post);
     register_static("/api/v1/auth/refresh", HttpMethod::Post, drogon::Post);
     register_static("/api/v1/auth/logout", HttpMethod::Post, drogon::Post);
+    register_static("/livez", HttpMethod::Get, drogon::Get);
+    register_static("/readyz", HttpMethod::Get, drogon::Get);
     register_static("/api/v1/web/auth/register", HttpMethod::Post, drogon::Post);
     register_static("/api/v1/web/auth/login", HttpMethod::Post, drogon::Post);
     register_static("/api/v1/web/auth/refresh", HttpMethod::Post, drogon::Post);
@@ -189,6 +196,26 @@ void DrogonHttpAdapter::configure() {
         "/api/v1/users/me/preferences", HttpMethod::Get, drogon::Get);
     register_static(
         "/api/v1/users/me/preferences", HttpMethod::Put, drogon::Put);
+    register_static(
+        "/api/v1/maintenance/audit-logs", HttpMethod::Get, drogon::Get);
+    register_static(
+        "/api/v1/maintenance/accounts/balance-cache/rebuild",
+        HttpMethod::Post,
+        drogon::Post);
+    register_dynamic(
+        "/api/v1/maintenance/accounts/{1}/balance-cache/rebuild",
+        HttpMethod::Post,
+        drogon::Post);
+    register_static(
+        "/api/v1/operations/summary", HttpMethod::Get, drogon::Get);
+    register_static(
+        "/api/v1/operations/metrics", HttpMethod::Get, drogon::Get);
+    register_static(
+        "/api/v1/operations/dead-letters", HttpMethod::Get, drogon::Get);
+    register_dynamic(
+        "/api/v1/operations/dead-letters/{1}/retry",
+        HttpMethod::Post,
+        drogon::Post);
 
     drogon::app().setExceptionHandler(
         [](const std::exception& error,

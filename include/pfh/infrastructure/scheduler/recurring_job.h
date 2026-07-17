@@ -7,6 +7,7 @@
 #include "pfh/application/scheduler/i_job.h"
 #include "pfh/application/scheduler/i_job_lease_repository.h"
 #include "pfh/application/scheduler/i_timer_scheduler.h"
+#include "pfh/application/operations/i_operations_repository.h"
 
 #include <atomic>
 #include <chrono>
@@ -36,6 +37,7 @@ struct RecurringJobConfig {
 };
 
 class RecurringJob : public application::IJob,
+                     public application::IJobRuntimeStatusReader,
                      public std::enable_shared_from_this<RecurringJob> {
 public:
     RecurringJob(
@@ -52,6 +54,8 @@ public:
     [[nodiscard]] domain::RepositoryVoidResult start() override;
     void stop() override;
     [[nodiscard]] bool trigger_now() override;
+    [[nodiscard]] application::JobRuntimeSnapshot runtime_snapshot()
+        const override;
 
 private:
     void execute(std::uint64_t sequence) noexcept;
@@ -74,6 +78,11 @@ private:
     bool stopping_ = false;
     bool running_ = false;
     std::atomic<std::uint64_t> execution_sequence_{0};
+    application::JobLastResult last_result_ =
+        application::JobLastResult::NeverRun;
+    std::optional<std::chrono::system_clock::time_point> last_started_at_;
+    std::optional<std::chrono::system_clock::time_point> last_finished_at_;
+    std::int64_t last_duration_milliseconds_ = 0;
 };
 
 } // namespace pfh::infrastructure

@@ -63,6 +63,7 @@ def main() -> int:
     transfer_correction_migration = read(
         "migrations/V9__transfer_corrections.sql"
     )
+    operations_migration = read("migrations/V10__operations_and_roles.sql")
     role_init = read("docker/postgres/init-roles.sql")
     idempotency = read(
         "src/infrastructure/persistence/idempotency_repository_impl.cpp"
@@ -78,6 +79,12 @@ def main() -> int:
     )
     job_leases = read(
         "src/infrastructure/persistence/postgres_job_lease_repository.cpp"
+    )
+    idempotency_cleanup = read(
+        "src/infrastructure/persistence/postgres_idempotency_cleanup_repository.cpp"
+    )
+    operations = read(
+        "src/infrastructure/persistence/postgres_operations_repository.cpp"
     )
     rate_provider = read(
         "src/infrastructure/external/exchange_rate_providers.cpp"
@@ -108,6 +115,8 @@ def main() -> int:
         "postgres_supplemental_audit_store.cpp",
         "postgres_session_cleanup_repository.cpp",
         "postgres_job_lease_repository.cpp",
+        "postgres_idempotency_cleanup_repository.cpp",
+        "postgres_operations_repository.cpp",
         "curl_http_transport.cpp",
         "drogon_timer_scheduler.cpp",
     ]
@@ -265,6 +274,14 @@ def main() -> int:
         failures,
     )
     require(
+        "AccountRepositoryImpl::rebuild_balance_cache" in account
+        and "target_accounts AS MATERIALIZED" in account
+        and "COALESCE(MAX(entry.version), 0)" in account
+        and "FOR UPDATE" in account,
+        "S10 balance maintenance must lock targets and rebuild source_version",
+        failures,
+    )
+    require(
         "find_by_id_for_user_for_update" in tag
         and "AND deleted_at IS NULL FOR UPDATE NOWAIT" in tag,
         "Tag delete audit snapshot must be locked in the active transaction",
@@ -301,6 +318,8 @@ def main() -> int:
         "DrogonUnitOfWork",
         "PostgresSessionCleanupRepository",
         "PostgresJobLeaseRepository",
+        "PostgresIdempotencyCleanupRepository",
+        "PostgresOperationsRepository",
     ):
         require(
             re.search(rf"{adapter}>\(\s*request_db_", composition) is not None,
@@ -328,6 +347,13 @@ def main() -> int:
         and "EVP_DigestSign" in token_service
         and "RAND_bytes" in token_service,
         "JWT and opaque tokens must use OpenSSL-backed HS256 and secure randomness",
+        failures,
+    )
+    require(
+        '"OPERATOR"' in token_service
+        and "find_role_by_id" in user
+        and "role::text" in user,
+        "JWT roles must be signed from persistent server role facts",
         failures,
     )
     require(
@@ -386,6 +412,35 @@ def main() -> int:
         and "lease.lease_until <= NOW()" in job_leases
         and "$3::bigint * INTERVAL '1 second'" in job_leases,
         "Scheduled job leases must use expiring token-guarded ownership",
+        failures,
+    )
+    require(
+        "CREATE TYPE user_role AS ENUM ('user', 'operator')" in operations_migration
+        and "CREATE TABLE outbox_retry_commands" in operations_migration
+        and "SECURITY DEFINER" in operations_migration
+        and "FOR UPDATE SKIP LOCKED" in operations_migration
+        and "REVOKE ALL ON FUNCTION pfh_cleanup_expired_request_idempotency"
+        in operations_migration
+        and "GRANT EXECUTE ON FUNCTION public.pfh_cleanup_expired_request_idempotency"
+        in role_init,
+        "V10 role and bounded idempotency cleanup boundaries are incomplete",
+        failures,
+    )
+    require(
+        "pfh_cleanup_expired_request_idempotency" in idempotency_cleanup
+        and "request_db_" in composition
+        and "background_db_" not in idempotency_cleanup,
+        "Idempotency cleanup must use the narrow request-role function path",
+        failures,
+    )
+    require(
+        "event.payload" not in operations
+        and "event.last_error" not in operations
+        and "FOR UPDATE" in operations
+        and "outbox_retry_commands" in operations
+        and "'operator'::audit_actor_type" in operations
+        and "'retry'::audit_action" in operations,
+        "Operations adapter must sanitize dead letters and retry atomically",
         failures,
     )
     require(

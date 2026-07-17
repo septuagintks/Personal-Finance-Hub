@@ -5,6 +5,8 @@
 #include "pfh/application/dto.h"
 #include "pfh/application/error.h"
 #include "pfh/application/persistence/i_unit_of_work.h"
+#include "pfh/application/idempotency.h"
+#include "pfh/application/ports/i_idempotency_repository.h"
 #include "pfh/domain/repositories/i_account_repository.h"
 #include "pfh/domain/repositories/i_audit_log_repository.h"
 #include "pfh/domain/repositories/i_category_repository.h"
@@ -21,15 +23,24 @@ public:
     CreateAccountUseCase(
         domain::IAccountRepository& accounts,
         domain::IAuditLogRepository& audit_logs,
-        IUnitOfWork& uow)
-        : accounts_(accounts), audit_logs_(audit_logs), uow_(uow) {}
+        IUnitOfWork& uow,
+        IIdempotencyRepository* idempotency = nullptr)
+        : accounts_(accounts), audit_logs_(audit_logs), uow_(uow),
+          idempotency_(idempotency) {}
 
     [[nodiscard]] Result<AccountDto> execute(const CreateAccountCommand& command);
+    [[nodiscard]] Result<AccountDto> execute(
+        const CreateAccountCommand& command,
+        const IdempotencyRequest& idempotency);
 
 private:
+    [[nodiscard]] Result<AccountDto> execute_impl(
+        const CreateAccountCommand& command,
+        const std::optional<IdempotencyRequest>& idempotency);
     domain::IAccountRepository& accounts_;
     domain::IAuditLogRepository& audit_logs_;
     IUnitOfWork& uow_;
+    IIdempotencyRepository* idempotency_;
 };
 
 class ArchiveAccountUseCase {
@@ -102,19 +113,28 @@ public:
         domain::ICategoryRepository& categories,
         domain::IUserPreferenceRepository& preferences,
         domain::IAuditLogRepository& audit_logs,
-        IUnitOfWork& uow)
+        IUnitOfWork& uow,
+        IIdempotencyRepository* idempotency = nullptr)
         : categories_(categories),
           preferences_(preferences),
           audit_logs_(audit_logs),
-          uow_(uow) {}
+          uow_(uow),
+          idempotency_(idempotency) {}
 
     [[nodiscard]] Result<CategoryDto> execute(const CreateCategoryCommand& command);
+    [[nodiscard]] Result<CategoryDto> execute(
+        const CreateCategoryCommand& command,
+        const IdempotencyRequest& idempotency);
 
 private:
+    [[nodiscard]] Result<CategoryDto> execute_impl(
+        const CreateCategoryCommand& command,
+        const std::optional<IdempotencyRequest>& idempotency);
     domain::ICategoryRepository& categories_;
     domain::IUserPreferenceRepository& preferences_;
     domain::IAuditLogRepository& audit_logs_;
     IUnitOfWork& uow_;
+    IIdempotencyRepository* idempotency_;
 };
 
 class DeleteCategoryUseCase {
@@ -181,15 +201,24 @@ public:
     CreateTagUseCase(
         domain::ITagRepository& tags,
         domain::IAuditLogRepository& audit_logs,
-        IUnitOfWork& uow)
-        : tags_(tags), audit_logs_(audit_logs), uow_(uow) {}
+        IUnitOfWork& uow,
+        IIdempotencyRepository* idempotency = nullptr)
+        : tags_(tags), audit_logs_(audit_logs), uow_(uow),
+          idempotency_(idempotency) {}
 
     [[nodiscard]] Result<TagDto> execute(const CreateTagCommand& command);
+    [[nodiscard]] Result<TagDto> execute(
+        const CreateTagCommand& command,
+        const IdempotencyRequest& idempotency);
 
 private:
+    [[nodiscard]] Result<TagDto> execute_impl(
+        const CreateTagCommand& command,
+        const std::optional<IdempotencyRequest>& idempotency);
     domain::ITagRepository& tags_;
     domain::IAuditLogRepository& audit_logs_;
     IUnitOfWork& uow_;
+    IIdempotencyRepository* idempotency_;
 };
 
 class DeleteTagUseCase {

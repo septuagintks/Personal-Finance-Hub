@@ -3,12 +3,14 @@ import { computed, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import {
   ChartNoAxesCombined,
+  Activity,
   LayoutDashboard,
   LogOut,
   Menu,
   ReceiptText,
   ArrowRightLeft,
   Settings2,
+  Wrench,
   WalletCards,
   X,
 } from '@lucide/vue';
@@ -31,6 +33,8 @@ const navigation = computed(() =>
     { key: 'transfers', to: '/transfers', icon: ArrowRightLeft },
     { key: 'reports', to: '/reports', icon: ChartNoAxesCombined },
     { key: 'settings', to: '/settings', icon: Settings2 },
+    { key: 'maintenance', to: '/maintenance', icon: Wrench },
+    ...(session.isOperator ? [{ key: 'operations', to: '/operations', icon: Activity }] : []),
   ].map((item) => ({
     ...item,
     label: translate(userContext.preference?.locale, item.key as MessageKey),

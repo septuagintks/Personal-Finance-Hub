@@ -64,6 +64,7 @@ private:
     [[nodiscard]] Result<PendingTokens> create_pending_tokens() const;
     [[nodiscard]] Result<TokenPairDto> build_token_pair(
         domain::UserId user_id,
+        domain::UserRole role,
         const PendingTokens& pending,
         AuthTimePoint now,
         IssuedAccessToken* issued = nullptr) const;

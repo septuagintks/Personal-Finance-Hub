@@ -138,6 +138,7 @@ for (const viewport of [
             accessToken: 'registered-access',
             expiresIn: 900,
             tokenType: 'Bearer',
+            roles: ['USER'],
           }),
         });
       });
@@ -181,7 +182,12 @@ for (const viewport of [
             'Set-Cookie':
               'pfh_refresh=e2e-cookie; Path=/api/v1/web/auth; HttpOnly; Secure; SameSite=Strict',
           },
-          body: JSON.stringify({ accessToken: 'e2e-access', expiresIn: 900, tokenType: 'Bearer' }),
+          body: JSON.stringify({
+            accessToken: 'e2e-access',
+            expiresIn: 900,
+            tokenType: 'Bearer',
+            roles: ['USER'],
+          }),
         });
       });
       let logoutAuthorization = '';
@@ -229,6 +235,7 @@ for (const viewport of [
             accessToken: 'short-lived-access',
             expiresIn: 1,
             tokenType: 'Bearer',
+            roles: ['USER'],
           }),
         });
       });
@@ -281,6 +288,7 @@ for (const viewport of [
             accessToken: 'expiring-access',
             expiresIn: 1,
             tokenType: 'Bearer',
+            roles: ['USER'],
           }),
         });
       });
@@ -307,6 +315,7 @@ for (const viewport of [
             accessToken: 'refreshed-access',
             expiresIn: 900,
             tokenType: 'Bearer',
+            roles: ['USER'],
           }),
         });
       });
@@ -366,6 +375,7 @@ for (const viewport of [
             accessToken: `restored-access-${refreshRequests}`,
             expiresIn: 900,
             tokenType: 'Bearer',
+            roles: ['USER'],
           }),
         });
       });
@@ -439,6 +449,7 @@ for (const viewport of [
             accessToken: 'orphaned-access',
             expiresIn: 900,
             tokenType: 'Bearer',
+            roles: ['USER'],
           }),
         });
       });
@@ -477,7 +488,12 @@ test('logout broadcasts state only and removes both tabs from protected routes',
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ accessToken: 'tab-one-access', expiresIn: 900, tokenType: 'Bearer' }),
+      body: JSON.stringify({
+        accessToken: 'tab-one-access',
+        expiresIn: 900,
+        tokenType: 'Bearer',
+        roles: ['USER'],
+      }),
     });
   });
   await context.route(refreshEndpoint, async (route) => {
@@ -499,7 +515,12 @@ test('logout broadcasts state only and removes both tabs from protected routes',
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ accessToken: 'tab-two-access', expiresIn: 900, tokenType: 'Bearer' }),
+      body: JSON.stringify({
+        accessToken: 'tab-two-access',
+        expiresIn: 900,
+        tokenType: 'Bearer',
+        roles: ['USER'],
+      }),
     });
   });
   await context.route('**/api/v1/users/me/preferences', async (route) => {

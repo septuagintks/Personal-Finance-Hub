@@ -29,6 +29,7 @@ struct AccessTokenClaims {
     domain::UserId user_id;
     std::string session_id;
     std::string token_id;
+    domain::UserRole role = domain::UserRole::User;
     AuthTimePoint issued_at{};
     AuthTimePoint not_before{};
     AuthTimePoint expires_at{};
@@ -75,6 +76,7 @@ struct TokenPairDto {
     std::string refresh_token;
     std::int64_t expires_in_seconds = 0;
     std::string token_type = "Bearer";
+    domain::UserRole role = domain::UserRole::User;
 };
 
 struct RegisterResultDto {

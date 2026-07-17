@@ -77,6 +77,24 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/maintenance',
+      name: 'maintenance',
+      component: () => import('../views/MaintenanceView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/operations',
+      name: 'operations',
+      component: () => import('../views/OperationsView.vue'),
+      meta: { requiresAuth: true, requiresOperator: true },
+    },
+    {
+      path: '/forbidden',
+      name: 'forbidden',
+      component: () => import('../views/ForbiddenView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/:pathMatch(.*)*',
       name: 'not-found',
       component: () => import('../views/NotFoundView.vue'),
@@ -94,6 +112,7 @@ router.beforeEach(async (to) => {
   if (to.meta.requiresAuth && !session.isAuthenticated) {
     return { name: 'login', query: { redirect: to.fullPath } };
   }
+  if (to.meta.requiresOperator && !session.isOperator) return { name: 'forbidden' };
   if (to.meta.guestOnly && session.isAuthenticated) return { name: 'dashboard' };
   return true;
 });

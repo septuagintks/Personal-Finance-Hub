@@ -7,6 +7,7 @@
 #pragma once
 
 #include "pfh/domain/account.h"
+#include "pfh/domain/audit_log.h"
 #include "pfh/domain/category.h"
 #include "pfh/domain/money.h"
 #include "pfh/domain/tag.h"
@@ -474,6 +475,51 @@ struct CsvExportDto {
     std::string filename;
     std::string content;
     std::size_t row_count = 0;
+};
+
+struct UserAuditLogQueryDto {
+    domain::UserId user_id;
+    std::optional<domain::AuditAction> action;
+    std::optional<std::string> resource_type;
+    std::optional<std::chrono::system_clock::time_point> from;
+    std::optional<std::chrono::system_clock::time_point> to;
+    std::optional<std::int64_t> before_id;
+    std::size_t page_size = 50;
+};
+
+struct UserAuditLogItemDto {
+    std::int64_t id = 0;
+    domain::AuditAction action = domain::AuditAction::Create;
+    std::string resource_type;
+    std::string resource_id;
+    std::string result = "success";
+    std::optional<std::string> trace_id;
+    std::chrono::system_clock::time_point occurred_at{};
+};
+
+struct UserAuditLogPageDto {
+    std::vector<UserAuditLogItemDto> items;
+    std::optional<std::string> next_cursor;
+};
+
+struct RebuildBalanceCacheCommand {
+    domain::UserId user_id;
+    std::optional<domain::AccountId> account_id;
+    std::string trace_id;
+};
+
+struct BalanceCacheRebuildItemDto {
+    domain::AccountId account_id;
+    std::string currency_code;
+    std::string balance;
+    std::optional<domain::TransactionId> last_transaction_id;
+    std::int64_t source_version = 0;
+    std::int64_t cache_version = 1;
+    std::chrono::system_clock::time_point rebuilt_at{};
+};
+
+struct BalanceCacheRebuildDto {
+    std::vector<BalanceCacheRebuildItemDto> accounts;
 };
 
 struct RefreshExchangeRatesCommand {

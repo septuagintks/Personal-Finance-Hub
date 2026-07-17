@@ -11,6 +11,10 @@ namespace pfh::presentation {
 bool JwtFilter::is_public_route(
     HttpMethod method,
     std::string_view path) noexcept {
+    if (method == HttpMethod::Get &&
+        (path == "/livez" || path == "/readyz")) {
+        return true;
+    }
     if (method == HttpMethod::Post &&
         (path == "/api/v1/auth/register" ||
          path == "/api/v1/auth/login" ||
@@ -53,6 +57,19 @@ application::Result<RequestIdentity> JwtFilter::authenticate(
     if (*revoked) {
         return application::err(application::Error::unauthorized(
             "Invalid or expired access token"));
+    }
+    auto current_role = roles_.find_role_by_id(claims->user_id);
+    if (!current_role) {
+        if (current_role.error().status == domain::RepositoryStatus::NotFound) {
+            return application::err(application::Error::unauthorized(
+                "Invalid or expired access token"));
+        }
+        return application::err(
+            application::from_repository(current_role.error()));
+    }
+    if (*current_role != claims->role) {
+        return application::err(application::Error::unauthorized(
+            "Access role changed; refresh the session"));
     }
     return RequestIdentity{*claims};
 }

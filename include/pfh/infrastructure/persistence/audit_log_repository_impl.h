@@ -13,6 +13,11 @@ public:
     [[nodiscard]] domain::RepositoryVoidResult append(
         domain::ITransactionContext& tx,
         const domain::AuditLogEntry& entry) override;
+
+    [[nodiscard]] domain::RepositoryResult<domain::UserAuditLogPage>
+    find_user_entries(
+        domain::ITransactionContext& tx,
+        const domain::UserAuditLogQuery& query) override;
 };
 
 } // namespace pfh::infrastructure

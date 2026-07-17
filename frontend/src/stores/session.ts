@@ -30,14 +30,13 @@ import { useTransferStore } from './transfers';
 
 type RegisterRequest = components['schemas']['RegisterRequest'];
 type LoginRequest = components['schemas']['LoginRequest'];
+type Role = components['schemas']['Role'];
 const availableHomeRoutes: Record<string, string> = {
   dashboard: '/dashboard',
   accounts: '/accounts',
   transactions: '/transactions',
   reports: '/reports',
 };
-
-installRefreshHandler();
 
 export const useSessionStore = defineStore('session', () => {
   const userContext = useUserContextStore();
@@ -48,6 +47,7 @@ export const useSessionStore = defineStore('session', () => {
   const status = ref<'idle' | 'restoring' | 'authenticated' | 'anonymous'>('idle');
   const userId = ref<number | null>(null);
   const expiresAt = ref<number | null>(null);
+  const roles = ref<Role[]>([]);
   let restorePromise: Promise<void> | null = null;
   let stopChannel: (() => void) | null = null;
   let lifecycleGeneration = 0;
@@ -57,6 +57,11 @@ export const useSessionStore = defineStore('session', () => {
     () => status.value === 'authenticated' && getAccessToken() !== null,
   );
   const isBusy = computed(() => status.value === 'restoring');
+  const isOperator = computed(() => roles.value.includes('OPERATOR'));
+
+  installRefreshHandler((pair) => {
+    roles.value = [...pair.roles];
+  });
 
   const defaultHomeRoute = computed(() => {
     const configured = userContext.preference?.defaultHomePage ?? 'dashboard';
@@ -77,6 +82,7 @@ export const useSessionStore = defineStore('session', () => {
     transfers.clear();
     userId.value = null;
     expiresAt.value = null;
+    roles.value = [];
     status.value = 'restoring';
     return { generation: lifecycleGeneration, controller };
   }
@@ -92,6 +98,7 @@ export const useSessionStore = defineStore('session', () => {
   ): Promise<boolean> {
     if (!isCurrent(attempt.generation, attempt.controller)) return false;
     setAccessToken(pair.accessToken);
+    roles.value = [...pair.roles];
     expiresAt.value = Date.now() + pair.expiresIn * 1000;
     const contextLoaded = await userContext.load();
     if (!contextLoaded || !isCurrent(attempt.generation, attempt.controller)) return false;
@@ -115,6 +122,7 @@ export const useSessionStore = defineStore('session', () => {
     transfers.clear();
     userId.value = null;
     expiresAt.value = null;
+    roles.value = [];
     status.value = 'anonymous';
   }
 
@@ -208,8 +216,10 @@ export const useSessionStore = defineStore('session', () => {
     status,
     userId,
     expiresAt,
+    roles,
     isAuthenticated,
     isBusy,
+    isOperator,
     defaultHomeRoute,
     restore,
     register,

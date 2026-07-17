@@ -4,6 +4,7 @@
 
 #include "pfh/application/events/outbox_publisher.h"
 #include "pfh/application/maintenance/cleanup_expired_sessions_use_case.h"
+#include "pfh/application/maintenance/cleanup_expired_idempotency_use_case.h"
 #include "pfh/application/use_cases/refresh_exchange_rates_use_case.h"
 #include "pfh/infrastructure/scheduler/recurring_job.h"
 
@@ -41,6 +42,18 @@ public:
         application::IBackgroundExecutor& executor,
         const application::IClock& clock,
         application::CleanupExpiredSessionsUseCase& use_case,
+        application::IJobLeaseRepository& leases,
+        std::string owner_id,
+        RecurringJobConfig config);
+};
+
+class IdempotencyCleanupJob final : public RecurringJob {
+public:
+    IdempotencyCleanupJob(
+        application::ITimerScheduler& timers,
+        application::IBackgroundExecutor& executor,
+        const application::IClock& clock,
+        application::CleanupExpiredIdempotencyUseCase& use_case,
         application::IJobLeaseRepository& leases,
         std::string owner_id,
         RecurringJobConfig config);

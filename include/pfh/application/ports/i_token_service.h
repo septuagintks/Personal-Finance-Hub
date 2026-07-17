@@ -18,6 +18,7 @@ public:
 
     [[nodiscard]] virtual Result<IssuedAccessToken> issue_access_token(
         domain::UserId user_id,
+        domain::UserRole role,
         std::string_view session_id,
         AuthTimePoint issued_at) const = 0;
 

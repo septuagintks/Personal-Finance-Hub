@@ -48,6 +48,14 @@ SELECT format(
     :'request_user')
 \gexec
 SELECT format(
+    'GRANT EXECUTE ON FUNCTION public.pfh_cleanup_expired_request_idempotency(INTEGER) TO %I',
+    :'request_user')
+\gexec
+SELECT format(
+    'GRANT EXECUTE ON FUNCTION public.pfh_count_expired_request_idempotency() TO %I',
+    :'request_user')
+\gexec
+SELECT format(
     'GRANT SELECT ON public.accounts, public.users TO %I',
     :'background_user')
 \gexec

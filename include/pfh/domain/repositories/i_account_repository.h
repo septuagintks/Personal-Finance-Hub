@@ -17,6 +17,12 @@ struct AccountBalanceAt {
     Money balance;
 };
 
+struct BalanceCacheRebuildResult {
+    BalanceSnapshot snapshot;
+    std::int64_t source_version = 0;
+    std::int64_t cache_version = 1;
+};
+
 class IAccountRepository {
 public:
     virtual ~IAccountRepository() = default;
@@ -58,6 +64,13 @@ public:
 
     /// @brief Return balance snapshot. Implementation owns cache hit/miss/rebuild.
     [[nodiscard]] virtual RepositoryResult<BalanceSnapshot> balance_of(AccountId id) = 0;
+
+    [[nodiscard]] virtual RepositoryResult<std::vector<BalanceCacheRebuildResult>>
+    rebuild_balance_cache(
+        ITransactionContext& tx,
+        UserId user_id,
+        std::optional<AccountId> account_id,
+        std::chrono::system_clock::time_point rebuilt_at) = 0;
 
     /// @brief Return tenant-owned account balances at an inclusive historical
     /// valuation instant. Account created_at is record metadata, not a business

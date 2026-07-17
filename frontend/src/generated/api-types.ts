@@ -468,6 +468,150 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/livez": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getLiveness"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/readyz": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getReadiness"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/maintenance/audit-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listUserAuditLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/maintenance/accounts/balance-cache/rebuild": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["rebuildAllBalanceCaches"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/maintenance/accounts/{accountId}/balance-cache/rebuild": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["rebuildAccountBalanceCache"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/operations/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getOperationsSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/operations/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getOperationsMetrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/operations/dead-letters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listDeadLetters"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/operations/dead-letters/{outboxId}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["retryDeadLetter"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/web/auth/register": {
         parameters: {
             query?: never;
@@ -570,12 +714,15 @@ export interface components {
         RefreshRequest: {
             refreshToken: string;
         };
+        /** @enum {string} */
+        Role: "USER" | "OPERATOR";
         TokenPair: {
             accessToken: string;
             refreshToken: string;
             expiresIn: number;
             /** @constant */
             tokenType: "Bearer";
+            roles: components["schemas"]["Role"][];
         };
         RegisterResponse: {
             userId: components["schemas"]["Id"];
@@ -584,6 +731,7 @@ export interface components {
             expiresIn: number;
             /** @constant */
             tokenType: "Bearer";
+            roles: components["schemas"]["Role"][];
         };
         CurrencyMetadata: {
             code: components["schemas"]["CurrencyCode"];
@@ -884,6 +1032,103 @@ export interface components {
             netWorthTrend: components["schemas"]["NetWorthTrendPoint"][];
             breakdown: components["schemas"]["ReportBreakdownSlice"][];
         };
+        HealthStatus: {
+            /** @enum {string} */
+            status: "alive" | "ready" | "not_ready";
+        };
+        /** @enum {string} */
+        UserAuditAction: "create" | "update" | "archive" | "delete" | "dangerous_delete" | "sync_import" | "refresh" | "register" | "login" | "logout" | "token_refresh" | "security_event";
+        UserAuditLogItem: {
+            id: components["schemas"]["Id"];
+            action: components["schemas"]["UserAuditAction"];
+            resourceType: string;
+            resourceId: string;
+            /** @constant */
+            result: "success";
+            traceId: string | null;
+            /** Format: date-time */
+            occurredAt: string;
+        };
+        UserAuditLogPage: {
+            items: components["schemas"]["UserAuditLogItem"][];
+            nextCursor: string | null;
+        };
+        BalanceCacheRebuildItem: {
+            accountId: components["schemas"]["Id"];
+            currencyCode: components["schemas"]["CurrencyCode"];
+            balance: components["schemas"]["DecimalString"];
+            lastTransactionId: components["schemas"]["Id"] | null;
+            sourceVersion: number;
+            cacheVersion: number;
+            /** Format: date-time */
+            rebuiltAt: string;
+        };
+        BalanceCacheRebuildResponse: {
+            accounts: components["schemas"]["BalanceCacheRebuildItem"][];
+        };
+        OutboxCounts: {
+            pending: number;
+            processing: number;
+            published: number;
+            failed: number;
+            deadLetter: number;
+        };
+        HandlerReceiptSummary: {
+            count: number;
+            /** Format: date-time */
+            latestAt: string | null;
+        };
+        OperationalLease: {
+            jobName: string;
+            active: boolean;
+            /** Format: date-time */
+            leaseUntil: string;
+        };
+        JobRuntime: {
+            name: string;
+            schedulerStarted: boolean;
+            running: boolean;
+            executionSequence: number;
+            /** @enum {string} */
+            lastResult: "neverRun" | "succeeded" | "failed" | "skipped";
+            /** Format: date-time */
+            lastStartedAt: string | null;
+            /** Format: date-time */
+            lastFinishedAt: string | null;
+            lastDurationMs: number;
+        };
+        OperationsSummary: {
+            /** Format: date-time */
+            generatedAt: string;
+            outbox: components["schemas"]["OutboxCounts"];
+            handlerReceipts: components["schemas"]["HandlerReceiptSummary"];
+            expiredIdempotency: number;
+            leases: components["schemas"]["OperationalLease"][];
+            jobs: components["schemas"]["JobRuntime"][];
+        };
+        DeadLetterItem: {
+            id: string;
+            eventName: string;
+            aggregateType: string | null;
+            aggregateId: string | null;
+            retryCount: number;
+            maxRetryCount: number;
+            lastFailedHandler: string | null;
+            /** Format: date-time */
+            lastFailedAt: string | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        DeadLetterPage: {
+            items: components["schemas"]["DeadLetterItem"][];
+            nextCursor: string | null;
+        };
+        DeadLetterRetryResponse: {
+            outboxId: string;
+            replayed: boolean;
+            /** @constant */
+            status: "retry_scheduled";
+        };
         FieldError: {
             field: string;
             code: string;
@@ -894,6 +1139,7 @@ export interface components {
             expiresIn: number;
             /** @constant */
             tokenType: "Bearer";
+            roles: components["schemas"]["Role"][];
         };
         WebRegisterResponse: {
             userId: components["schemas"]["Id"];
@@ -901,6 +1147,7 @@ export interface components {
             expiresIn: number;
             /** @constant */
             tokenType: "Bearer";
+            roles: components["schemas"]["Role"][];
         };
         CursorPageMetadata: {
             nextCursor: string | null;
@@ -1158,7 +1405,9 @@ export interface operations {
     createAccount: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -1380,7 +1629,9 @@ export interface operations {
     createCategory: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -1514,7 +1765,9 @@ export interface operations {
     createTag: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -2125,6 +2378,237 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getLiveness: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Process is alive */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthStatus"];
+                };
+            };
+        };
+    };
+    getReadiness: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Process is ready to serve traffic */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthStatus"];
+                };
+            };
+            /** @description Process is alive but not ready, or the bounded request queue is full */
+            503: {
+                headers: {
+                    "Retry-After"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthStatus"] | components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    listUserAuditLogs: {
+        parameters: {
+            query?: {
+                action?: components["schemas"]["UserAuditAction"];
+                resourceType?: string;
+                from?: string;
+                to?: string;
+                cursor?: string;
+                pageSize?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current user's sanitized audit facts */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserAuditLogPage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    rebuildAllBalanceCaches: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description All current-user account caches rebuilt */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BalanceCacheRebuildResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    rebuildAccountBalanceCache: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                accountId: components["parameters"]["AccountId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Owned account cache rebuilt */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BalanceCacheRebuildResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getOperationsSummary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Data-minimized operational summary */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationsSummary"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getOperationsMetrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Bounded Prometheus metrics for an authenticated operator */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listDeadLetters: {
+        parameters: {
+            query?: {
+                cursor?: string;
+                pageSize?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Dead-letter metadata without event payload or raw error */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeadLetterPage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    retryDeadLetter: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                outboxId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Retry scheduled or replayed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeadLetterRetryResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };

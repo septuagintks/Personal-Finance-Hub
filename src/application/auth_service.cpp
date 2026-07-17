@@ -95,10 +95,12 @@ Result<AuthService::PendingTokens> AuthService::create_pending_tokens() const {
 
 Result<TokenPairDto> AuthService::build_token_pair(
     domain::UserId user_id,
+    domain::UserRole role,
     const PendingTokens& pending,
     AuthTimePoint now,
     IssuedAccessToken* issued) const {
-    auto access = tokens_.issue_access_token(user_id, pending.session_id, now);
+    auto access = tokens_.issue_access_token(
+        user_id, role, pending.session_id, now);
     if (!access) {
         return err(access.error());
     }
@@ -109,6 +111,7 @@ Result<TokenPairDto> AuthService::build_token_pair(
     result.access_token = access->token;
     result.refresh_token = pending.refresh_token;
     result.expires_in_seconds = tokens_.access_token_lifetime().count();
+    result.role = role;
     return result;
 }
 
@@ -182,7 +185,8 @@ Result<RegisterResultDto> AuthService::register_user(
             }
 
             IssuedAccessToken issued;
-            auto pair = build_token_pair(*created, *pending, now, &issued);
+            auto pair = build_token_pair(
+                *created, domain::UserRole::User, *pending, now, &issued);
             if (!pair) {
                 app_error = pair.error();
                 return std::unexpected(domain::RepositoryError::database(
@@ -259,7 +263,8 @@ Result<TokenPairDto> AuthService::login(const LoginCommand& command) {
         return err(pending.error());
     }
     const auto now = clock_.now();
-    auto pair = build_token_pair(credentials->user.id(), *pending, now);
+    auto pair = build_token_pair(
+        credentials->user.id(), credentials->user.role(), *pending, now);
     if (!pair) {
         return pair;
     }
@@ -316,7 +321,12 @@ Result<TokenPairDto> AuthService::refresh(const RefreshCommand& command) {
         return err(pending.error());
     }
     pending->session_id = existing->session_id;
-    auto pair = build_token_pair(existing->user_id, *pending, now);
+    auto user = users_.find_by_id(existing->user_id);
+    if (!user) {
+        return err(from_repository(user.error()));
+    }
+    auto pair = build_token_pair(
+        existing->user_id, user->role(), *pending, now);
     if (!pair) {
         return pair;
     }

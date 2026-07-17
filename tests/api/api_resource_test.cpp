@@ -6,6 +6,7 @@
 #include "pfh/infrastructure/persistence/in_memory_auth_session_repository.h"
 #include "pfh/infrastructure/persistence/in_memory_registration_defaults_repository.h"
 #include "pfh/infrastructure/persistence/in_memory_request_scope.h"
+#include "pfh/infrastructure/persistence/in_memory_operations_repository.h"
 #include "pfh/infrastructure/persistence/in_memory_store.h"
 #include "pfh/infrastructure/persistence/in_memory_unit_of_work_factory.h"
 #include "pfh/infrastructure/persistence/in_memory_user_repository.h"
@@ -54,12 +55,14 @@ class ResourceTokenService final : public ITokenService {
 public:
     [[nodiscard]] Result<IssuedAccessToken> issue_access_token(
         UserId user_id,
+        UserRole role,
         std::string_view session_id,
         AuthTimePoint issued_at) const override {
         AccessTokenClaims claims;
         claims.issuer = "pfh-api";
         claims.audience = "pfh-client";
         claims.user_id = user_id;
+        claims.role = role;
         claims.session_id = std::string(session_id);
         claims.token_id = "resource-jti-" + std::to_string(++sequence_);
         claims.issued_at = issued_at;
@@ -116,6 +119,9 @@ protected:
               auth_uow_factory_, hasher_, tokens_, clock_),
           scopes_(store_),
           finance_(scopes_, clock_, request_hasher_),
+          operations_repository_(store_),
+          operations_service_(
+              operations_repository_, clock_, {}, false, 10),
           auth_controller_(auth_service_),
           account_controller_(finance_),
           category_controller_(finance_),
@@ -125,12 +131,15 @@ protected:
           transaction_controller_(finance_),
           transfer_controller_(finance_),
           report_controller_(finance_),
-          jwt_filter_(tokens_, sessions_, clock_),
+          maintenance_controller_(finance_),
+          operations_controller_(operations_service_),
+          jwt_filter_(tokens_, sessions_, users_, clock_),
           app_(
               auth_controller_, jwt_filter_, account_controller_,
               category_controller_, tag_controller_, preference_controller_,
               currency_controller_, transaction_controller_, transfer_controller_,
-              report_controller_) {}
+              report_controller_, &maintenance_controller_,
+              &operations_controller_) {}
 
     [[nodiscard]] nlohmann::json register_user(std::string username) {
         const auto response = request(
@@ -161,7 +170,10 @@ protected:
             value.headers.insert_or_assign("Authorization", "Bearer " + token);
         }
         if (method == HttpMethod::Post &&
-            (value.path == "/api/v1/transactions" ||
+            (value.path == "/api/v1/accounts" ||
+             value.path == "/api/v1/categories" ||
+             value.path == "/api/v1/tags" ||
+             value.path == "/api/v1/transactions" ||
              value.path == "/api/v1/transfers") &&
             !value.header("Idempotency-Key").has_value()) {
             value.headers.emplace(
@@ -198,6 +210,8 @@ protected:
     AuthService auth_service_;
     InMemoryRequestScopeFactory scopes_;
     FinanceApplicationService finance_;
+    InMemoryOperationsRepository operations_repository_;
+    OperationsApplicationService operations_service_;
     AuthController auth_controller_;
     AccountController account_controller_;
     CategoryController category_controller_;
@@ -207,6 +221,8 @@ protected:
     TransactionController transaction_controller_;
     TransferController transfer_controller_;
     ReportController report_controller_;
+    MaintenanceController maintenance_controller_;
+    OperationsController operations_controller_;
     JwtFilter jwt_filter_;
     ApiApplication app_;
     std::uint64_t request_sequence_ = 0;
@@ -1691,6 +1707,313 @@ TEST_F(ResourceApiTest, EmptyReportDoesNotLeakAnotherUsersFinancialData) {
     EXPECT_EQ(bob_export.headers.at("X-Export-Row-Count"), "0");
     EXPECT_NE(alice_export.body.find("\"99\""), std::string::npos);
     EXPECT_EQ(bob_export.body.find("\"99\""), std::string::npos);
+}
+
+TEST_F(ResourceApiTest, NonFinancialCreatesReplayExactlyOncePerTenant) {
+    const auto alice = register_user("alice-idempotent-resources@example.com");
+    const auto token = alice["accessToken"].get<std::string>();
+    const nlohmann::json account_request{
+        {"name", "Idempotent Wallet"},
+        {"type", "digital_wallet"},
+        {"subtype", "wallet"},
+        {"currencyCode", "CNY"},
+        {"description", ""}};
+    const std::map<std::string, std::string> account_key{
+        {"Idempotency-Key", "account-intent-1"}};
+    const auto created = request(
+        HttpMethod::Post,
+        "/api/v1/accounts",
+        account_request,
+        token,
+        {},
+        account_key);
+    const auto replayed = request(
+        HttpMethod::Post,
+        "/api/v1/accounts",
+        account_request,
+        token,
+        {},
+        account_key);
+    ASSERT_EQ(created.status, 201) << created.body;
+    ASSERT_EQ(replayed.status, 201) << replayed.body;
+    EXPECT_EQ(created.body, replayed.body);
+    EXPECT_EQ(store_.accounts.size(), 1U);
+
+    auto changed_account = account_request;
+    changed_account["name"] = "Different Wallet";
+    EXPECT_EQ(request(
+        HttpMethod::Post,
+        "/api/v1/accounts",
+        changed_account,
+        token,
+        {},
+        account_key).status, 409);
+
+    const nlohmann::json category_request{
+        {"board", "expense"}, {"name", "Learning"}};
+    const std::map<std::string, std::string> category_key{
+        {"Idempotency-Key", "category-intent-1"}};
+    const auto category = request(
+        HttpMethod::Post,
+        "/api/v1/categories",
+        category_request,
+        token,
+        {},
+        category_key);
+    const auto category_replay = request(
+        HttpMethod::Post,
+        "/api/v1/categories",
+        category_request,
+        token,
+        {},
+        category_key);
+    ASSERT_EQ(category.status, 201) << category.body;
+    EXPECT_EQ(category.body, category_replay.body);
+
+    const nlohmann::json tag_request{{"name", "Quarterly"}};
+    const std::map<std::string, std::string> tag_key{
+        {"Idempotency-Key", "tag-intent-1"}};
+    const auto tag = request(
+        HttpMethod::Post,
+        "/api/v1/tags",
+        tag_request,
+        token,
+        {},
+        tag_key);
+    const auto tag_replay = request(
+        HttpMethod::Post,
+        "/api/v1/tags",
+        tag_request,
+        token,
+        {},
+        tag_key);
+    ASSERT_EQ(tag.status, 201) << tag.body;
+    EXPECT_EQ(tag.body, tag_replay.body);
+}
+
+TEST_F(ResourceApiTest, MaintenanceAuditAndBalanceRebuildStayTenantScoped) {
+    const auto alice = register_user("alice-maintenance@example.com");
+    const auto bob = register_user("bob-maintenance@example.com");
+    const auto alice_token = alice["accessToken"].get<std::string>();
+    const auto bob_token = bob["accessToken"].get<std::string>();
+    const auto account = create_account(alice_token);
+    const auto account_id = account["id"].get<std::int64_t>();
+    const auto transaction = request(
+        HttpMethod::Post,
+        "/api/v1/transactions",
+        {{"accountId", account_id},
+         {"type", "income"},
+         {"amount", "125.50"},
+         {"currencyCode", "CNY"},
+         {"description", "Maintenance baseline"}},
+        alice_token);
+    ASSERT_EQ(transaction.status, 201) << transaction.body;
+
+    const auto rebuilt = request(
+        HttpMethod::Post,
+        "/api/v1/maintenance/accounts/" + std::to_string(account_id) +
+            "/balance-cache/rebuild",
+        {},
+        alice_token);
+    ASSERT_EQ(rebuilt.status, 200) << rebuilt.body;
+    const auto rebuilt_body = nlohmann::json::parse(rebuilt.body);
+    ASSERT_EQ(rebuilt_body["accounts"].size(), 1U);
+    EXPECT_EQ(rebuilt_body["accounts"][0]["balance"], "125.5");
+    EXPECT_GT(rebuilt_body["accounts"][0]["sourceVersion"].get<int>(), 0);
+    EXPECT_EQ(request(
+        HttpMethod::Post,
+        "/api/v1/maintenance/accounts/" + std::to_string(account_id) +
+            "/balance-cache/rebuild",
+        {},
+        bob_token).status, 404);
+
+    const auto alice_audit = request(
+        HttpMethod::Get,
+        "/api/v1/maintenance/audit-logs",
+        {},
+        alice_token,
+        {{"resourceType", "BalanceCache"}});
+    ASSERT_EQ(alice_audit.status, 200) << alice_audit.body;
+    const auto alice_body = nlohmann::json::parse(alice_audit.body);
+    ASSERT_EQ(alice_body["items"].size(), 1U);
+    EXPECT_EQ(alice_body["items"][0]["resourceId"],
+              std::to_string(account_id));
+    EXPECT_TRUE(alice_body["items"][0]["traceId"].is_string());
+    EXPECT_FALSE(alice_body["items"][0].contains("beforeValue"));
+    EXPECT_FALSE(alice_body["items"][0].contains("afterValue"));
+    EXPECT_FALSE(alice_body["items"][0].contains("metadata"));
+
+    const auto bob_audit = request(
+        HttpMethod::Get,
+        "/api/v1/maintenance/audit-logs",
+        {},
+        bob_token,
+        {{"resourceType", "BalanceCache"}});
+    ASSERT_EQ(bob_audit.status, 200) << bob_audit.body;
+    EXPECT_TRUE(nlohmann::json::parse(bob_audit.body)["items"].empty());
+}
+
+TEST_F(ResourceApiTest, MaintenanceAuditCursorDoesNotDependOnOccurredAtOrder) {
+    const auto registered = register_user("audit-cursor@example.com");
+    const auto user_id = registered["userId"].get<std::int64_t>();
+    const auto token = registered["accessToken"].get<std::string>();
+    const auto base = clock_.now();
+    for (const auto offset : {3, 1, 2}) {
+        domain::AuditLogEntry entry;
+        entry.id = store_.next_audit_log_id++;
+        entry.operator_user_id = domain::UserId(user_id);
+        entry.actor_type = domain::AuditActorType::User;
+        entry.action = domain::AuditAction::Update;
+        entry.resource_type = "CursorProbe";
+        entry.resource_id = std::to_string(offset);
+        entry.metadata_json = "{}";
+        entry.occurred_at = base + std::chrono::hours(offset);
+        store_.audit_logs.push_back(std::move(entry));
+    }
+
+    const auto first = request(
+        HttpMethod::Get,
+        "/api/v1/maintenance/audit-logs",
+        {},
+        token,
+        {{"resourceType", "CursorProbe"}, {"pageSize", "2"}});
+    ASSERT_EQ(first.status, 200) << first.body;
+    const auto first_body = nlohmann::json::parse(first.body);
+    ASSERT_EQ(first_body["items"].size(), 2U);
+    ASSERT_TRUE(first_body["nextCursor"].is_string());
+
+    const auto second = request(
+        HttpMethod::Get,
+        "/api/v1/maintenance/audit-logs",
+        {},
+        token,
+        {{"resourceType", "CursorProbe"},
+         {"pageSize", "2"},
+         {"cursor", first_body["nextCursor"].get<std::string>()}});
+    ASSERT_EQ(second.status, 200) << second.body;
+    const auto second_body = nlohmann::json::parse(second.body);
+    ASSERT_EQ(second_body["items"].size(), 1U);
+
+    std::set<std::int64_t> ids;
+    for (const auto& item : first_body["items"]) {
+        ids.insert(item["id"].get<std::int64_t>());
+    }
+    ids.insert(second_body["items"][0]["id"].get<std::int64_t>());
+    EXPECT_EQ(ids.size(), 3U);
+}
+
+TEST_F(ResourceApiTest, OperatorRoutesUseCurrentServerRoleAndSanitizeDeadLetters) {
+    EXPECT_EQ(request(HttpMethod::Get, "/livez").status, 200);
+    EXPECT_EQ(request(HttpMethod::Get, "/readyz").status, 200);
+
+    const auto registered = register_user("phase2-operator@example.com");
+    const auto user_id = registered["userId"].get<std::int64_t>();
+    const auto user_token = registered["accessToken"].get<std::string>();
+    EXPECT_EQ(request(
+        HttpMethod::Get,
+        "/api/v1/operations/summary",
+        {},
+        user_token).status, 403);
+
+    auto& record = store_.users.at(user_id);
+    record.user = domain::User(
+        domain::UserId(user_id),
+        record.user.username(),
+        domain::UserRole::Operator);
+    EXPECT_EQ(request(
+        HttpMethod::Get,
+        "/api/v1/operations/summary",
+        {},
+        user_token).status, 401);
+
+    const auto login = request(
+        HttpMethod::Post,
+        "/api/v1/auth/login",
+        {{"username", "phase2-operator@example.com"},
+         {"password", "correct horse battery staple"}});
+    ASSERT_EQ(login.status, 200) << login.body;
+    const auto login_body = nlohmann::json::parse(login.body);
+    ASSERT_EQ(login_body["roles"], nlohmann::json::array({"OPERATOR"}));
+    const auto operator_token = login_body["accessToken"].get<std::string>();
+
+    application::OutboxMessage dead_letter;
+    dead_letter.id = "dead-letter-1";
+    dead_letter.event_name = "SensitiveEvent";
+    dead_letter.aggregate_type = "Account";
+    dead_letter.aggregate_id = "42";
+    dead_letter.payload_json = R"({"token":"must-not-leak"})";
+    dead_letter.status = application::OutboxStatus::DeadLetter;
+    dead_letter.retry_count = 5;
+    dead_letter.max_retry_count = 5;
+    dead_letter.last_error = "database password must-not-leak";
+    dead_letter.last_failed_handler = "projection";
+    dead_letter.last_failed_at = clock_.now();
+    dead_letter.created_at = clock_.now();
+    store_.outbox.push_back(dead_letter);
+
+    const auto listed = request(
+        HttpMethod::Get,
+        "/api/v1/operations/dead-letters",
+        {},
+        operator_token);
+    ASSERT_EQ(listed.status, 200) << listed.body;
+    EXPECT_EQ(listed.body.find("must-not-leak"), std::string::npos);
+    const auto listed_body = nlohmann::json::parse(listed.body);
+    ASSERT_EQ(listed_body["items"].size(), 1U);
+    EXPECT_FALSE(listed_body["items"][0].contains("payload"));
+    EXPECT_FALSE(listed_body["items"][0].contains("lastError"));
+
+    const std::map<std::string, std::string> retry_key{
+        {"Idempotency-Key", "dead-letter-retry-1"}};
+    EXPECT_EQ(request(
+        HttpMethod::Post,
+        "/api/v1/operations/dead-letters/dead-letter-1/retry",
+        {},
+        operator_token,
+        {},
+        {{"Idempotency-Key", "invalid key"}}).status, 400);
+    const auto retried = request(
+        HttpMethod::Post,
+        "/api/v1/operations/dead-letters/dead-letter-1/retry",
+        {},
+        operator_token,
+        {},
+        retry_key);
+    const auto replayed = request(
+        HttpMethod::Post,
+        "/api/v1/operations/dead-letters/dead-letter-1/retry",
+        {},
+        operator_token,
+        {},
+        retry_key);
+    ASSERT_EQ(retried.status, 202) << retried.body;
+    ASSERT_EQ(replayed.status, 202) << replayed.body;
+    EXPECT_FALSE(nlohmann::json::parse(retried.body)["replayed"]);
+    EXPECT_TRUE(nlohmann::json::parse(replayed.body)["replayed"]);
+    const auto retried_event = std::ranges::find_if(
+        store_.outbox,
+        [](const auto& message) { return message.id == "dead-letter-1"; });
+    ASSERT_NE(retried_event, store_.outbox.end());
+    EXPECT_EQ(retried_event->status, application::OutboxStatus::Failed);
+    EXPECT_EQ(store_.outbox_retry_commands.size(), 1U);
+    EXPECT_EQ(std::ranges::count_if(
+        store_.audit_logs,
+        [](const auto& entry) {
+            return entry.actor_type == domain::AuditActorType::Operator &&
+                   entry.action == domain::AuditAction::Retry;
+        }), 1);
+
+    const auto summary = request(
+        HttpMethod::Get,
+        "/api/v1/operations/summary",
+        {},
+        operator_token);
+    ASSERT_EQ(summary.status, 200) << summary.body;
+    EXPECT_EQ(request(
+        HttpMethod::Get,
+        "/api/v1/operations/metrics",
+        {},
+        operator_token).status, 200);
 }
 
 } // namespace pfh::test

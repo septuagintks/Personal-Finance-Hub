@@ -196,6 +196,7 @@ application::Result<std::string> OpenSslTokenService::hash_opaque_token(
 application::Result<application::IssuedAccessToken>
 OpenSslTokenService::issue_access_token(
     domain::UserId user_id,
+    domain::UserRole role,
     std::string_view session_id,
     application::AuthTimePoint issued_at) const {
     if (secret_.size() < 32 || issuer_.empty() || audience_.empty() ||
@@ -212,6 +213,7 @@ OpenSslTokenService::issue_access_token(
     claims.issuer = issuer_;
     claims.audience = audience_;
     claims.user_id = user_id;
+    claims.role = role;
     claims.session_id = std::string(session_id);
     claims.token_id = *token_id;
     claims.issued_at = issued_at;
@@ -225,7 +227,8 @@ OpenSslTokenService::issue_access_token(
         {"sub", claims.user_id.to_string()},
         {"sid", claims.session_id},
         {"jti", claims.token_id},
-        {"roles", nlohmann::json::array({"USER"})},
+        {"roles", nlohmann::json::array({
+            role == domain::UserRole::Operator ? "OPERATOR" : "USER"})},
         {"iat", epoch_seconds(claims.issued_at)},
         {"nbf", epoch_seconds(claims.not_before)},
         {"exp", epoch_seconds(claims.expires_at)}};
@@ -312,11 +315,12 @@ OpenSslTokenService::validate_access_token(
             !payload["nbf"].is_number_integer() || !payload["exp"].is_number_integer()) {
             return application::err(invalid_token_error());
         }
-        const auto has_user_role = std::any_of(
-            payload["roles"].begin(), payload["roles"].end(), [](const auto& role) {
-                return role.is_string() && role.template get<std::string>() == "USER";
-            });
-        if (!has_user_role) {
+        if (payload["roles"].size() != 1 ||
+            !payload["roles"][0].is_string()) {
+            return application::err(invalid_token_error());
+        }
+        const auto role_text = payload["roles"][0].get<std::string>();
+        if (role_text != "USER" && role_text != "OPERATOR") {
             return application::err(invalid_token_error());
         }
         if (payload["iss"].get<std::string>() != issuer_ ||
@@ -338,6 +342,9 @@ OpenSslTokenService::validate_access_token(
         claims.issuer = issuer_;
         claims.audience = audience_;
         claims.user_id = user_id;
+        claims.role = role_text == "OPERATOR"
+            ? domain::UserRole::Operator
+            : domain::UserRole::User;
         claims.session_id = payload["sid"].get<std::string>();
         claims.token_id = payload["jti"].get<std::string>();
         claims.issued_at = from_epoch(payload["iat"].get<std::int64_t>());

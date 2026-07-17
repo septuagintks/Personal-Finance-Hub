@@ -5,6 +5,7 @@
 #include "pfh/application/ports/i_auth_session_repository.h"
 #include "pfh/application/ports/i_clock.h"
 #include "pfh/application/ports/i_token_service.h"
+#include "pfh/application/ports/i_user_role_reader.h"
 #include "pfh/presentation/http/http_types.h"
 
 namespace pfh::presentation {
@@ -14,8 +15,9 @@ public:
     JwtFilter(
         const application::ITokenService& tokens,
         application::IAuthSessionRepository& sessions,
+        application::IUserRoleReader& roles,
         const application::IClock& clock)
-        : tokens_(tokens), sessions_(sessions), clock_(clock) {}
+        : tokens_(tokens), sessions_(sessions), roles_(roles), clock_(clock) {}
 
     [[nodiscard]] application::Result<RequestIdentity> authenticate(
         const HttpRequest& request);
@@ -27,6 +29,7 @@ public:
 private:
     const application::ITokenService& tokens_;
     application::IAuthSessionRepository& sessions_;
+    application::IUserRoleReader& roles_;
     const application::IClock& clock_;
 };
 

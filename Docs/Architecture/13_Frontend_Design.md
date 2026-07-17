@@ -95,7 +95,7 @@ test/         test setup、MSW 与 fixtures
 - OpenAPI operation 必须有唯一 `operationId`。
 - API DTO 从 OpenAPI 生成，生成结果漂移会使质量门禁失败。
 - 列表使用稳定游标和确定性排序，不把全量流水加载到浏览器。
-- 金融创建请求携带 `Idempotency-Key`；同一操作意图重试时复用该键。
+- 账户、分类、标签和金融创建请求携带 `Idempotency-Key`；同一操作意图重试时复用该键。
 - 非幂等写请求不会被 Axios 自动重试。
 - `409` 表达幂等冲突或版本冲突，前端必须保留用户输入并显示可恢复动作。
 
@@ -106,6 +106,7 @@ test/         test setup、MSW 与 fixtures
 - Refresh Token 只存在于 `HttpOnly`、`Secure`、`SameSite=Strict` Cookie，JavaScript 不可读取。
 - 应用启动执行一次静默 refresh；单标签页并发 401 共享同一 Promise。
 - 跨标签页使用 Web Locks（不可用时使用租约式 localStorage mutex）串行 refresh，并通过 `BroadcastChannel` 只广播会话状态，不广播 Token。
+- Session Store 只在内存保存服务端返回的唯一 `USER` 或 `OPERATOR` role；自动 refresh 后必须同步替换 role，不能沿用旧 Token 的权限投影。
 - Logout、reuse detection 或 session 撤销会清除内存 Token、用户 Store 和路由状态。
 - 现有 `/api/v1/auth/*` JSON Token API 只服务非浏览器调用方，Web 前端不得使用。
 
@@ -182,6 +183,8 @@ interface ApiError {
 - 危险操作显示影响范围并要求明确确认，不能只依赖按钮颜色。
 - 图表提供同数据表格或可访问摘要。
 - 所有关键路径支持键盘操作并满足 WCAG 2.2 AA。
+- Maintenance 对所有已认证用户开放且只消费当前用户投影；Operations 使用独立 `OPERATOR` route guard。隐藏导航不是授权控制，直接访问无权路由进入稳定 403 页面，服务端仍是最终权限边界。
+- 只读宽表在 Desktop/Tablet 提供可聚焦滚动区，在窄屏转换为字段标签明确的纵向行，不依赖页面级横向滚动。
 
 ---
 

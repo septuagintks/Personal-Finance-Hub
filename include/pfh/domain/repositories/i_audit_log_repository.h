@@ -15,6 +15,10 @@ public:
     [[nodiscard]] virtual RepositoryVoidResult append(
         ITransactionContext& tx,
         const AuditLogEntry& entry) = 0;
+
+    [[nodiscard]] virtual RepositoryResult<UserAuditLogPage> find_user_entries(
+        ITransactionContext& tx,
+        const UserAuditLogQuery& query) = 0;
 };
 
 } // namespace pfh::domain
