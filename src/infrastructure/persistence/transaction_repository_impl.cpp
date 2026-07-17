@@ -295,6 +295,99 @@ void invalidate_balance_cache(
         user_id.value());
 }
 
+domain::RepositoryResult<domain::TransferSnapshot> load_transfer_snapshot(
+    drogon::orm::Transaction& database,
+    const drogon::orm::Row& group_row,
+    bool lock_members) {
+    try {
+        domain::TransferSnapshot snapshot;
+        snapshot.group_id = domain::TransferGroupId(pg::getBigInt(group_row, 0));
+        snapshot.user_id = domain::UserId(pg::getBigInt(group_row, 1));
+        const auto mode = pg::getBigInt(group_row, 2);
+        if (mode < 1 || mode > 3) {
+            return std::unexpected(domain::RepositoryError::database(
+                "Stored transfer mode is invalid"));
+        }
+        snapshot.transfer_mode = static_cast<int>(mode);
+        if (const auto rate_text = pg::getOptionalString(group_row, 3);
+            rate_text.has_value()) {
+            auto rate = domain::Decimal::parse_numeric_20_10(*rate_text);
+            if (!rate) {
+                return std::unexpected(domain::RepositoryError::database(
+                    "Stored transfer rate is invalid"));
+            }
+            snapshot.exchange_rate = *rate;
+        }
+        snapshot.note = pg::getString(group_row, 4);
+        snapshot.created_at = pg::getTimestamp(group_row, 5);
+        if (const auto original = pg::getOptionalBigInt(group_row, 6);
+            original.has_value()) {
+            snapshot.corrects_group_id = domain::TransferGroupId(*original);
+        }
+        if (const auto replacement = pg::getOptionalBigInt(group_row, 7);
+            replacement.has_value()) {
+            snapshot.corrected_by_group_id =
+                domain::TransferGroupId(*replacement);
+        }
+
+        std::string sql = std::string("SELECT ") + kTransactionColumns +
+            " FROM transactions WHERE transfer_group_id = $1 "
+            "AND user_id = $2 ORDER BY account_id, id";
+        if (lock_members) sql += " FOR UPDATE NOWAIT";
+        const auto rows = database.execSqlSync(
+            sql, snapshot.group_id.value(), snapshot.user_id.value());
+        if (rows.empty()) {
+            return std::unexpected(domain::RepositoryError::database(
+                "Persisted transfer has no transactions"));
+        }
+        snapshot.transactions.reserve(rows.size());
+        bool any_active = false;
+        bool any_deleted = false;
+        std::optional<std::chrono::system_clock::time_point> latest_deleted;
+        for (const auto& row : rows) {
+            auto transaction = map_transaction_row(row);
+            if (!transaction) return std::unexpected(transaction.error());
+            if (snapshot.occurred_at.time_since_epoch().count() == 0 ||
+                transaction->occurred_at() < snapshot.occurred_at) {
+                snapshot.occurred_at = transaction->occurred_at();
+            }
+            if (transaction->is_deleted()) {
+                any_deleted = true;
+                if (!latest_deleted.has_value() ||
+                    *transaction->deleted_at() > *latest_deleted) {
+                    latest_deleted = transaction->deleted_at();
+                }
+            } else {
+                any_active = true;
+            }
+            snapshot.transactions.push_back(std::move(*transaction));
+        }
+        if (any_active && any_deleted) {
+            return std::unexpected(domain::RepositoryError::database(
+                "Persisted transfer is partially deleted"));
+        }
+        if (any_deleted) snapshot.deleted_at = latest_deleted;
+        return snapshot;
+    } catch (const std::exception&) {
+        return std::unexpected(domain::RepositoryError::database(
+            "Stored transfer projection is invalid"));
+    }
+}
+
+constexpr const char* kTransferGroupProjectionSql = R"SQL(
+    SELECT tg.id, tg.user_id, tg.transfer_mode, tg.exchange_rate::text,
+           COALESCE(tg.note, ''), tg.created_at,
+           replacement_link.original_transfer_group_id,
+           original_link.replacement_transfer_group_id
+    FROM transfer_groups tg
+    LEFT JOIN transfer_corrections replacement_link
+      ON replacement_link.replacement_transfer_group_id = tg.id
+     AND replacement_link.user_id = tg.user_id
+    LEFT JOIN transfer_corrections original_link
+      ON original_link.original_transfer_group_id = tg.id
+     AND original_link.user_id = tg.user_id
+)SQL";
+
 }  // namespace
 
 domain::RepositoryResult<domain::Transaction>
@@ -664,12 +757,15 @@ TransactionRepositoryImpl::save_transfer(
             return std::unexpected(persisted_incoming.error());
         }
 
+        std::vector<domain::TransactionId> adjustment_ids;
+        adjustment_ids.reserve(transfer.adjustments().size());
         for (const auto& adjustment : transfer.adjustments()) {
             auto persisted_adjustment = insert_transaction(
                 database, adjustment, adjustment.amount(), group_id);
             if (!persisted_adjustment.has_value()) {
                 return std::unexpected(persisted_adjustment.error());
             }
+            adjustment_ids.push_back(persisted_adjustment->id());
         }
 
         invalidate_balance_cache(
@@ -682,7 +778,10 @@ TransactionRepositoryImpl::save_transfer(
         }
 
         return domain::TransferPersistResult{
-            group_id, persisted_outgoing->id(), persisted_incoming->id()};
+            group_id,
+            persisted_outgoing->id(),
+            persisted_incoming->id(),
+            std::move(adjustment_ids)};
     } catch (const drogon::orm::DrogonDbException& error) {
         return std::unexpected(postgres::database_error("save transfer", error));
     } catch (const std::exception& error) {
@@ -830,57 +929,229 @@ TransactionRepositoryImpl::find_transfer_by_group(
     }
     return postgres::execute_tenant_read<domain::TransferSnapshot>(
         db_, tenant_user_id_, "find transfer", [&](const auto& transaction) {
-            constexpr const char* kGroupSql = R"SQL(
-                SELECT id, user_id, transfer_mode, exchange_rate::text
-                FROM transfer_groups
-                WHERE id = $1 AND user_id = $2
-            )SQL";
+            const std::string sql = std::string(kTransferGroupProjectionSql) +
+                " WHERE tg.id = $1 AND tg.user_id = $2";
             const auto group = transaction->execSqlSync(
-                kGroupSql, group_id.value(), user_id.value());
+                sql, group_id.value(), user_id.value());
             if (group.empty()) {
                 return domain::RepositoryResult<domain::TransferSnapshot>(
                     std::unexpected(domain::RepositoryError::not_found(
                         "Transfer not found for user")));
             }
-            domain::TransferSnapshot snapshot;
-            snapshot.group_id = domain::TransferGroupId(
-                pg::getBigInt(group[0], 0));
-            snapshot.user_id = domain::UserId(pg::getBigInt(group[0], 1));
-            const auto mode = pg::getBigInt(group[0], 2);
-            if (mode < 1 || mode > 3) {
-                return domain::RepositoryResult<domain::TransferSnapshot>(
-                    std::unexpected(domain::RepositoryError::database(
-                        "Stored transfer mode is invalid")));
-            }
-            snapshot.transfer_mode = static_cast<int>(mode);
-            const auto rate_text = pg::getOptionalString(group[0], 3);
-            if (rate_text.has_value()) {
-                auto rate = domain::Decimal::parse_numeric_20_10(*rate_text);
-                if (!rate) {
-                    return domain::RepositoryResult<domain::TransferSnapshot>(
-                        std::unexpected(domain::RepositoryError::database(
-                            "Stored transfer rate is invalid")));
-                }
-                snapshot.exchange_rate = *rate;
-            }
-
-            const std::string sql = std::string("SELECT ") + kTransactionColumns +
-                " FROM transactions WHERE transfer_group_id = $1 "
-                "AND user_id = $2 AND deleted_at IS NULL ORDER BY id";
-            const auto rows = transaction->execSqlSync(
-                sql, group_id.value(), user_id.value());
-            snapshot.transactions.reserve(rows.size());
-            for (const auto& row : rows) {
-                auto mapped = map_transaction_row(row);
-                if (!mapped) {
-                    return domain::RepositoryResult<domain::TransferSnapshot>(
-                        std::unexpected(mapped.error()));
-                }
-                snapshot.transactions.push_back(std::move(*mapped));
-            }
-            return domain::RepositoryResult<domain::TransferSnapshot>(
-                std::move(snapshot));
+            return load_transfer_snapshot(*transaction, group[0], false);
         });
+}
+
+domain::RepositoryResult<domain::TransferPageResult>
+TransactionRepositoryImpl::find_transfer_page(
+    const domain::TransferPageQuery& query) {
+    if (query.user_id != tenant_user_id_ || query.limit == 0 ||
+        query.limit > 200) {
+        return std::unexpected(domain::RepositoryError::validation(
+            "Transfer page query is invalid"));
+    }
+    return postgres::execute_tenant_read<domain::TransferPageResult>(
+        db_, tenant_user_id_, "list transfer page", [&](const auto& transaction) {
+            const std::string sql = std::string(kTransferGroupProjectionSql) + R"SQL(
+                JOIN LATERAL (
+                    SELECT MIN(member.transaction_time) AS occurred_at,
+                           BOOL_AND(member.deleted_at IS NULL) AS is_active
+                    FROM transactions member
+                    WHERE member.transfer_group_id = tg.id
+                      AND member.user_id = tg.user_id
+                ) aggregate_state ON TRUE
+                WHERE tg.user_id = $1
+                  AND aggregate_state.is_active
+                  AND ($2::bigint IS NULL OR EXISTS (
+                      SELECT 1 FROM transactions account_member
+                      WHERE account_member.transfer_group_id = tg.id
+                        AND account_member.user_id = tg.user_id
+                        AND account_member.deleted_at IS NULL
+                        AND account_member.account_id = $2))
+                  AND ($3::timestamptz IS NULL OR
+                       aggregate_state.occurred_at >= $3)
+                  AND ($4::timestamptz IS NULL OR
+                       aggregate_state.occurred_at < $4)
+                  AND ($5::timestamptz IS NULL OR
+                       (aggregate_state.occurred_at, tg.id) < ($5, $6::bigint))
+                ORDER BY aggregate_state.occurred_at DESC, tg.id DESC
+                LIMIT $7
+            )SQL";
+            std::optional<std::int64_t> account_id;
+            if (query.account_id.has_value()) {
+                account_id = query.account_id->value();
+            }
+            std::optional<trantor::Date> cursor_time;
+            std::optional<std::int64_t> cursor_id;
+            if (query.before.has_value()) {
+                cursor_time = pg::toDbTimestamp(query.before->occurred_at);
+                cursor_id = query.before->group_id.value();
+            }
+            const auto rows = transaction->execSqlSync(
+                sql,
+                query.user_id.value(),
+                account_id,
+                pg::toDbTimestamp(query.occurred_from),
+                pg::toDbTimestamp(query.occurred_to),
+                cursor_time,
+                cursor_id,
+                static_cast<std::int64_t>(query.limit + 1U));
+            domain::TransferPageResult page;
+            page.has_more = rows.size() > query.limit;
+            const auto count = page.has_more ? query.limit : rows.size();
+            page.items.reserve(count);
+            for (std::size_t index = 0; index < count; ++index) {
+                auto snapshot = load_transfer_snapshot(
+                    *transaction, rows[index], false);
+                if (!snapshot) {
+                    return domain::RepositoryResult<domain::TransferPageResult>(
+                        std::unexpected(snapshot.error()));
+                }
+                page.items.push_back(std::move(*snapshot));
+            }
+            return domain::RepositoryResult<domain::TransferPageResult>(
+                std::move(page));
+        });
+}
+
+domain::RepositoryResult<domain::TransferSnapshot>
+TransactionRepositoryImpl::find_transfer_by_group_for_update(
+    domain::ITransactionContext& tx_iface,
+    domain::TransferGroupId group_id,
+    domain::UserId user_id) {
+    if (user_id != tenant_user_id_) {
+        return std::unexpected(domain::RepositoryError::not_found(
+            "Transfer not found for user"));
+    }
+    auto context = postgres::require_transaction(tx_iface, tenant_user_id_);
+    if (!context) return std::unexpected(context.error());
+    try {
+        const std::string sql = std::string(kTransferGroupProjectionSql) +
+            " WHERE tg.id = $1 AND tg.user_id = $2 FOR UPDATE OF tg NOWAIT";
+        const auto group = (*context)->transaction().execSqlSync(
+            sql, group_id.value(), user_id.value());
+        if (group.empty()) {
+            return std::unexpected(domain::RepositoryError::not_found(
+                "Transfer not found for user"));
+        }
+        return load_transfer_snapshot(
+            (*context)->transaction(), group[0], true);
+    } catch (const drogon::orm::DrogonDbException& error) {
+        return std::unexpected(
+            postgres::database_error("lock transfer aggregate", error));
+    } catch (const std::exception& error) {
+        return std::unexpected(
+            postgres::unexpected_error("lock transfer aggregate", error));
+    }
+}
+
+domain::RepositoryVoidResult TransactionRepositoryImpl::soft_delete_transfer(
+    domain::ITransactionContext& tx_iface,
+    domain::TransferGroupId group_id,
+    domain::UserId user_id,
+    std::chrono::system_clock::time_point deleted_at) {
+    if (user_id != tenant_user_id_) {
+        return std::unexpected(domain::RepositoryError::not_found(
+            "Transfer not found for user"));
+    }
+    auto context = postgres::require_transaction(tx_iface, tenant_user_id_);
+    if (!context) return std::unexpected(context.error());
+    try {
+        constexpr const char* kStateSql = R"SQL(
+            SELECT id, deleted_at
+            FROM transactions
+            WHERE transfer_group_id = $1 AND user_id = $2
+            ORDER BY account_id, id
+            FOR UPDATE NOWAIT
+        )SQL";
+        const auto state = (*context)->transaction().execSqlSync(
+            kStateSql, group_id.value(), user_id.value());
+        if (state.empty()) {
+            return std::unexpected(domain::RepositoryError::not_found(
+                "Transfer not found for user"));
+        }
+        for (const auto& row : state) {
+            if (pg::getOptionalTimestamp(row, 1).has_value()) {
+                return std::unexpected(domain::RepositoryError::conflict(
+                    "Transfer is already deleted"));
+            }
+        }
+        constexpr const char* kDeleteSql = R"SQL(
+            UPDATE transactions
+            SET deleted_at = $1, updated_at = $1, version = version + 1
+            WHERE transfer_group_id = $2 AND user_id = $3
+              AND deleted_at IS NULL
+            RETURNING account_id
+        )SQL";
+        const auto changed = (*context)->transaction().execSqlSync(
+            kDeleteSql,
+            pg::toDbTimestamp(deleted_at),
+            group_id.value(),
+            user_id.value());
+        if (changed.size() != state.size()) {
+            return std::unexpected(domain::RepositoryError::conflict(
+                "Transfer changed while being deleted"));
+        }
+        std::set<std::int64_t> accounts;
+        for (const auto& row : changed) accounts.insert(pg::getBigInt(row, 0));
+        for (const auto account_id : accounts) {
+            invalidate_balance_cache(
+                (*context)->transaction(),
+                domain::AccountId(account_id),
+                tenant_user_id_);
+        }
+        return {};
+    } catch (const drogon::orm::DrogonDbException& error) {
+        return std::unexpected(
+            postgres::database_error("soft-delete transfer", error));
+    } catch (const std::exception& error) {
+        return std::unexpected(
+            postgres::unexpected_error("soft-delete transfer", error));
+    }
+}
+
+domain::RepositoryResult<domain::TransferCorrectionPersistResult>
+TransactionRepositoryImpl::save_transfer_correction(
+    domain::ITransactionContext& tx_iface,
+    domain::TransferGroupId original_group_id,
+    const domain::TransferAggregate& replacement,
+    std::chrono::system_clock::time_point corrected_at) {
+    auto context = postgres::require_transaction(tx_iface, tenant_user_id_);
+    if (!context) return std::unexpected(context.error());
+    try {
+        const auto existing = (*context)->transaction().execSqlSync(
+            "SELECT 1 FROM transfer_corrections "
+            "WHERE original_transfer_group_id = $1 AND user_id = $2",
+            original_group_id.value(), tenant_user_id_.value());
+        if (!existing.empty()) {
+            return std::unexpected(domain::RepositoryError::conflict(
+                "Transfer is already corrected"));
+        }
+        auto persisted = save_transfer(tx_iface, replacement);
+        if (!persisted) return std::unexpected(persisted.error());
+        auto deleted = soft_delete_transfer(
+            tx_iface, original_group_id, tenant_user_id_, corrected_at);
+        if (!deleted) return std::unexpected(deleted.error());
+        constexpr const char* kLinkSql = R"SQL(
+            INSERT INTO transfer_corrections (
+                original_transfer_group_id, replacement_transfer_group_id,
+                user_id, corrected_at)
+            VALUES ($1, $2, $3, $4)
+        )SQL";
+        (*context)->transaction().execSqlSync(
+            kLinkSql,
+            original_group_id.value(),
+            persisted->group_id.value(),
+            tenant_user_id_.value(),
+            pg::toDbTimestamp(corrected_at));
+        return domain::TransferCorrectionPersistResult{std::move(*persisted)};
+    } catch (const drogon::orm::DrogonDbException& error) {
+        return std::unexpected(
+            postgres::database_error("correct transfer", error));
+    } catch (const std::exception& error) {
+        return std::unexpected(
+            postgres::unexpected_error("correct transfer", error));
+    }
 }
 
 domain::RepositoryVoidResult TransactionRepositoryImpl::soft_delete(

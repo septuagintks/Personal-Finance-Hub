@@ -74,16 +74,22 @@ struct InMemoryTransferGroup {
     domain::UserId user_id;
     int transfer_mode = 0;
     std::optional<domain::ExchangeRate> rate;
+    std::string note;
+    std::chrono::system_clock::time_point created_at{};
 
     InMemoryTransferGroup(
         domain::TransferGroupId id_in,
         domain::UserId user_id_in,
         int transfer_mode_in,
-        std::optional<domain::ExchangeRate> rate_in)
+        std::optional<domain::ExchangeRate> rate_in,
+        std::string note_in = {},
+        std::chrono::system_clock::time_point created_at_in = {})
         : id(id_in),
           user_id(user_id_in),
           transfer_mode(transfer_mode_in),
-          rate(std::move(rate_in)) {}
+          rate(std::move(rate_in)),
+          note(std::move(note_in)),
+          created_at(created_at_in) {}
 };
 
 struct InMemoryRevokedAccessToken {
@@ -113,6 +119,13 @@ struct InMemoryTransactionCorrection {
     domain::UserId user_id;
     domain::TransactionId original_transaction_id;
     domain::TransactionId replacement_transaction_id;
+    std::chrono::system_clock::time_point corrected_at{};
+};
+
+struct InMemoryTransferCorrection {
+    domain::UserId user_id;
+    domain::TransferGroupId original_group_id;
+    domain::TransferGroupId replacement_group_id;
     std::chrono::system_clock::time_point corrected_at{};
 };
 
@@ -153,6 +166,7 @@ struct InMemoryStore {
     std::map<std::int64_t, domain::Tag> tags;
     std::map<std::int64_t, std::set<std::int64_t>> transaction_tag_relations;
     std::map<std::int64_t, InMemoryTransferGroup> transfer_groups;
+    std::map<std::int64_t, InMemoryTransferCorrection> transfer_corrections;
     std::map<std::int64_t, InMemoryTransactionCorrection> transaction_corrections;
     std::map<std::int64_t, InMemoryBalanceCache> balance_cache;
     // Append-only: key is exchange_rate id, order of insertion preserved by map id.
@@ -182,6 +196,7 @@ struct InMemoryStore {
     std::map<std::int64_t, domain::Tag> staged_tags;
     std::map<std::int64_t, std::set<std::int64_t>> staged_transaction_tag_relations;
     std::map<std::int64_t, InMemoryTransferGroup> staged_transfer_groups;
+    std::map<std::int64_t, InMemoryTransferCorrection> staged_transfer_corrections;
     std::map<std::int64_t, InMemoryTransactionCorrection>
         staged_transaction_corrections;
     std::map<std::int64_t, InMemoryBalanceCache> staged_balance_cache;
@@ -197,6 +212,7 @@ struct InMemoryStore {
     std::vector<std::int64_t> staged_deleted_transactions;
     std::vector<std::int64_t> staged_deleted_balance_cache;
     std::vector<std::int64_t> staged_deleted_transfer_groups;
+    std::vector<std::int64_t> staged_deleted_transfer_corrections;
     std::vector<std::int64_t> staged_deleted_transaction_corrections;
     std::vector<std::int64_t> staged_deleted_categories;
     std::vector<std::int64_t> staged_deleted_tags;

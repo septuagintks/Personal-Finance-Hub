@@ -15,13 +15,14 @@ Personal Finance Hub 是仓库、后端和 API 的工程名称；面向用户的
 - 三种跨币种转账输入模式和三种手续费来源。
 - Balance、Net Worth、Cash Flow 与 Dashboard Summary。
 - JWT、Refresh Token rotation/reuse detection 与 session 撤销。
-- PostgreSQL 16+、Flyway V1-V8、FORCE RLS 与双数据库角色。
+- PostgreSQL 16+、Flyway V1-V9、FORCE RLS 与双数据库角色。
 - Transactional Outbox、重试、dead letter、幂等 Handler 和 Scheduler。
 - FreeCurrencyAPI 主源、exchangerate.fun 整批备用与历史降级。
 - Ubuntu 24.04 Docker 镜像、non-root、healthcheck 和优雅停止。
 - Candy's Ledger 公开入口、同源 Web 会话、认证页面和应用 Shell。
 - Candy's Ledger 账户列表、详情、余额、编辑、归档、恢复和危险删除。
 - Candy's Ledger 流水筛选、稳定分页、创建、历史详情、原子更正和软删除。
+- Candy's Ledger 转账聚合列表、三模式创建、历史详情、原子更正和软删除。
 
 金额与汇率不使用二进制浮点：金额使用 `NUMERIC(20,8)`，汇率使用 `NUMERIC(20,10)`，JSON 金额使用十进制字符串。
 
@@ -110,7 +111,7 @@ tests/integration/    In-Memory and PostgreSQL scenarios
 tests/api/            HTTP contract and resource tests
 tests/sql/            Migration and adapter gates
 config/               Runtime configuration templates
-migrations/           Flyway V1-V8
+migrations/           Flyway V1-V9
 frontend/             Candy's Ledger Vue 3 Web client
 Docs/                 Architecture, plans, guides, standards and archive
 ```

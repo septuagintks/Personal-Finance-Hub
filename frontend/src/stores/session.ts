@@ -26,6 +26,7 @@ import { useAccountStore } from './accounts';
 import { useUserContextStore } from './user-context';
 import { useMetadataStore } from './metadata';
 import { useTransactionStore } from './transactions';
+import { useTransferStore } from './transfers';
 
 type RegisterRequest = components['schemas']['RegisterRequest'];
 type LoginRequest = components['schemas']['LoginRequest'];
@@ -42,6 +43,7 @@ export const useSessionStore = defineStore('session', () => {
   const accounts = useAccountStore();
   const metadata = useMetadataStore();
   const transactions = useTransactionStore();
+  const transfers = useTransferStore();
   const status = ref<'idle' | 'restoring' | 'authenticated' | 'anonymous'>('idle');
   const userId = ref<number | null>(null);
   const expiresAt = ref<number | null>(null);
@@ -71,6 +73,7 @@ export const useSessionStore = defineStore('session', () => {
     accounts.clear();
     metadata.clear();
     transactions.clear();
+    transfers.clear();
     userId.value = null;
     expiresAt.value = null;
     status.value = 'restoring';
@@ -108,6 +111,7 @@ export const useSessionStore = defineStore('session', () => {
     accounts.clear();
     metadata.clear();
     transactions.clear();
+    transfers.clear();
     userId.value = null;
     expiresAt.value = null;
     status.value = 'anonymous';

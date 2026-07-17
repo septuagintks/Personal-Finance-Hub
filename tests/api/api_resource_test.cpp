@@ -1201,7 +1201,169 @@ TEST_F(ResourceApiTest, TransferApiPersistsSignedAggregateAndQueriesMagnitudes) 
     ASSERT_EQ(queried.status, 200) << queried.body;
     EXPECT_EQ(nlohmann::json::parse(queried.body)["outgoingAmount"], "718");
     EXPECT_EQ(request(HttpMethod::Get, query_path, {}, bob_token).status, 404);
-    EXPECT_EQ(request(HttpMethod::Delete, query_path, {}, alice_token).status, 404);
+    EXPECT_EQ(request(HttpMethod::Delete, query_path, {}, bob_token).status, 404);
+    EXPECT_EQ(request(HttpMethod::Delete, query_path, {}, alice_token).status, 204);
+    EXPECT_EQ(request(HttpMethod::Delete, query_path, {}, alice_token).status, 409);
+    const auto deleted = request(HttpMethod::Get, query_path, {}, alice_token);
+    ASSERT_EQ(deleted.status, 200) << deleted.body;
+    EXPECT_TRUE(nlohmann::json::parse(deleted.body)["deletedAt"].is_string());
+    for (const auto& [_, transaction] : store_.transactions) {
+        if (transaction.transfer_group_id() ==
+            std::optional<TransferGroupId>(TransferGroupId(group_id))) {
+            EXPECT_TRUE(transaction.is_deleted());
+        }
+    }
+}
+
+TEST_F(ResourceApiTest, TransferListUsesStableAggregateCursorAndAccountFilter) {
+    const auto user = register_user("transfer-list@example.com");
+    const auto token = user["accessToken"].get<std::string>();
+    const auto source = create_account(token)["id"].get<std::int64_t>();
+    const auto target_response = request(
+        HttpMethod::Post, "/api/v1/accounts",
+        {{"name", "Transfer list target"}, {"type", "savings"},
+         {"subtype", "bank"}, {"currencyCode", "USD"}}, token);
+    ASSERT_EQ(target_response.status, 201) << target_response.body;
+    const auto target = nlohmann::json::parse(
+        target_response.body)["id"].get<std::int64_t>();
+    const auto post = [&](std::string amount, std::string occurred_at) {
+        return request(
+            HttpMethod::Post, "/api/v1/transfers",
+            {{"sourceAccountId", source}, {"targetAccountId", target},
+             {"mode", "BothAmounts"}, {"outgoingAmount", amount},
+             {"incomingAmount", "1"}, {"occurredAt", occurred_at}}, token);
+    };
+    ASSERT_EQ(post("7", "2026-07-16T00:00:00Z").status, 201);
+    ASSERT_EQ(post("14", "2026-07-17T00:00:00Z").status, 201);
+    ASSERT_EQ(post("21", "2026-07-18T00:00:00Z").status, 201);
+
+    const auto first = request(
+        HttpMethod::Get, "/api/v1/transfers", {}, token,
+        {{"accountId", std::to_string(source)}, {"pageSize", "2"}});
+    ASSERT_EQ(first.status, 200) << first.body;
+    const auto first_body = nlohmann::json::parse(first.body);
+    ASSERT_EQ(first_body["items"].size(), 2U);
+    EXPECT_EQ(first_body["items"][0]["outgoingAmount"], "21");
+    EXPECT_EQ(first_body["items"][1]["outgoingAmount"], "14");
+    ASSERT_TRUE(first_body["nextCursor"].is_string());
+    const auto second = request(
+        HttpMethod::Get, "/api/v1/transfers", {}, token,
+        {{"accountId", std::to_string(source)},
+         {"pageSize", "2"},
+         {"cursor", first_body["nextCursor"].get<std::string>()}});
+    ASSERT_EQ(second.status, 200) << second.body;
+    const auto second_body = nlohmann::json::parse(second.body);
+    ASSERT_EQ(second_body["items"].size(), 1U);
+    EXPECT_EQ(second_body["items"][0]["outgoingAmount"], "7");
+    EXPECT_TRUE(second_body["nextCursor"].is_null());
+
+    EXPECT_EQ(request(
+        HttpMethod::Get, "/api/v1/transfers", {}, token,
+        {{"from", "2026-01-01T00:00:00Z"},
+         {"to", "2027-02-01T00:00:00Z"}}).status, 400);
+    EXPECT_EQ(request(
+        HttpMethod::Get, "/api/v1/transfers", {}, token,
+        {{"cursor", "not-a-transfer-cursor"}}).status, 400);
+}
+
+TEST_F(ResourceApiTest, TransferCorrectionIsAtomicIdempotentAndTraceable) {
+    const auto user = register_user("transfer-correction@example.com");
+    const auto token = user["accessToken"].get<std::string>();
+    const auto source = create_account(token)["id"].get<std::int64_t>();
+    const auto target_response = request(
+        HttpMethod::Post, "/api/v1/accounts",
+        {{"name", "Correction target"}, {"type", "savings"},
+         {"subtype", "bank"}, {"currencyCode", "USD"}}, token);
+    ASSERT_EQ(target_response.status, 201) << target_response.body;
+    const auto target = nlohmann::json::parse(
+        target_response.body)["id"].get<std::int64_t>();
+    const auto original = request(
+        HttpMethod::Post, "/api/v1/transfers",
+        {{"sourceAccountId", source}, {"targetAccountId", target},
+         {"mode", "OutgoingAndRate"}, {"outgoingAmount", "70"},
+         {"rate", "0.1428571429"}, {"feeAmount", "1"},
+         {"feeSource", "SourceAccount"}}, token);
+    ASSERT_EQ(original.status, 201) << original.body;
+    const auto original_id = nlohmann::json::parse(
+        original.body)["transferGroupId"].get<std::int64_t>();
+    const auto correction_body = nlohmann::json{
+        {"sourceAccountId", source}, {"targetAccountId", target},
+        {"mode", "BothAmounts"}, {"outgoingAmount", "72"},
+        {"incomingAmount", "10"}, {"feeAmount", "2"},
+        {"feeSource", "TargetAccount"},
+        {"description", "corrected transfer"}};
+    const std::map<std::string, std::string> key{
+        {"Idempotency-Key", "transfer-correction-key"}};
+    const auto groups_before = store_.transfer_groups.size();
+    const auto transactions_before = store_.transactions.size();
+    const auto corrected = request(
+        HttpMethod::Post,
+        "/api/v1/transfers/" + std::to_string(original_id) + "/correction",
+        correction_body, token, {}, key);
+    ASSERT_EQ(corrected.status, 201) << corrected.body;
+    const auto corrected_body = nlohmann::json::parse(corrected.body);
+    const auto replacement_id =
+        corrected_body["transferGroupId"].get<std::int64_t>();
+    EXPECT_EQ(corrected_body["correctsTransferGroupId"], original_id);
+    EXPECT_EQ(corrected_body["feeSource"], "TargetAccount");
+    EXPECT_EQ(store_.transfer_groups.size(), groups_before + 1U);
+    EXPECT_EQ(store_.transactions.size(), transactions_before + 3U);
+    ASSERT_TRUE(store_.transfer_corrections.contains(original_id));
+    EXPECT_EQ(
+        store_.transfer_corrections.at(original_id).replacement_group_id.value(),
+        replacement_id);
+
+    const auto original_detail = request(
+        HttpMethod::Get,
+        "/api/v1/transfers/" + std::to_string(original_id), {}, token);
+    ASSERT_EQ(original_detail.status, 200) << original_detail.body;
+    const auto original_json = nlohmann::json::parse(original_detail.body);
+    EXPECT_TRUE(original_json["deletedAt"].is_string());
+    EXPECT_EQ(original_json["correctedByTransferGroupId"], replacement_id);
+    const auto replacement_detail = request(
+        HttpMethod::Get,
+        "/api/v1/transfers/" + std::to_string(replacement_id), {}, token);
+    ASSERT_EQ(replacement_detail.status, 200) << replacement_detail.body;
+    EXPECT_EQ(
+        nlohmann::json::parse(replacement_detail.body)["correctsTransferGroupId"],
+        original_id);
+
+    const auto replay = request(
+        HttpMethod::Post,
+        "/api/v1/transfers/" + std::to_string(original_id) + "/correction",
+        correction_body, token, {}, key);
+    ASSERT_EQ(replay.status, 201) << replay.body;
+    EXPECT_EQ(replay.body, corrected.body);
+    EXPECT_EQ(store_.transfer_groups.size(), groups_before + 1U);
+    EXPECT_EQ(store_.transactions.size(), transactions_before + 3U);
+
+    const auto second_original = request(
+        HttpMethod::Post, "/api/v1/transfers",
+        {{"sourceAccountId", source}, {"targetAccountId", target},
+         {"mode", "BothAmounts"}, {"outgoingAmount", "7"},
+         {"incomingAmount", "1"}}, token);
+    ASSERT_EQ(second_original.status, 201) << second_original.body;
+    const auto second_id = nlohmann::json::parse(
+        second_original.body)["transferGroupId"].get<std::int64_t>();
+    auto invalid = correction_body;
+    invalid["feeSource"] = "ThirdParty";
+    invalid["feeAccountId"] = 999999;
+    const auto groups_before_failure = store_.transfer_groups.size();
+    const auto transactions_before_failure = store_.transactions.size();
+    const auto failed = request(
+        HttpMethod::Post,
+        "/api/v1/transfers/" + std::to_string(second_id) + "/correction",
+        invalid, token, {},
+        {{"Idempotency-Key", "transfer-correction-failure"}});
+    ASSERT_EQ(failed.status, 404) << failed.body;
+    EXPECT_EQ(store_.transfer_groups.size(), groups_before_failure);
+    EXPECT_EQ(store_.transactions.size(), transactions_before_failure);
+    EXPECT_FALSE(store_.transfer_corrections.contains(second_id));
+    const auto still_active = request(
+        HttpMethod::Get,
+        "/api/v1/transfers/" + std::to_string(second_id), {}, token);
+    ASSERT_EQ(still_active.status, 200) << still_active.body;
+    EXPECT_TRUE(nlohmann::json::parse(still_active.body)["deletedAt"].is_null());
 }
 
 TEST_F(ResourceApiTest, TransferApiSupportsRateModesAndThirdPartyFee) {
@@ -1266,6 +1428,23 @@ TEST_F(ResourceApiTest, TransferCreateReplaysWholeAggregateExactlyOnce) {
     ASSERT_EQ(first.status, 201) << first.body;
     ASSERT_EQ(replay.status, 201) << replay.body;
     EXPECT_EQ(replay.body, first.body);
+
+    const auto user_id = user["userId"].get<std::int64_t>();
+    auto& idempotency = store_.idempotency.at(
+        std::to_string(user_id) + "\ncreate_transfer\ntransfer-operation-key");
+    const auto complete_values = idempotency.response_values;
+    idempotency.response_values = {
+        {"transfer_group_id", complete_values.at("transfer_group_id")},
+        {"outgoing_transaction_id", complete_values.at("outgoing_transaction_id")},
+        {"incoming_transaction_id", complete_values.at("incoming_transaction_id")},
+        {"outgoing_amount", complete_values.at("outgoing_amount")},
+        {"incoming_amount", complete_values.at("incoming_amount")},
+        {"rate", complete_values.at("rate")},
+        {"fee_amount", complete_values.at("fee_amount")}};
+    const auto legacy_replay = request(
+        HttpMethod::Post, "/api/v1/transfers", body, token, {}, key);
+    ASSERT_EQ(legacy_replay.status, 201) << legacy_replay.body;
+    EXPECT_EQ(legacy_replay.body, first.body);
     EXPECT_EQ(store_.transfer_groups.size(), groups_before + 1U);
     EXPECT_EQ(store_.transactions.size(), transactions_before + 3U);
     EXPECT_EQ(store_.outbox.size(), outbox_before + 1U);

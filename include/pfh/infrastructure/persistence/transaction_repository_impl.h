@@ -69,6 +69,28 @@ public:
         domain::TransferGroupId group_id,
         domain::UserId user_id) override;
 
+    [[nodiscard]] domain::RepositoryResult<domain::TransferPageResult>
+    find_transfer_page(const domain::TransferPageQuery& query) override;
+
+    [[nodiscard]] domain::RepositoryResult<domain::TransferSnapshot>
+    find_transfer_by_group_for_update(
+        domain::ITransactionContext& tx,
+        domain::TransferGroupId group_id,
+        domain::UserId user_id) override;
+
+    [[nodiscard]] domain::RepositoryVoidResult soft_delete_transfer(
+        domain::ITransactionContext& tx,
+        domain::TransferGroupId group_id,
+        domain::UserId user_id,
+        std::chrono::system_clock::time_point deleted_at) override;
+
+    [[nodiscard]] domain::RepositoryResult<
+        domain::TransferCorrectionPersistResult> save_transfer_correction(
+        domain::ITransactionContext& tx,
+        domain::TransferGroupId original_group_id,
+        const domain::TransferAggregate& replacement,
+        std::chrono::system_clock::time_point corrected_at) override;
+
     [[nodiscard]] domain::RepositoryVoidResult soft_delete(
         domain::ITransactionContext& tx,
         domain::TransactionId id,

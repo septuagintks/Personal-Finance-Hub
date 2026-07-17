@@ -149,6 +149,9 @@ set(PFH_APPLICATION_SOURCES
     src/application/finance_application_service.cpp
     src/application/transaction_query_use_cases.cpp
     src/application/correct_transaction_use_case.cpp
+    src/application/transfer_query_use_cases.cpp
+    src/application/delete_transfer_use_case.cpp
+    src/application/correct_transfer_use_case.cpp
     src/application/local_event_bus.cpp
     src/application/outbox_publisher.cpp
     src/application/supplemental_audit_handler.cpp

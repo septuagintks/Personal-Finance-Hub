@@ -71,6 +71,7 @@ private:
         store_.staged_tags.clear();
         store_.staged_transaction_tag_relations.clear();
         store_.staged_transfer_groups.clear();
+        store_.staged_transfer_corrections.clear();
         store_.staged_transaction_corrections.clear();
         store_.staged_balance_cache.clear();
         store_.staged_exchange_rates.clear();
@@ -85,6 +86,7 @@ private:
         store_.staged_deleted_transactions.clear();
         store_.staged_deleted_balance_cache.clear();
         store_.staged_deleted_transfer_groups.clear();
+        store_.staged_deleted_transfer_corrections.clear();
         store_.staged_deleted_transaction_corrections.clear();
         store_.staged_deleted_categories.clear();
         store_.staged_deleted_tags.clear();
@@ -110,6 +112,7 @@ private:
             store_.staged_tags.clear();
             store_.staged_transaction_tag_relations.clear();
             store_.staged_transfer_groups.clear();
+            store_.staged_transfer_corrections.clear();
             store_.staged_transaction_corrections.clear();
             store_.staged_balance_cache.clear();
             store_.staged_exchange_rates.clear();
@@ -124,6 +127,7 @@ private:
             store_.staged_deleted_transactions.clear();
             store_.staged_deleted_balance_cache.clear();
             store_.staged_deleted_transfer_groups.clear();
+            store_.staged_deleted_transfer_corrections.clear();
             store_.staged_deleted_transaction_corrections.clear();
             store_.staged_deleted_categories.clear();
             store_.staged_deleted_tags.clear();
@@ -179,6 +183,10 @@ private:
         for (auto& [id, tg] : store_.staged_transfer_groups) {
             store_.transfer_groups.insert_or_assign(id, std::move(tg));
         }
+        for (auto& [id, correction] : store_.staged_transfer_corrections) {
+            store_.transfer_corrections.insert_or_assign(
+                id, std::move(correction));
+        }
         for (auto& [id, correction] : store_.staged_transaction_corrections) {
             store_.transaction_corrections.insert_or_assign(
                 id, std::move(correction));
@@ -222,6 +230,9 @@ private:
         for (const auto id : store_.staged_deleted_transfer_groups) {
             store_.transfer_groups.erase(id);
         }
+        for (const auto id : store_.staged_deleted_transfer_corrections) {
+            store_.transfer_corrections.erase(id);
+        }
         for (const auto id : store_.staged_deleted_transaction_corrections) {
             store_.transaction_corrections.erase(id);
         }
@@ -241,6 +252,7 @@ private:
         store_.staged_tags.clear();
         store_.staged_transaction_tag_relations.clear();
         store_.staged_transfer_groups.clear();
+        store_.staged_transfer_corrections.clear();
         store_.staged_transaction_corrections.clear();
         store_.staged_balance_cache.clear();
         store_.staged_exchange_rates.clear();
@@ -255,6 +267,7 @@ private:
         store_.staged_deleted_transactions.clear();
         store_.staged_deleted_balance_cache.clear();
         store_.staged_deleted_transfer_groups.clear();
+        store_.staged_deleted_transfer_corrections.clear();
         store_.staged_deleted_transaction_corrections.clear();
         store_.staged_deleted_categories.clear();
         store_.staged_deleted_tags.clear();

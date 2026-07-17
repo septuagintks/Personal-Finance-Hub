@@ -195,7 +195,7 @@ PostgreSQL `TIMESTAMPTZ` 的 6 位微秒精度。所有响应时间规范化为 
 - 成功响应通过 `correctsTransactionId` 指向原流水；原流水详情通过 `correctedByTransactionId` 指向替代流水。更正链可继续追加，不原地覆盖历史事实。
 - 普通 `DELETE` 与 correction 都拒绝 Transfer leg 和带 `transfer_group_id` 的 Adjustment；转账只能由聚合级用例变更。
 
-### 3.4 创建跨账户/跨币种转账 (Transfer)
+### 3.4 Transfer 聚合工作流
 
 - **HTTP 方法**：`POST`
 - **路径** : `/api/v1/transfers`
@@ -237,16 +237,35 @@ PostgreSQL `TIMESTAMPTZ` 的 6 位微秒精度。所有响应时间规范化为 
 ```json
 {
   "transferGroupId": 88,
+  "mode": "BothAmounts",
+  "sourceAccountId": 2,
+  "targetAccountId": 1,
   "outgoingTransactionId": 4523,
   "incomingTransactionId": 4524,
+  "adjustmentTransactionIds": [4525],
   "outgoingAmount": "100.00",
   "incomingAmount": "718.00",
+  "sourceCurrencyCode": "USD",
+  "targetCurrencyCode": "CNY",
   "rate": "7.18",
-  "feeAmount": "2.00"
+  "feeAmount": "2.00",
+  "feeSource": "SourceAccount",
+  "feeAccountId": 2,
+  "feeCurrencyCode": "USD",
+  "description": "资金回国",
+  "occurredAt": "2026-07-13T04:40:00Z",
+  "createdAt": "2026-07-13T04:40:01Z",
+  "deletedAt": null,
+  "correctsTransferGroupId": null,
+  "correctedByTransferGroupId": null
 }
 ```
 
-Phase 1 只开放创建与查询转账，不注册 `DELETE /api/v1/transfers/{id}`。`DELETE /api/v1/transactions/{transactionId}` 同时拒绝 Transfer 双边和任何带 `transfer_group_id` 的 Adjustment，禁止从普通流水接口破坏聚合。只有 `DeleteTransferUseCase` 能在同一事务删除两端流水与全部 Adjustment 并通过聚合级联测试后，才允许增加删除路由。
+- `GET /api/v1/transfers` 使用 `(occurredAt DESC, transferGroupId DESC)` 的不透明 cursor，支持账户与最长 366 天的半开时间窗口；响应只包含活动聚合。
+- `GET /api/v1/transfers/{id}` 返回完整组级投影，包括模式、双边账户/币种/金额、rate、手续费、成员流水、删除时间及更正双向链接；当前用户可读取已软删除历史。
+- `POST /api/v1/transfers/{id}/correction` 使用与创建相同的三模式请求和 `Idempotency-Key`。同一事务追加替代组、软删除旧组全部成员、写入 `transfer_corrections`、失效缓存并提交 Audit/Outbox；失败不改变旧聚合。
+- `DELETE /api/v1/transfers/{id}` 在同一事务软删除双腿与全部 grouped Adjustment，保留 `transfer_groups` 历史事实；重复删除返回 `409`。
+- 聚合更正和删除先锁定原组及成员，再按账户 ID 升序锁定旧、新与手续费账户。普通 Transaction 删除/更正继续拒绝任何 Transfer 成员，前端不得串联单腿操作模拟聚合写入。
 
 ---
 

@@ -215,6 +215,65 @@ private:
     AccountId account_id_;
 };
 
+class TransferDeletedEvent final : public UserScopedEvent {
+public:
+    TransferDeletedEvent(
+        UserId user_id,
+        TransferGroupId group_id,
+        std::chrono::system_clock::time_point occurred_at)
+        : UserScopedEvent(user_id, occurred_at), group_id_(group_id) {}
+
+    [[nodiscard]] std::string event_name() const override {
+        return "TransferDeleted";
+    }
+    [[nodiscard]] std::string aggregate_type() const override {
+        return "TransferGroup";
+    }
+    [[nodiscard]] std::string aggregate_id() const override {
+        return group_id_.to_string();
+    }
+    [[nodiscard]] std::string payload_json() const override {
+        return "{" + base_payload() +
+               ",\"transferGroupId\":" + std::to_string(group_id_.value()) + "}";
+    }
+
+private:
+    TransferGroupId group_id_;
+};
+
+class TransferCorrectedEvent final : public UserScopedEvent {
+public:
+    TransferCorrectedEvent(
+        UserId user_id,
+        TransferGroupId original_group_id,
+        TransferGroupId replacement_group_id,
+        std::chrono::system_clock::time_point occurred_at)
+        : UserScopedEvent(user_id, occurred_at),
+          original_group_id_(original_group_id),
+          replacement_group_id_(replacement_group_id) {}
+
+    [[nodiscard]] std::string event_name() const override {
+        return "TransferCorrected";
+    }
+    [[nodiscard]] std::string aggregate_type() const override {
+        return "TransferGroup";
+    }
+    [[nodiscard]] std::string aggregate_id() const override {
+        return replacement_group_id_.to_string();
+    }
+    [[nodiscard]] std::string payload_json() const override {
+        return "{" + base_payload() +
+               ",\"originalTransferGroupId\":" +
+               std::to_string(original_group_id_.value()) +
+               ",\"replacementTransferGroupId\":" +
+               std::to_string(replacement_group_id_.value()) + "}";
+    }
+
+private:
+    TransferGroupId original_group_id_;
+    TransferGroupId replacement_group_id_;
+};
+
 /// @brief TransactionCorrected links the immutable original fact to its
 /// replacement after both persistence changes commit atomically.
 class TransactionCorrectedEvent final : public UserScopedEvent {

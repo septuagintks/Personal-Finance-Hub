@@ -15,7 +15,14 @@ public:
         : service_(service) {}
 
     [[nodiscard]] HttpResponse create(const HttpRequest& request);
+    [[nodiscard]] HttpResponse list(const HttpRequest& request);
     [[nodiscard]] HttpResponse get(
+        const HttpRequest& request,
+        std::string_view transfer_group_id);
+    [[nodiscard]] HttpResponse correct(
+        const HttpRequest& request,
+        std::string_view transfer_group_id);
+    [[nodiscard]] HttpResponse remove(
         const HttpRequest& request,
         std::string_view transfer_group_id);
 

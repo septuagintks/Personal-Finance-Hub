@@ -53,6 +53,18 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/transfers',
+      name: 'transfers',
+      component: () => import('../views/TransfersView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/transfers/:transferGroupId',
+      name: 'transfer-detail',
+      component: () => import('../views/TransferDetailView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/settings',
       name: 'settings',
       component: () => import('../views/SettingsView.vue'),

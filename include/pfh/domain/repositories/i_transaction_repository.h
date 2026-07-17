@@ -27,6 +27,7 @@ struct TransferPersistResult {
     TransferGroupId group_id;
     TransactionId outgoing_id;
     TransactionId incoming_id;
+    std::vector<TransactionId> adjustment_ids;
 };
 
 /// @brief Persisted transfer aggregate read model. Amounts in transactions use
@@ -36,7 +37,36 @@ struct TransferSnapshot {
     UserId user_id;
     int transfer_mode = 0;
     std::optional<Decimal> exchange_rate;
+    std::string note;
+    std::chrono::system_clock::time_point occurred_at{};
+    std::chrono::system_clock::time_point created_at{};
+    std::optional<std::chrono::system_clock::time_point> deleted_at;
+    std::optional<TransferGroupId> corrects_group_id;
+    std::optional<TransferGroupId> corrected_by_group_id;
     std::vector<Transaction> transactions;
+};
+
+struct TransferPageCursor {
+    std::chrono::system_clock::time_point occurred_at{};
+    TransferGroupId group_id;
+};
+
+struct TransferPageQuery {
+    UserId user_id;
+    std::optional<AccountId> account_id;
+    std::optional<std::chrono::system_clock::time_point> occurred_from;
+    std::optional<std::chrono::system_clock::time_point> occurred_to;
+    std::optional<TransferPageCursor> before;
+    std::size_t limit = 50;
+};
+
+struct TransferPageResult {
+    std::vector<TransferSnapshot> items;
+    bool has_more = false;
+};
+
+struct TransferCorrectionPersistResult {
+    TransferPersistResult replacement;
 };
 
 /// @brief Stable keyset used by the ledger read path. The public cursor is an
@@ -145,6 +175,28 @@ public:
     [[nodiscard]] virtual RepositoryResult<TransferSnapshot> find_transfer_by_group(
         TransferGroupId group_id,
         UserId user_id) = 0;
+
+    [[nodiscard]] virtual RepositoryResult<TransferPageResult> find_transfer_page(
+        const TransferPageQuery& query) = 0;
+
+    [[nodiscard]] virtual RepositoryResult<TransferSnapshot>
+    find_transfer_by_group_for_update(
+        ITransactionContext& tx,
+        TransferGroupId group_id,
+        UserId user_id) = 0;
+
+    [[nodiscard]] virtual RepositoryVoidResult soft_delete_transfer(
+        ITransactionContext& tx,
+        TransferGroupId group_id,
+        UserId user_id,
+        std::chrono::system_clock::time_point deleted_at) = 0;
+
+    [[nodiscard]] virtual RepositoryResult<TransferCorrectionPersistResult>
+    save_transfer_correction(
+        ITransactionContext& tx,
+        TransferGroupId original_group_id,
+        const TransferAggregate& replacement,
+        std::chrono::system_clock::time_point corrected_at) = 0;
 
     [[nodiscard]] virtual RepositoryVoidResult soft_delete(
         ITransactionContext& tx,

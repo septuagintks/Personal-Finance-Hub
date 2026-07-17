@@ -1716,6 +1716,320 @@ a {
   }
 }
 
+/* Transfer aggregate workflow */
+.transfer-filters {
+  grid-template-columns: auto minmax(150px, 1fr) minmax(130px, 0.7fr) minmax(130px, 0.7fr) auto;
+}
+
+.transfer-list {
+  min-height: 300px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.transfer-list__head,
+.transfer-list__row {
+  display: grid;
+  grid-template-columns:
+    minmax(135px, 0.8fr) minmax(230px, 1.5fr) minmax(110px, 0.7fr) minmax(110px, 0.7fr)
+    minmax(90px, 0.55fr);
+  align-items: center;
+  gap: 16px;
+}
+
+.transfer-list__head {
+  min-height: 42px;
+  padding: 0 16px;
+  color: var(--color-ink-muted);
+  background: var(--color-surface-muted);
+  border-bottom: 1px solid var(--color-line);
+  font-size: 0.67rem;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.transfer-list__row {
+  min-height: 82px;
+  padding: 12px 16px;
+  color: var(--color-ink);
+  border-bottom: 1px solid var(--color-line);
+  text-decoration: none;
+}
+
+.transfer-list__row:last-child {
+  border-bottom: 0;
+}
+
+.transfer-list__row:hover {
+  background: var(--color-surface-muted);
+}
+
+.transfer-list__row time,
+.transfer-list__row > span,
+.transfer-list__row > strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.transfer-list__row time,
+.transfer-list__row > span:last-child {
+  color: var(--color-ink-muted);
+  font-size: 0.73rem;
+}
+
+.transfer-list__row > strong {
+  color: var(--color-teal);
+  font-size: 0.83rem;
+}
+
+.transfer-list__row > strong small {
+  color: var(--color-ink-muted);
+  font-size: 0.65rem;
+}
+
+.transfer-route {
+  display: grid;
+  grid-template-columns: minmax(0, auto) auto minmax(0, auto);
+  align-items: center;
+  justify-content: start;
+  gap: 7px;
+}
+
+.transfer-route strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transfer-route small {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  color: var(--color-ink-muted);
+  font-size: 0.68rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transfer-form {
+  display: grid;
+  gap: 18px;
+}
+
+.transfer-mode {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  min-height: 42px;
+  padding: 3px;
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+}
+
+.transfer-mode button {
+  min-width: 0;
+  padding: 7px 10px;
+  color: var(--color-ink-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  font-size: 0.73rem;
+  font-weight: 700;
+}
+
+.transfer-mode button.is-active {
+  color: var(--color-ink);
+  background: var(--color-surface);
+  box-shadow: 0 1px 4px rgba(29, 36, 34, 0.09);
+}
+
+.transfer-mode button:disabled:not(.is-active) {
+  opacity: 0.45;
+}
+
+.transfer-form__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.transfer-form__description {
+  grid-column: 1 / -1;
+}
+
+.transfer-preview {
+  display: flex;
+  min-height: 64px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  padding: 10px 13px;
+  background: var(--color-teal-soft);
+  border-left: 3px solid var(--color-teal);
+  border-radius: var(--radius-sm);
+}
+
+.transfer-preview span {
+  color: var(--color-ink-muted);
+  font-size: 0.67rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.transfer-preview strong {
+  overflow-wrap: anywhere;
+  color: var(--color-teal);
+  font-family: var(--font-mono);
+  font-size: 0.84rem;
+}
+
+.transfer-detail-header h1 {
+  overflow-wrap: anywhere;
+}
+
+.transfer-amount-band {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 24px;
+  margin-bottom: 30px;
+  padding: 24px;
+  background: var(--color-surface);
+  border-block: 1px solid var(--color-line);
+}
+
+.transfer-amount-band > div {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  gap: 4px 9px;
+}
+
+.transfer-amount-band p,
+.transfer-amount-band small {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--color-ink-muted);
+}
+
+.transfer-amount-band p {
+  font-size: 0.68rem;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.transfer-amount-band strong {
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: 1.75rem;
+}
+
+.transfer-amount-band span {
+  color: var(--color-ink-muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.transfer-amount-band small {
+  font-size: 0.75rem;
+}
+
+.account-detail-grid dd a + a {
+  margin-left: 12px;
+}
+
+.transfer-delete-impact {
+  display: grid;
+  gap: 1px;
+  margin-bottom: 22px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.transfer-delete-impact span {
+  padding: 11px 13px;
+  background: var(--color-surface-muted);
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+
+@media (max-width: 860px) {
+  .transfer-filters {
+    grid-template-columns: auto repeat(2, minmax(0, 1fr));
+  }
+
+  .transfer-filters > label:first-of-type {
+    grid-column: 2 / -1;
+  }
+
+  .transfer-filters .ledger-filters__actions {
+    grid-column: 1 / -1;
+  }
+
+  .transfer-list__head {
+    display: none;
+  }
+
+  .transfer-list__row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px 14px;
+  }
+
+  .transfer-list__row time,
+  .transfer-route {
+    grid-column: 1 / -1;
+  }
+
+  .transfer-list__row > span:last-child {
+    text-align: right;
+  }
+}
+
+@media (max-width: 580px) {
+  .transfer-filters {
+    grid-template-columns: 1fr;
+  }
+
+  .transfer-filters > svg {
+    display: none;
+  }
+
+  .transfer-filters > label:first-of-type,
+  .transfer-filters .ledger-filters__actions {
+    grid-column: auto;
+  }
+
+  .transfer-form__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .transfer-form__description {
+    grid-column: auto;
+  }
+
+  .transfer-mode button {
+    padding-inline: 5px;
+    font-size: 0.66rem;
+  }
+
+  .transfer-amount-band {
+    grid-template-columns: 1fr;
+    gap: 14px;
+    padding-inline: 18px;
+  }
+
+  .transfer-amount-band > svg {
+    transform: rotate(90deg);
+  }
+
+  .transfer-amount-band strong {
+    font-size: 1.35rem;
+  }
+}
+
 .transaction-form {
   display: grid;
   gap: 18px;

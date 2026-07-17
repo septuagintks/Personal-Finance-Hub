@@ -347,7 +347,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: operations["listTransfers"];
         put?: never;
         post: operations["createTransfer"];
         delete?: never;
@@ -366,6 +366,22 @@ export interface paths {
         get: operations["getTransfer"];
         put?: never;
         post?: never;
+        delete: operations["deleteTransfer"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/transfers/{transferGroupId}/correction": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["correctTransfer"];
         delete?: never;
         options?: never;
         head?: never;
@@ -714,6 +730,10 @@ export interface components {
             items: components["schemas"]["Transaction"][];
             nextCursor: string | null;
         };
+        TransferPage: {
+            items: components["schemas"]["Transfer"][];
+            nextCursor: string | null;
+        };
         CreateTransferRequest: {
             sourceAccountId: components["schemas"]["Id"];
             targetAccountId: components["schemas"]["Id"];
@@ -732,12 +752,32 @@ export interface components {
         };
         Transfer: {
             transferGroupId: components["schemas"]["Id"];
+            /** @enum {string} */
+            mode: "OutgoingAndRate" | "BothAmounts" | "IncomingAndRate";
+            sourceAccountId: components["schemas"]["Id"];
+            targetAccountId: components["schemas"]["Id"];
             outgoingTransactionId: components["schemas"]["Id"];
             incomingTransactionId: components["schemas"]["Id"];
+            adjustmentTransactionIds: components["schemas"]["Id"][];
             outgoingAmount: components["schemas"]["PositiveDecimalString"];
             incomingAmount: components["schemas"]["PositiveDecimalString"];
+            sourceCurrencyCode: components["schemas"]["CurrencyCode"];
+            targetCurrencyCode: components["schemas"]["CurrencyCode"];
             rate: components["schemas"]["PositiveDecimalString"] | null;
             feeAmount: components["schemas"]["PositiveDecimalString"] | null;
+            /** @enum {string|null} */
+            feeSource: "SourceAccount" | "TargetAccount" | "ThirdParty" | null;
+            feeAccountId: components["schemas"]["Id"] | null;
+            feeCurrencyCode: components["schemas"]["CurrencyCode"] | null;
+            description: string;
+            /** Format: date-time */
+            occurredAt: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            deletedAt: string | null;
+            correctsTransferGroupId: components["schemas"]["Id"] | null;
+            correctedByTransferGroupId: components["schemas"]["Id"] | null;
         };
         NetWorth: {
             baseCurrency: components["schemas"]["CurrencyCode"];
@@ -1742,6 +1782,35 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    listTransfers: {
+        parameters: {
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                pageSize?: components["parameters"]["PageSize"];
+                accountId?: components["schemas"]["Id"];
+                from?: string;
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Stable transfer aggregate cursor page */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TransferPage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     createTransfer: {
         parameters: {
             query?: never;
@@ -1796,6 +1865,64 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    deleteTransfer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                transferGroupId: components["parameters"]["TransferGroupId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Transfer aggregate soft-deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    correctTransfer: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                transferGroupId: components["parameters"]["TransferGroupId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTransferRequest"];
+            };
+        };
+        responses: {
+            /** @description Replacement transfer aggregate created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Transfer"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["RuleViolation"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };

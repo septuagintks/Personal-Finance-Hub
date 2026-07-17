@@ -11,6 +11,8 @@
 #include "pfh/application/input_constraints.h"
 #include "pfh/application/persistence/i_unit_of_work.h"
 #include "pfh/application/ports/i_idempotency_repository.h"
+#include "pfh/application/transfer_command_builder.h"
+#include "pfh/application/transfer_dto_mapper.h"
 #include "pfh/domain/events/domain_events.h"
 #include "pfh/domain/repositories/i_account_repository.h"
 #include "pfh/domain/repositories/i_transaction_repository.h"
@@ -59,7 +61,7 @@ private:
                 return err(valid.error());
             }
         }
-        if (auto shape = validate_command_shape(cmd); !shape) {
+        if (auto shape = validate_transfer_command_shape(cmd); !shape) {
             return err(shape.error());
         }
 
@@ -95,9 +97,34 @@ private:
                         auto restored = from_idempotency_values(
                             started->response_values);
                         if (!restored) {
-                            app_error = restored.error();
-                            return std::unexpected(domain::RepositoryError::database(
-                                "Stored idempotency response is invalid"));
+                            const auto legacy_group = idempotency_value(
+                                started->response_values,
+                                "transfer_group_id");
+                            const auto legacy_group_value = legacy_group.has_value()
+                                ? parse_idempotency_integer(*legacy_group)
+                                : std::nullopt;
+                            if (!legacy_group_value.has_value() ||
+                                *legacy_group_value <= 0) {
+                                app_error = restored.error();
+                                return std::unexpected(
+                                    domain::RepositoryError::database(
+                                        "Stored idempotency response is invalid"));
+                            }
+                            auto snapshot =
+                                transactions_.find_transfer_by_group_for_update(
+                                    tx_ctx,
+                                    domain::TransferGroupId(*legacy_group_value),
+                                    cmd.user_id);
+                            if (!snapshot) {
+                                return std::unexpected(snapshot.error());
+                            }
+                            restored = to_transfer_dto(*snapshot);
+                            if (!restored) {
+                                app_error = restored.error();
+                                return std::unexpected(
+                                    domain::RepositoryError::database(
+                                        "Legacy transfer response cannot be rebuilt"));
+                            }
                         }
                         result_dto = std::move(*restored);
                         return {};
@@ -158,8 +185,9 @@ private:
                         "archived account"));
                 }
 
-                auto aggregate_result = build_aggregate(
-                    cmd, *source, *target, third_party_fee_account);
+                auto aggregate_result = build_transfer_aggregate(
+                    cmd, *source, *target, third_party_fee_account,
+                    std::chrono::system_clock::now());
                 if (!aggregate_result) {
                     app_error = aggregate_result.error();
                     return std::unexpected(domain::RepositoryError::validation(
@@ -210,297 +238,17 @@ private:
     [[nodiscard]] static TransferResultDto to_dto(
         const domain::TransferPersistResult& persisted,
         const domain::TransferAggregate& aggregate) {
-        TransferResultDto dto;
-        dto.transfer_group_id = persisted.group_id;
-        dto.outgoing_transaction_id = persisted.outgoing_id;
-        dto.incoming_transaction_id = persisted.incoming_id;
-        dto.outgoing_amount =
-            aggregate.outgoing().amount().amount().to_string();
-        dto.incoming_amount =
-            aggregate.incoming().amount().amount().to_string();
-        if (aggregate.rate().has_value()) {
-            dto.rate = aggregate.rate()->rate().to_string();
-        }
-        if (!aggregate.adjustments().empty()) {
-            dto.fee_amount = aggregate.adjustments().front().amount().amount().abs().to_string();
-        }
-        return dto;
+        return to_transfer_dto(persisted, aggregate);
     }
 
     [[nodiscard]] static IdempotencyValues to_idempotency_values(
         const TransferResultDto& value) {
-        return {
-            {"transfer_group_id", value.transfer_group_id.to_string()},
-            {"outgoing_transaction_id", value.outgoing_transaction_id.to_string()},
-            {"incoming_transaction_id", value.incoming_transaction_id.to_string()},
-            {"outgoing_amount", value.outgoing_amount},
-            {"incoming_amount", value.incoming_amount},
-            {"rate", value.rate.value_or("")},
-            {"fee_amount", value.fee_amount.value_or("")}};
+        return transfer_to_idempotency_values(value);
     }
 
     [[nodiscard]] static Result<TransferResultDto> from_idempotency_values(
         const IdempotencyValues& values) {
-        const auto group = idempotency_value(values, "transfer_group_id");
-        const auto outgoing_id = idempotency_value(
-            values, "outgoing_transaction_id");
-        const auto incoming_id = idempotency_value(
-            values, "incoming_transaction_id");
-        const auto outgoing = idempotency_value(values, "outgoing_amount");
-        const auto incoming = idempotency_value(values, "incoming_amount");
-        const auto rate = idempotency_value(values, "rate");
-        const auto fee = idempotency_value(values, "fee_amount");
-        if (!group || !outgoing_id || !incoming_id || !outgoing || !incoming ||
-            !rate || !fee) {
-            return err(Error::infrastructure_failure(
-                "Stored transfer response is incomplete"));
-        }
-        const auto group_value = parse_idempotency_integer(*group);
-        const auto outgoing_value = parse_idempotency_integer(*outgoing_id);
-        const auto incoming_value = parse_idempotency_integer(*incoming_id);
-        if (!group_value || !outgoing_value || !incoming_value ||
-            *group_value <= 0 || *outgoing_value <= 0 || *incoming_value <= 0) {
-            return err(Error::infrastructure_failure(
-                "Stored transfer response is invalid"));
-        }
-        TransferResultDto result;
-        result.transfer_group_id = domain::TransferGroupId(*group_value);
-        result.outgoing_transaction_id = domain::TransactionId(*outgoing_value);
-        result.incoming_transaction_id = domain::TransactionId(*incoming_value);
-        result.outgoing_amount = std::string(*outgoing);
-        result.incoming_amount = std::string(*incoming);
-        if (!rate->empty()) result.rate = std::string(*rate);
-        if (!fee->empty()) result.fee_amount = std::string(*fee);
-        return result;
-    }
-
-    [[nodiscard]] static VoidResult validate_command_shape(
-        const CreateTransferCommand& cmd) {
-        if (!cmd.user_id.is_valid() || !cmd.source_account_id.is_valid() ||
-            !cmd.target_account_id.is_valid()) {
-            return err(Error::validation("user and transfer account ids must be valid"));
-        }
-        if (cmd.description.size() > kMaxDescriptionLength) {
-            return err(Error::validation(
-                "description exceeds the maximum length"));
-        }
-        if (cmd.source_account_id == cmd.target_account_id) {
-            return err(Error::validation("source and target accounts must differ"));
-        }
-
-        switch (cmd.mode) {
-        case TransferInputMode::OutgoingAndRate:
-            if (cmd.outgoing_amount.empty() || cmd.rate.empty()) {
-                return err(Error::validation(
-                    "OutgoingAndRate requires outgoing_amount and rate"));
-            }
-            if (!cmd.incoming_amount.empty()) {
-                return err(Error::validation(
-                    "OutgoingAndRate must not provide incoming_amount"));
-            }
-            break;
-        case TransferInputMode::BothAmounts:
-            if (cmd.outgoing_amount.empty() || cmd.incoming_amount.empty()) {
-                return err(Error::validation(
-                    "BothAmounts requires outgoing_amount and incoming_amount"));
-            }
-            if (!cmd.rate.empty()) {
-                return err(Error::validation("BothAmounts must not provide rate"));
-            }
-            break;
-        case TransferInputMode::IncomingAndRate:
-            if (cmd.incoming_amount.empty() || cmd.rate.empty()) {
-                return err(Error::validation(
-                    "IncomingAndRate requires incoming_amount and rate"));
-            }
-            if (!cmd.outgoing_amount.empty()) {
-                return err(Error::validation(
-                    "IncomingAndRate must not provide outgoing_amount"));
-            }
-            break;
-        default:
-            return err(Error::validation("unsupported transfer mode"));
-        }
-
-        if (!cmd.fee_amount.has_value()) {
-            if (cmd.fee_source.has_value() || cmd.fee_account_id.has_value()) {
-                return err(Error::validation(
-                    "fee_source and fee_account_id require fee_amount"));
-            }
-            return ok();
-        }
-        if (!cmd.fee_source.has_value()) {
-            return err(Error::validation("fee_amount requires fee_source"));
-        }
-
-        switch (*cmd.fee_source) {
-        case domain::FeeSource::SourceAccount:
-        case domain::FeeSource::TargetAccount:
-            if (cmd.fee_account_id.has_value()) {
-                return err(Error::validation(
-                    "fee_account_id is only valid for ThirdParty fees"));
-            }
-            break;
-        case domain::FeeSource::ThirdParty:
-            if (!cmd.fee_account_id.has_value() || !cmd.fee_account_id->is_valid()) {
-                return err(Error::validation(
-                    "ThirdParty fee requires a valid fee_account_id"));
-            }
-            if (*cmd.fee_account_id == cmd.source_account_id ||
-                *cmd.fee_account_id == cmd.target_account_id) {
-                return err(Error::validation(
-                    "ThirdParty fee account must differ from both transfer accounts"));
-            }
-            break;
-        default:
-            return err(Error::validation("unsupported fee source"));
-        }
-        return ok();
-    }
-
-    [[nodiscard]] Result<domain::TransferAggregate> build_aggregate(
-        const CreateTransferCommand& cmd,
-        const domain::Account& source,
-        const domain::Account& target,
-        const domain::Account* third_party_fee_account) const {
-        using domain::TransferDomainService;
-
-        // Stamp current time when the caller omitted a business time, so a
-        // missing REST field never lands the transfer legs in 1970.
-        const auto occurred_at = normalize_persisted_time(
-            cmd.occurred_at.value_or(std::chrono::system_clock::now()));
-
-        auto parse_money = [](const std::string& amount,
-                              const domain::Currency& currency)
-            -> Result<domain::Money> {
-            if (!is_plain_decimal_string(amount, false)) {
-                return err(Error::validation(
-                    "amount must be a positive plain decimal string"));
-            }
-            auto d = domain::Decimal::parse_numeric_20_8(amount);
-            if (!d) {
-                return err(from_domain(d.error()));
-            }
-            if (!d->is_positive()) {
-                return err(Error::validation("amount must be positive"));
-            }
-            return domain::Money(*d, currency);
-        };
-
-        std::optional<domain::TransferFee> fee;
-        if (cmd.fee_amount.has_value()) {
-            const domain::Account* selected_fee_account = nullptr;
-            switch (*cmd.fee_source) {
-            case domain::FeeSource::SourceAccount:
-                selected_fee_account = &source;
-                break;
-            case domain::FeeSource::TargetAccount:
-                selected_fee_account = &target;
-                break;
-            case domain::FeeSource::ThirdParty:
-                selected_fee_account = third_party_fee_account;
-                break;
-            }
-            if (selected_fee_account == nullptr) {
-                return err(Error::validation("fee account could not be resolved"));
-            }
-            auto amount = parse_money(*cmd.fee_amount, selected_fee_account->currency());
-            if (!amount) {
-                return err(amount.error());
-            }
-            fee = domain::TransferFee{
-                *cmd.fee_source, selected_fee_account->id(), std::move(*amount)};
-        }
-
-        switch (cmd.mode) {
-        case TransferInputMode::OutgoingAndRate: {
-            auto out = parse_money(cmd.outgoing_amount, source.currency());
-            if (!out) {
-                return err(out.error());
-            }
-            if (!is_plain_decimal_string(cmd.rate, false)) {
-                return err(Error::validation(
-                    "rate must be a positive plain decimal string"));
-            }
-            auto rate_dec = domain::Decimal::parse_numeric_20_10(cmd.rate);
-            if (!rate_dec) {
-                return err(from_domain(rate_dec.error()));
-            }
-            auto rate = domain::ExchangeRate::create(
-                source.currency(),
-                target.currency(),
-                *rate_dec,
-                occurred_at,
-                "Manual");
-            if (!rate) {
-                return err(from_domain(rate.error()));
-            }
-            return map_domain(TransferDomainService::build_from_outgoing_and_rate(
-                *out,
-                source.id(),
-                target.id(),
-                *rate,
-                cmd.user_id,
-                occurred_at,
-                cmd.description,
-                domain::TransferGroupId{},
-                fee));
-        }
-        case TransferInputMode::BothAmounts: {
-            auto out = parse_money(cmd.outgoing_amount, source.currency());
-            if (!out) {
-                return err(out.error());
-            }
-            auto in = parse_money(cmd.incoming_amount, target.currency());
-            if (!in) {
-                return err(in.error());
-            }
-            return map_domain(TransferDomainService::build_from_both_amounts(
-                *out,
-                *in,
-                source.id(),
-                target.id(),
-                cmd.user_id,
-                occurred_at,
-                cmd.description,
-                domain::TransferGroupId{},
-                fee));
-        }
-        case TransferInputMode::IncomingAndRate: {
-            auto in = parse_money(cmd.incoming_amount, target.currency());
-            if (!in) {
-                return err(in.error());
-            }
-            if (!is_plain_decimal_string(cmd.rate, false)) {
-                return err(Error::validation(
-                    "rate must be a positive plain decimal string"));
-            }
-            auto rate_dec = domain::Decimal::parse_numeric_20_10(cmd.rate);
-            if (!rate_dec) {
-                return err(from_domain(rate_dec.error()));
-            }
-            auto rate = domain::ExchangeRate::create(
-                source.currency(),
-                target.currency(),
-                *rate_dec,
-                occurred_at,
-                "Manual");
-            if (!rate) {
-                return err(from_domain(rate.error()));
-            }
-            return map_domain(TransferDomainService::build_from_incoming_and_rate(
-                *in,
-                source.id(),
-                target.id(),
-                *rate,
-                cmd.user_id,
-                occurred_at,
-                cmd.description,
-                domain::TransferGroupId{},
-                fee));
-        }
-        }
-        return err(Error::validation("unsupported transfer mode"));
+        return transfer_from_idempotency_values(values);
     }
 
     domain::IAccountRepository& accounts_;

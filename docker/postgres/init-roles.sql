@@ -62,11 +62,11 @@ BEGIN
         'accounts', 'categories', 'transactions', 'transfer_groups',
         'transaction_tags', 'transaction_tag_relations',
         'account_balance_cache', 'user_preferences', 'request_idempotency',
-        'transaction_corrections'])
+        'transaction_corrections', 'transfer_corrections'])
       AND relrowsecurity
       AND relforcerowsecurity;
-    IF tenant_tables <> 10 THEN
-        RAISE EXCEPTION 'expected 10 ENABLE/FORCE RLS tenant tables, got %',
+    IF tenant_tables <> 11 THEN
+        RAISE EXCEPTION 'expected 11 ENABLE/FORCE RLS tenant tables, got %',
             tenant_tables;
     END IF;
 END

@@ -1224,6 +1224,61 @@
       }
     },
     "/api/v1/transfers": {
+      "get": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "name": "accountId",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Id"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Stable transfer aggregate cursor page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransferPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "operationId": "listTransfers"
+      },
       "post": {
         "requestBody": {
           "required": true,
@@ -1302,6 +1357,84 @@
           }
         },
         "operationId": "getTransfer"
+      },
+      "delete": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TransferGroupId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Transfer aggregate soft-deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "operationId": "deleteTransfer"
+      }
+    },
+    "/api/v1/transfers/{transferGroupId}/correction": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TransferGroupId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTransferRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Replacement transfer aggregate created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Transfer"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/RuleViolation"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "operationId": "correctTransfer"
       }
     },
     "/api/v1/reports/net-worth": {
@@ -2871,6 +3004,29 @@
           }
         }
       },
+      "TransferPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Transfer"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 512
+          }
+        }
+      },
       "CreateTransferRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -2977,15 +3133,44 @@
         "additionalProperties": false,
         "required": [
           "transferGroupId",
+          "mode",
+          "sourceAccountId",
+          "targetAccountId",
           "outgoingTransactionId",
           "incomingTransactionId",
+          "adjustmentTransactionIds",
           "outgoingAmount",
           "incomingAmount",
+          "sourceCurrencyCode",
+          "targetCurrencyCode",
           "rate",
-          "feeAmount"
+          "feeAmount",
+          "feeSource",
+          "feeAccountId",
+          "feeCurrencyCode",
+          "description",
+          "occurredAt",
+          "createdAt",
+          "deletedAt",
+          "correctsTransferGroupId",
+          "correctedByTransferGroupId"
         ],
         "properties": {
           "transferGroupId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "OutgoingAndRate",
+              "BothAmounts",
+              "IncomingAndRate"
+            ]
+          },
+          "sourceAccountId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "targetAccountId": {
             "$ref": "#/components/schemas/Id"
           },
           "outgoingTransactionId": {
@@ -2994,11 +3179,24 @@
           "incomingTransactionId": {
             "$ref": "#/components/schemas/Id"
           },
+          "adjustmentTransactionIds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Id"
+            },
+            "maxItems": 64
+          },
           "outgoingAmount": {
             "$ref": "#/components/schemas/PositiveDecimalString"
           },
           "incomingAmount": {
             "$ref": "#/components/schemas/PositiveDecimalString"
+          },
+          "sourceCurrencyCode": {
+            "$ref": "#/components/schemas/CurrencyCode"
+          },
+          "targetCurrencyCode": {
+            "$ref": "#/components/schemas/CurrencyCode"
           },
           "rate": {
             "oneOf": [
@@ -3014,6 +3212,77 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/PositiveDecimalString"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "feeSource": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "SourceAccount",
+              "TargetAccount",
+              "ThirdParty",
+              null
+            ]
+          },
+          "feeAccountId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Id"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "feeCurrencyCode": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CurrencyCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "correctsTransferGroupId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Id"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "correctedByTransferGroupId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Id"
               },
               {
                 "type": "null"

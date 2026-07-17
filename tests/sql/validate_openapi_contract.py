@@ -37,8 +37,9 @@ EXPECTED = {
     "/api/v1/transactions/{transactionId}": {"get", "delete"},
     "/api/v1/transactions/{transactionId}/correction": {"post"},
     "/api/v1/transactions/{transactionId}/tags": {"put"},
-    "/api/v1/transfers": {"post"},
-    "/api/v1/transfers/{transferGroupId}": {"get"},
+    "/api/v1/transfers": {"get", "post"},
+    "/api/v1/transfers/{transferGroupId}": {"get", "delete"},
+    "/api/v1/transfers/{transferGroupId}/correction": {"post"},
     "/api/v1/reports/net-worth": {"get"},
     "/api/v1/reports/cash-flow": {"get"},
     "/api/v1/reports/dashboard-summary": {"get"},
@@ -74,9 +75,6 @@ def main() -> int:
         }
         if actual != methods:
             failures.append(f"{path} methods are {sorted(actual)}, expected {sorted(methods)}")
-    if "delete" in paths.get("/api/v1/transfers/{transferGroupId}", {}):
-        failures.append("Phase 1 must not publish a transfer delete operation")
-
     operation_ids: list[str] = []
     overload_ref = "#/components/responses/ServiceUnavailable"
     unauthorized_ref = "#/components/responses/Unauthorized"
@@ -120,8 +118,6 @@ def main() -> int:
         failures.append(
             "Drogon route registration differs from the checked-in OpenAPI route table"
         )
-    if '"/api/v1/transfers/{1}", HttpMethod::Delete' in adapter_source:
-        failures.append("Drogon adapter must not register transfer deletion")
     if 'response.headers.insert_or_assign("X-Trace-Id", trace_id)' not in adapter_source:
         failures.append("Drogon exception responses must expose their trace id header")
 
@@ -165,6 +161,7 @@ def main() -> int:
         "/api/v1/transactions",
         "/api/v1/transactions/{transactionId}/correction",
         "/api/v1/transfers",
+        "/api/v1/transfers/{transferGroupId}/correction",
     ):
         operation = paths.get(path, {}).get("post", {})
         parameters = operation.get("parameters", [])

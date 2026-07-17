@@ -198,12 +198,46 @@ struct CreateTransferCommand {
 
 struct TransferResultDto {
     domain::TransferGroupId transfer_group_id;
+    TransferInputMode mode = TransferInputMode::BothAmounts;
+    domain::AccountId source_account_id;
+    domain::AccountId target_account_id;
     domain::TransactionId outgoing_transaction_id;
     domain::TransactionId incoming_transaction_id;
+    std::vector<domain::TransactionId> adjustment_transaction_ids;
     std::string outgoing_amount;
     std::string incoming_amount;
+    std::string source_currency_code;
+    std::string target_currency_code;
     std::optional<std::string> rate;
     std::optional<std::string> fee_amount;
+    std::optional<domain::FeeSource> fee_source;
+    std::optional<domain::AccountId> fee_account_id;
+    std::optional<std::string> fee_currency_code;
+    std::string description;
+    std::chrono::system_clock::time_point occurred_at{};
+    std::chrono::system_clock::time_point created_at{};
+    std::optional<std::chrono::system_clock::time_point> deleted_at;
+    std::optional<domain::TransferGroupId> corrects_transfer_group_id;
+    std::optional<domain::TransferGroupId> corrected_by_transfer_group_id;
+};
+
+struct TransferListQuery {
+    domain::UserId user_id;
+    std::optional<domain::AccountId> account_id;
+    std::optional<std::chrono::system_clock::time_point> occurred_from;
+    std::optional<std::chrono::system_clock::time_point> occurred_to;
+    CursorPageRequest page;
+};
+
+struct CorrectTransferCommand {
+    domain::TransferGroupId original_transfer_group_id;
+    CreateTransferCommand replacement;
+};
+
+struct DeleteTransferCommand {
+    domain::UserId user_id;
+    domain::TransferGroupId transfer_group_id;
+    std::optional<std::chrono::system_clock::time_point> deleted_at;
 };
 
 struct CategoryDto {

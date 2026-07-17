@@ -321,7 +321,9 @@ public:
             // from currency equality (that mislabels Mode 2 cross-currency as
             // Mode 1 and can never represent Mode 3).
             static_cast<int>(transfer.mode()),
-            transfer.rate()};
+            transfer.rate(),
+            outgoing.description(),
+            outgoing.created_at()};
         store_.staged_transfer_groups.insert_or_assign(group_value, std::move(group));
 
         // Persist with signed-amount convention matching PostgreSQL:
@@ -364,6 +366,8 @@ public:
         // Persist grouped adjustments through this aggregate-only insertion
         // path. Calling public save_single would violate its deliberate rule
         // that no grouped transaction can be inserted independently.
+        std::vector<domain::TransactionId> adjustment_ids;
+        adjustment_ids.reserve(transfer.adjustments().size());
         for (const auto& adj : transfer.adjustments()) {
             domain::Transaction grouped_adjustment(
                 domain::TransactionId(store_.next_transaction_id++),
@@ -379,6 +383,7 @@ public:
                 adj.deleted_at());
             store_.staged_transactions.insert_or_assign(
                 grouped_adjustment.id().value(), grouped_adjustment);
+            adjustment_ids.push_back(grouped_adjustment.id());
             store_.staged_balance_cache.erase(adj.account_id().value());
             store_.staged_deleted_balance_cache.push_back(
                 adj.account_id().value());
@@ -390,7 +395,8 @@ public:
         store_.staged_deleted_balance_cache.push_back(outgoing.account_id().value());
         store_.staged_deleted_balance_cache.push_back(incoming.account_id().value());
 
-        return domain::TransferPersistResult{assigned_group, out_id, in_id};
+        return domain::TransferPersistResult{
+            assigned_group, out_id, in_id, std::move(adjustment_ids)};
     }
 
     [[nodiscard]] domain::RepositoryResult<std::vector<domain::Transaction>> find_by_account(
@@ -467,38 +473,125 @@ public:
     find_transfer_by_group(
         domain::TransferGroupId group_id,
         domain::UserId user_id) override {
-        const InMemoryTransferGroup* group = nullptr;
-        if (store_.in_transaction) {
-            if (const auto found = store_.staged_transfer_groups.find(group_id.value());
-                found != store_.staged_transfer_groups.end()) {
-                group = &found->second;
+        return make_transfer_snapshot(group_id, user_id);
+    }
+
+    [[nodiscard]] domain::RepositoryResult<domain::TransferPageResult>
+    find_transfer_page(const domain::TransferPageQuery& query) override {
+        if (!query.user_id.is_valid() || query.limit == 0 || query.limit > 200) {
+            return std::unexpected(domain::RepositoryError::validation(
+                "Transfer page query is invalid"));
+        }
+        std::vector<domain::TransferSnapshot> candidates;
+        for (const auto& [id, group] : merged_transfer_groups()) {
+            if (group.user_id != query.user_id) continue;
+            auto snapshot = make_transfer_snapshot(
+                domain::TransferGroupId(id), query.user_id);
+            if (!snapshot) return std::unexpected(snapshot.error());
+            if (snapshot->deleted_at.has_value()) continue;
+            if (query.account_id.has_value()) {
+                const auto matches = std::any_of(
+                    snapshot->transactions.begin(),
+                    snapshot->transactions.end(),
+                    [&](const domain::Transaction& transaction) {
+                        return !transaction.is_deleted() &&
+                               transaction.account_id() == *query.account_id;
+                    });
+                if (!matches) continue;
             }
+            if (query.occurred_from.has_value() &&
+                snapshot->occurred_at < *query.occurred_from) continue;
+            if (query.occurred_to.has_value() &&
+                snapshot->occurred_at >= *query.occurred_to) continue;
+            if (query.before.has_value() &&
+                !(snapshot->occurred_at < query.before->occurred_at ||
+                  (snapshot->occurred_at == query.before->occurred_at &&
+                   snapshot->group_id < query.before->group_id))) continue;
+            candidates.push_back(std::move(*snapshot));
         }
-        if (group == nullptr) {
-            if (const auto found = store_.transfer_groups.find(group_id.value());
-                found != store_.transfer_groups.end()) {
-                group = &found->second;
+        std::sort(candidates.begin(), candidates.end(), [](const auto& lhs, const auto& rhs) {
+            if (lhs.occurred_at != rhs.occurred_at) {
+                return lhs.occurred_at > rhs.occurred_at;
             }
+            return lhs.group_id > rhs.group_id;
+        });
+        domain::TransferPageResult result;
+        result.has_more = candidates.size() > query.limit;
+        if (result.has_more) candidates.resize(query.limit);
+        result.items = std::move(candidates);
+        return result;
+    }
+
+    [[nodiscard]] domain::RepositoryResult<domain::TransferSnapshot>
+    find_transfer_by_group_for_update(
+        domain::ITransactionContext& /*tx*/,
+        domain::TransferGroupId group_id,
+        domain::UserId user_id) override {
+        if (!store_.in_transaction) {
+            return std::unexpected(domain::RepositoryError::database(
+                "find_transfer_by_group_for_update requires an active transaction"));
         }
-        if (group == nullptr || group->user_id != user_id) {
-            return std::unexpected(domain::RepositoryError::not_found(
-                "Transfer not found for user"));
+        return make_transfer_snapshot(group_id, user_id);
+    }
+
+    [[nodiscard]] domain::RepositoryVoidResult soft_delete_transfer(
+        domain::ITransactionContext& /*tx*/,
+        domain::TransferGroupId group_id,
+        domain::UserId user_id,
+        std::chrono::system_clock::time_point deleted_at) override {
+        if (!store_.in_transaction) {
+            return std::unexpected(domain::RepositoryError::database(
+                "soft_delete_transfer requires an active transaction"));
         }
-        domain::TransferSnapshot snapshot;
-        snapshot.group_id = group_id;
-        snapshot.user_id = user_id;
-        snapshot.transfer_mode = group->transfer_mode;
-        if (group->rate.has_value()) {
-            snapshot.exchange_rate = group->rate->rate();
+        auto snapshot = make_transfer_snapshot(group_id, user_id);
+        if (!snapshot) return std::unexpected(snapshot.error());
+        if (snapshot->deleted_at.has_value()) {
+            return std::unexpected(domain::RepositoryError::conflict(
+                "Transfer is already deleted"));
         }
-        for (const auto& [_, transaction] : merge_transactions()) {
-            if (transaction.transfer_group_id() ==
-                    std::optional<domain::TransferGroupId>(group_id) &&
-                !transaction.is_deleted()) {
-                snapshot.transactions.push_back(transaction);
+        for (const auto& transaction : snapshot->transactions) {
+            if (transaction.is_deleted()) {
+                return std::unexpected(domain::RepositoryError::database(
+                    "Transfer aggregate is partially deleted"));
             }
+            auto updated = transaction;
+            updated.mark_deleted(deleted_at);
+            store_.staged_transactions.insert_or_assign(
+                updated.id().value(), std::move(updated));
+            store_.staged_balance_cache.erase(transaction.account_id().value());
+            store_.staged_deleted_balance_cache.push_back(
+                transaction.account_id().value());
         }
-        return snapshot;
+        return {};
+    }
+
+    [[nodiscard]] domain::RepositoryResult<domain::TransferCorrectionPersistResult>
+    save_transfer_correction(
+        domain::ITransactionContext& tx,
+        domain::TransferGroupId original_group_id,
+        const domain::TransferAggregate& replacement,
+        std::chrono::system_clock::time_point corrected_at) override {
+        if (!store_.in_transaction) {
+            return std::unexpected(domain::RepositoryError::database(
+                "save_transfer_correction requires an active transaction"));
+        }
+        if (merged_transfer_corrections().contains(original_group_id.value())) {
+            return std::unexpected(domain::RepositoryError::conflict(
+                "Transfer is already corrected"));
+        }
+        auto persisted = save_transfer(tx, replacement);
+        if (!persisted) return std::unexpected(persisted.error());
+        auto deleted = soft_delete_transfer(
+            tx, original_group_id, replacement.outgoing().user_id(), corrected_at);
+        if (!deleted) return std::unexpected(deleted.error());
+        store_.staged_transfer_corrections.insert_or_assign(
+            original_group_id.value(),
+            InMemoryTransferCorrection{
+                replacement.outgoing().user_id(),
+                original_group_id,
+                persisted->group_id,
+                corrected_at});
+        return domain::TransferCorrectionPersistResult{std::move(*persisted)};
     }
 
     [[nodiscard]] domain::RepositoryVoidResult soft_delete(
@@ -629,6 +722,7 @@ public:
             }
         }
         for (const auto gid : group_ids) {
+            stage_transfer_correction_deletions_for(gid);
             store_.staged_transfer_groups.erase(gid);
             store_.staged_deleted_transfer_groups.push_back(gid);
         }
@@ -642,6 +736,100 @@ private:
                 std::tolower(static_cast<unsigned char>(raw)));
         });
         return value;
+    }
+
+    [[nodiscard]] std::map<std::int64_t, InMemoryTransferGroup>
+    merged_transfer_groups() const {
+        auto merged = store_.transfer_groups;
+        if (store_.in_transaction) {
+            for (const auto& [id, value] : store_.staged_transfer_groups) {
+                merged.insert_or_assign(id, value);
+            }
+            for (const auto id : store_.staged_deleted_transfer_groups) {
+                merged.erase(id);
+            }
+        }
+        return merged;
+    }
+
+    [[nodiscard]] std::map<std::int64_t, InMemoryTransferCorrection>
+    merged_transfer_corrections() const {
+        auto merged = store_.transfer_corrections;
+        if (store_.in_transaction) {
+            for (const auto& [id, value] : store_.staged_transfer_corrections) {
+                merged.insert_or_assign(id, value);
+            }
+            for (const auto id : store_.staged_deleted_transfer_corrections) {
+                merged.erase(id);
+            }
+        }
+        return merged;
+    }
+
+    [[nodiscard]] domain::RepositoryResult<domain::TransferSnapshot>
+    make_transfer_snapshot(
+        domain::TransferGroupId group_id,
+        domain::UserId user_id) const {
+        const auto groups = merged_transfer_groups();
+        const auto found = groups.find(group_id.value());
+        if (found == groups.end() || found->second.user_id != user_id) {
+            return std::unexpected(domain::RepositoryError::not_found(
+                "Transfer not found for user"));
+        }
+        domain::TransferSnapshot snapshot;
+        snapshot.group_id = group_id;
+        snapshot.user_id = user_id;
+        snapshot.transfer_mode = found->second.transfer_mode;
+        snapshot.note = found->second.note;
+        snapshot.created_at = found->second.created_at;
+        if (found->second.rate.has_value()) {
+            snapshot.exchange_rate = found->second.rate->rate();
+        }
+        bool all_deleted = true;
+        std::optional<std::chrono::system_clock::time_point> latest_deleted;
+        for (const auto& [_, transaction] : merge_transactions()) {
+            if (transaction.transfer_group_id() !=
+                std::optional<domain::TransferGroupId>(group_id)) continue;
+            snapshot.transactions.push_back(transaction);
+            if (snapshot.occurred_at.time_since_epoch().count() == 0 ||
+                transaction.occurred_at() < snapshot.occurred_at) {
+                snapshot.occurred_at = transaction.occurred_at();
+            }
+            if (!transaction.is_deleted()) {
+                all_deleted = false;
+            } else if (!latest_deleted.has_value() ||
+                       *transaction.deleted_at() > *latest_deleted) {
+                latest_deleted = transaction.deleted_at();
+            }
+        }
+        if (snapshot.transactions.empty()) {
+            return std::unexpected(domain::RepositoryError::database(
+                "Persisted transfer has no transactions"));
+        }
+        std::sort(
+            snapshot.transactions.begin(), snapshot.transactions.end(),
+            [](const auto& lhs, const auto& rhs) { return lhs.id() < rhs.id(); });
+        if (all_deleted) snapshot.deleted_at = latest_deleted;
+        for (const auto& [_, correction] : merged_transfer_corrections()) {
+            if (correction.original_group_id == group_id) {
+                snapshot.corrected_by_group_id = correction.replacement_group_id;
+            }
+            if (correction.replacement_group_id == group_id) {
+                snapshot.corrects_group_id = correction.original_group_id;
+            }
+        }
+        return snapshot;
+    }
+
+    void stage_transfer_correction_deletions_for(std::int64_t group_id) {
+        for (const auto& [original_id, correction] :
+             merged_transfer_corrections()) {
+            if (original_id == group_id ||
+                correction.replacement_group_id.value() == group_id) {
+                store_.staged_transfer_corrections.erase(original_id);
+                store_.staged_deleted_transfer_corrections.push_back(original_id);
+            }
+        }
     }
 
     [[nodiscard]] std::map<std::int64_t, domain::Category>

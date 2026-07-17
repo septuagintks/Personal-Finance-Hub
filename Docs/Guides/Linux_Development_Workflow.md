@@ -139,7 +139,7 @@ Production ON 必须实际执行：
 
 验收范围：
 
-- V1-V8、legacy upgrade 和种子数据。
+- V1-V9、legacy upgrade 和种子数据。
 - Unit of Work commit/rollback 与 Outbox 原子性。
 - FORCE RLS、两用户隔离和连接池复用。
 - Repository、并发锁、缓存和 NUMERIC 边界。

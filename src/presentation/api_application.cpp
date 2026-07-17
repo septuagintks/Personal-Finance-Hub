@@ -225,14 +225,28 @@ HttpResponse ApiApplication::handle(HttpRequest request) noexcept {
                 }
             }
         }
-        if (request.method == HttpMethod::Post &&
-            request.path == "/api/v1/transfers" && transfers_ != nullptr) {
-            return finalize(transfers_->create(request));
+        if (request.path == "/api/v1/transfers" && transfers_ != nullptr) {
+            if (request.method == HttpMethod::Get) {
+                return finalize(transfers_->list(request));
+            }
+            if (request.method == HttpMethod::Post) {
+                return finalize(transfers_->create(request));
+            }
         }
         if (transfers_ != nullptr) {
+            if (const auto id = route_id(
+                    request.path, "/api/v1/transfers/", "/correction");
+                id.has_value() && request.method == HttpMethod::Post) {
+                return finalize(transfers_->correct(request, *id));
+            }
             if (const auto id = route_id(request.path, "/api/v1/transfers/");
-                id.has_value() && request.method == HttpMethod::Get) {
-                return finalize(transfers_->get(request, *id));
+                id.has_value()) {
+                if (request.method == HttpMethod::Get) {
+                    return finalize(transfers_->get(request, *id));
+                }
+                if (request.method == HttpMethod::Delete) {
+                    return finalize(transfers_->remove(request, *id));
+                }
             }
         }
         if (reports_ != nullptr && request.method == HttpMethod::Get) {

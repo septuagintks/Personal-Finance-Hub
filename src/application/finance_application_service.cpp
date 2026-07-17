@@ -10,6 +10,9 @@
 #include "pfh/application/use_cases/delete_transaction_use_case.h"
 #include "pfh/application/use_cases/create_transfer_use_case.h"
 #include "pfh/application/use_cases/get_transfer_use_case.h"
+#include "pfh/application/use_cases/transfer_query_use_cases.h"
+#include "pfh/application/use_cases/correct_transfer_use_case.h"
+#include "pfh/application/use_cases/delete_transfer_use_case.h"
 #include "pfh/application/query/report_query_service.h"
 #include "pfh/application/use_cases/resource_use_cases.h"
 #include "pfh/application/use_cases/transaction_query_use_cases.h"
@@ -95,6 +98,18 @@ void append_optional_time(
     for (const auto tag_id : command.tag_ids) {
         append_canonical_field(result, tag_id.to_string());
     }
+    return result;
+}
+
+[[nodiscard]] std::string transfer_correction_fingerprint_input(
+    const CorrectTransferCommand& command) {
+    std::string result;
+    result.reserve(448 + command.replacement.description.size());
+    append_canonical_field(result, "correct_transfer:v1");
+    append_canonical_field(
+        result, command.original_transfer_group_id.to_string());
+    append_canonical_field(
+        result, transfer_fingerprint_input(command.replacement));
     return result;
 }
 
@@ -422,6 +437,45 @@ Result<TransferResultDto> FinanceApplicationService::get_transfer(
     auto scope = open_scope(user_id);
     if (!scope) return err(scope.error());
     return GetTransferUseCase((*scope)->transactions()).execute(user_id, group_id);
+}
+
+Result<CursorPage<TransferResultDto>> FinanceApplicationService::list_transfers(
+    const TransferListQuery& query) {
+    auto scope = open_scope(query.user_id);
+    if (!scope) return err(scope.error());
+    return ListTransfersUseCase((*scope)->transactions()).execute(query);
+}
+
+Result<TransferResultDto> FinanceApplicationService::correct_transfer(
+    const CorrectTransferCommand& command,
+    std::string_view idempotency_key) {
+    auto fingerprint = request_hasher_.sha256(
+        transfer_correction_fingerprint_input(command));
+    if (!fingerprint) return err(fingerprint.error());
+    auto scope = open_scope(command.replacement.user_id);
+    if (!scope) return err(scope.error());
+    return CorrectTransferUseCase(
+        (*scope)->accounts(),
+        (*scope)->transactions(),
+        (*scope)->audit_logs(),
+        (*scope)->unit_of_work(),
+        clock_,
+        &(*scope)->idempotency())
+        .execute(command, IdempotencyRequest{
+            std::string(idempotency_key), *fingerprint, clock_.now()});
+}
+
+VoidResult FinanceApplicationService::delete_transfer(
+    const DeleteTransferCommand& command) {
+    auto scope = open_scope(command.user_id);
+    if (!scope) return err(scope.error());
+    return DeleteTransferUseCase(
+        (*scope)->accounts(),
+        (*scope)->transactions(),
+        (*scope)->audit_logs(),
+        (*scope)->unit_of_work(),
+        clock_)
+        .execute(command);
 }
 
 Result<NetWorthDto> FinanceApplicationService::net_worth(

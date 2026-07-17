@@ -1431,6 +1431,33 @@ public:
         TransferGroupId group_id, UserId user_id) override {
         return delegate_.find_transfer_by_group(group_id, user_id);
     }
+    RepositoryResult<TransferPageResult> find_transfer_page(
+        const TransferPageQuery& query) override {
+        return delegate_.find_transfer_page(query);
+    }
+    RepositoryResult<TransferSnapshot> find_transfer_by_group_for_update(
+        ITransactionContext& tx,
+        TransferGroupId group_id,
+        UserId user_id) override {
+        return delegate_.find_transfer_by_group_for_update(
+            tx, group_id, user_id);
+    }
+    RepositoryVoidResult soft_delete_transfer(
+        ITransactionContext& tx,
+        TransferGroupId group_id,
+        UserId user_id,
+        std::chrono::system_clock::time_point deleted_at) override {
+        return delegate_.soft_delete_transfer(
+            tx, group_id, user_id, deleted_at);
+    }
+    RepositoryResult<TransferCorrectionPersistResult> save_transfer_correction(
+        ITransactionContext& tx,
+        TransferGroupId original_group_id,
+        const TransferAggregate& replacement,
+        std::chrono::system_clock::time_point corrected_at) override {
+        return delegate_.save_transfer_correction(
+            tx, original_group_id, replacement, corrected_at);
+    }
     RepositoryVoidResult soft_delete(
         ITransactionContext& tx, TransactionId id, UserId user_id,
         std::chrono::system_clock::time_point deleted_at) override {

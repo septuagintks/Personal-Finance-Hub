@@ -95,6 +95,13 @@ public:
     [[nodiscard]] Result<TransferResultDto> get_transfer(
         domain::UserId user_id,
         domain::TransferGroupId group_id);
+    [[nodiscard]] Result<CursorPage<TransferResultDto>> list_transfers(
+        const TransferListQuery& query);
+    [[nodiscard]] Result<TransferResultDto> correct_transfer(
+        const CorrectTransferCommand& command,
+        std::string_view idempotency_key);
+    [[nodiscard]] VoidResult delete_transfer(
+        const DeleteTransferCommand& command);
 
     [[nodiscard]] Result<NetWorthDto> net_worth(domain::UserId user_id);
     [[nodiscard]] Result<CashFlowTrendDto> cash_flow_trend(

@@ -7,6 +7,7 @@ import {
   LogOut,
   Menu,
   ReceiptText,
+  ArrowRightLeft,
   Settings2,
   WalletCards,
   X,
@@ -27,6 +28,7 @@ const navigation = computed(() =>
     { key: 'overview', to: '/dashboard', icon: LayoutDashboard },
     { key: 'accounts', to: '/accounts', icon: WalletCards },
     { key: 'transactions', to: '/transactions', icon: ReceiptText },
+    { key: 'transfers', to: '/transfers', icon: ArrowRightLeft },
     { key: 'reports', to: '/reports', icon: ChartNoAxesCombined, disabled: true },
     { key: 'settings', to: '/settings', icon: Settings2 },
   ].map((item) => ({
