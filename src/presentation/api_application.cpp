@@ -250,6 +250,9 @@ HttpResponse ApiApplication::handle(HttpRequest request) noexcept {
             }
         }
         if (reports_ != nullptr && request.method == HttpMethod::Get) {
+            if (request.path == "/api/v1/exports/transactions.csv") {
+                return finalize(reports_->export_transactions(request));
+            }
             if (request.path == "/api/v1/reports/net-worth") {
                 return finalize(reports_->net_worth(request));
             }
@@ -258,6 +261,9 @@ HttpResponse ApiApplication::handle(HttpRequest request) noexcept {
             }
             if (request.path == "/api/v1/reports/dashboard-summary") {
                 return finalize(reports_->dashboard_summary(request));
+            }
+            if (request.path == "/api/v1/reports/analysis") {
+                return finalize(reports_->analysis(request));
             }
         }
         return finalize(HttpResponseMapper::not_found(request.trace_id));

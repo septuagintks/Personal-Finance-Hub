@@ -2525,4 +2525,147 @@ TEST_F(UseCaseTest, TopExpenseCategories_RollUpToRootCategory) {
     EXPECT_EQ(dash->top_expense_categories[1].category_name, "Transport");
 }
 
+TEST_F(UseCaseTest, ReportAnalysisUsesHistoricalBalancesAndOverlappingTagDimension) {
+    const auto seeded = seed();
+    InMemoryTagRepository tags(*store_);
+    TagId recurring;
+    TagId essential;
+    auto tag_setup = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            auto first = tags.save(tx, Tag(TagId{}, seeded.user, "Recurring"));
+            if (!first) return std::unexpected(first.error());
+            recurring = *first;
+            auto second = tags.save(tx, Tag(TagId{}, seeded.user, "Essential"));
+            if (!second) return std::unexpected(second.error());
+            essential = *second;
+            return {};
+        });
+    ASSERT_TRUE(tag_setup.has_value()) << tag_setup.error().message;
+
+    const auto valuation_at = std::chrono::system_clock::now() +
+        std::chrono::hours(1);
+    const auto occurred_at = valuation_at - std::chrono::minutes(30);
+    CreateTransactionUseCase create(
+        *account_repo_, *category_repo_, *tx_repo_, *uow_, nullptr, &tags);
+    const auto post = [&](TransactionType type, std::string amount,
+                          std::vector<TagId> tag_ids) {
+        CreateTransactionCommand command;
+        command.user_id = seeded.user;
+        command.account_id = seeded.cash;
+        command.type = type;
+        command.amount = std::move(amount);
+        command.currency_code = "USD";
+        command.occurred_at = occurred_at;
+        command.tag_ids = std::move(tag_ids);
+        return create.execute(command);
+    };
+    ASSERT_TRUE(post(
+        TransactionType::Income, "100", {recurring, essential}).has_value());
+    ASSERT_TRUE(post(
+        TransactionType::Expense, "40", {recurring}).has_value());
+    ASSERT_TRUE(post(
+        TransactionType::Adjustment, "-5", {recurring}).has_value());
+
+    CreateTransferCommand transfer;
+    transfer.user_id = seeded.user;
+    transfer.source_account_id = seeded.cash;
+    transfer.target_account_id = seeded.savings;
+    transfer.mode = TransferInputMode::BothAmounts;
+    transfer.outgoing_amount = "20";
+    transfer.incoming_amount = "20";
+    transfer.occurred_at = occurred_at;
+    ASSERT_TRUE(CreateTransferUseCase(
+        *account_repo_, *tx_repo_, *uow_).execute(transfer).has_value());
+
+    const auto local_day = std::chrono::floor<std::chrono::days>(valuation_at);
+    const std::chrono::year_month_day date(local_day);
+    ReportQueryService reports(
+        *account_repo_, *tx_repo_, *rate_repo_, *pref_repo_,
+        category_repo_.get());
+    auto result = reports.analysis(ReportAnalysisQuery{
+        seeded.user,
+        static_cast<int>(date.year()),
+        static_cast<unsigned>(date.month()),
+        static_cast<int>(date.year()),
+        static_cast<unsigned>(date.month()),
+        ReportDimension::Tag}, valuation_at);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_TRUE(result->dimension_overlaps);
+    EXPECT_EQ(result->rate_status, ReportRateStatus::Current);
+    ASSERT_EQ(result->net_worth_trend.size(), 1U);
+    EXPECT_EQ(result->net_worth_trend.front().net_worth, "55");
+    ASSERT_EQ(result->breakdown.size(), 2U);
+    EXPECT_EQ(result->breakdown[0].label, "Recurring");
+    EXPECT_EQ(result->breakdown[0].income, "100");
+    EXPECT_EQ(result->breakdown[0].expense, "45");
+    EXPECT_EQ(result->breakdown[0].net, "55");
+    EXPECT_EQ(result->breakdown[1].label, "Essential");
+    EXPECT_EQ(result->breakdown[1].income, "100");
+    EXPECT_EQ(result->breakdown[1].expense, "0");
+}
+
+TEST_F(UseCaseTest, CsvExportUsesBusinessMagnitudeAndProtectsTextCells) {
+    const auto seeded = seed();
+    InMemoryTagRepository tags(*store_);
+    TagId tag_id;
+    CategoryId category_id;
+    auto metadata = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            auto saved_tag = tags.save(tx, Tag(TagId{}, seeded.user, "+review"));
+            if (!saved_tag) return std::unexpected(saved_tag.error());
+            tag_id = *saved_tag;
+            auto saved_category = category_repo_->save(
+                tx, Category(
+                    CategoryId{}, seeded.user, "@category",
+                    CategoryBoard::Expense));
+            if (!saved_category) return std::unexpected(saved_category.error());
+            category_id = *saved_category;
+            return {};
+        });
+    ASSERT_TRUE(metadata.has_value()) << metadata.error().message;
+
+    const auto occurred_at = std::chrono::system_clock::now();
+    CreateTransactionCommand command;
+    command.user_id = seeded.user;
+    command.account_id = seeded.cash;
+    command.type = TransactionType::Expense;
+    command.amount = "12.50";
+    command.currency_code = "USD";
+    command.description = " =SUM(1,\"2\")";
+    command.category_id = category_id;
+    command.occurred_at = occurred_at;
+    command.tag_ids = {tag_id};
+    ASSERT_TRUE(CreateTransactionUseCase(
+        *account_repo_, *category_repo_, *tx_repo_, *uow_, nullptr, &tags)
+        .execute(command).has_value());
+
+    ReportQueryService reports(
+        *account_repo_, *tx_repo_, *rate_repo_, *pref_repo_,
+        category_repo_.get());
+    TransactionListQuery query;
+    query.user_id = seeded.user;
+    query.occurred_from = occurred_at - std::chrono::hours(1);
+    query.occurred_to = occurred_at + std::chrono::hours(1);
+    auto exported = reports.export_transactions_csv(query);
+    ASSERT_TRUE(exported.has_value()) << exported.error().message;
+    EXPECT_EQ(exported->row_count, 1U);
+    ASSERT_GE(exported->content.size(), 3U);
+    EXPECT_EQ(
+        exported->content.substr(0, 3),
+        std::string("\xEF\xBB\xBF", 3));
+    EXPECT_NE(exported->content.find("\"12.5\""), std::string::npos);
+    EXPECT_NE(exported->content.find("\"'@category\""), std::string::npos);
+    EXPECT_NE(exported->content.find("\"'+review\""), std::string::npos);
+    EXPECT_NE(
+        exported->content.find("\"' =SUM(1,\"\"2\"\")\""),
+        std::string::npos);
+    EXPECT_NE(exported->content.find("\r\n"), std::string::npos);
+
+    query.occurred_from = occurred_at + std::chrono::hours(1);
+    query.occurred_to = query.occurred_from;
+    auto empty = reports.export_transactions_csv(query);
+    ASSERT_TRUE(empty.has_value()) << empty.error().message;
+    EXPECT_EQ(empty->row_count, 0U);
+}
+
 } // namespace pfh::test

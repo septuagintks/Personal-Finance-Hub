@@ -3,11 +3,15 @@
 #include "pfh/presentation/controllers/report_controller.h"
 
 #include "pfh/presentation/http/http_response_mapper.h"
+#include "pfh/presentation/http/json_request_parser.h"
 #include "pfh/presentation/http/time_codec.h"
 
 #include <nlohmann/json.hpp>
 
 #include <charconv>
+#include <cstdint>
+#include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -63,6 +67,67 @@ struct ParsedMonth {
         {"totalLiabilities", value.total_liabilities},
         {"netWorth", value.total},
         {"generatedAt", TimeCodec::format_rfc3339(value.generated_at)}};
+}
+
+[[nodiscard]] application::Result<application::ReportDimension> parse_dimension(
+    std::string_view value) {
+    if (value == "root_category") {
+        return application::ReportDimension::RootCategory;
+    }
+    if (value == "account") return application::ReportDimension::Account;
+    if (value == "tag") return application::ReportDimension::Tag;
+    return application::err(application::Error::validation(
+        "dimension must be root_category, account, or tag"));
+}
+
+[[nodiscard]] std::string dimension_text(
+    application::ReportDimension value) {
+    switch (value) {
+    case application::ReportDimension::RootCategory: return "root_category";
+    case application::ReportDimension::Account: return "account";
+    case application::ReportDimension::Tag: return "tag";
+    }
+    return "root_category";
+}
+
+[[nodiscard]] std::string rate_status_text(
+    application::ReportRateStatus value) {
+    return value == application::ReportRateStatus::Historical
+        ? "historical" : "current";
+}
+
+[[nodiscard]] application::Result<domain::TransactionType> parse_type(
+    const std::string& value) {
+    if (value == "income") return domain::TransactionType::Income;
+    if (value == "expense") return domain::TransactionType::Expense;
+    if (value == "transfer") return domain::TransactionType::Transfer;
+    if (value == "adjustment") return domain::TransactionType::Adjustment;
+    return application::err(application::Error::validation(
+        "type must be income, expense, transfer, or adjustment"));
+}
+
+template <typename TypedId>
+[[nodiscard]] application::Result<std::optional<TypedId>> optional_query_id(
+    const HttpRequest& request,
+    std::string_view name) {
+    const auto found = request.query.find(std::string(name));
+    if (found == request.query.end()) return std::optional<TypedId>{};
+    auto id = JsonRequestParser::path_id<TypedId>(found->second, name);
+    if (!id) return application::err(id.error());
+    return std::optional<TypedId>(*id);
+}
+
+[[nodiscard]] application::Result<std::optional<
+    std::chrono::system_clock::time_point>> optional_query_time(
+    const HttpRequest& request,
+    std::string_view name) {
+    const auto found = request.query.find(std::string(name));
+    if (found == request.query.end()) {
+        return std::optional<std::chrono::system_clock::time_point>{};
+    }
+    auto value = TimeCodec::parse_rfc3339(found->second);
+    if (!value) return application::err(value.error());
+    return std::optional<std::chrono::system_clock::time_point>(*value);
 }
 
 } // namespace
@@ -159,6 +224,135 @@ HttpResponse ReportController::dashboard_summary(const HttpRequest& request) {
         {"reportPeriodEnd", TimeCodec::format_rfc3339(
             result->report_period_end)},
         {"generatedAt", TimeCodec::format_rfc3339(result->generated_at)}});
+}
+
+HttpResponse ReportController::analysis(const HttpRequest& request) {
+    auto user = require_user(request);
+    if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
+    static const std::set<std::string> allowed{
+        "startDate", "endDate", "dimension"};
+    for (const auto& [name, _] : request.query) {
+        if (!allowed.contains(name)) {
+            return HttpResponseMapper::error(
+                application::Error::validation(
+                    "Unknown query parameter: " + name),
+                request.trace_id);
+        }
+    }
+    const auto start_value = request.query.find("startDate");
+    const auto end_value = request.query.find("endDate");
+    const auto dimension_value = request.query.find("dimension");
+    if (start_value == request.query.end() ||
+        end_value == request.query.end() ||
+        dimension_value == request.query.end()) {
+        return HttpResponseMapper::error(
+            application::Error::validation(
+                "startDate, endDate, and dimension are required"),
+            request.trace_id);
+    }
+    auto start = parse_month(start_value->second, "startDate");
+    auto end = parse_month(end_value->second, "endDate");
+    auto dimension = parse_dimension(dimension_value->second);
+    if (!start) return HttpResponseMapper::error(start.error(), request.trace_id);
+    if (!end) return HttpResponseMapper::error(end.error(), request.trace_id);
+    if (!dimension) {
+        return HttpResponseMapper::error(dimension.error(), request.trace_id);
+    }
+
+    auto result = service_.report_analysis(application::ReportAnalysisQuery{
+        *user, start->year, start->month, end->year, end->month, *dimension});
+    if (!result) return HttpResponseMapper::error(result.error(), request.trace_id);
+
+    nlohmann::json trend = nlohmann::json::array();
+    for (const auto& point : result->net_worth_trend) {
+        trend.push_back(nlohmann::json{
+            {"period", point.period},
+            {"totalAssets", point.total_assets},
+            {"totalLiabilities", point.total_liabilities},
+            {"netWorth", point.net_worth},
+            {"valuedAt", TimeCodec::format_rfc3339(point.valued_at)},
+            {"rateStatus", rate_status_text(point.rate_status)}});
+    }
+    nlohmann::json breakdown = nlohmann::json::array();
+    for (const auto& slice : result->breakdown) {
+        breakdown.push_back(nlohmann::json{
+            {"key", slice.key},
+            {"label", slice.label},
+            {"income", slice.income},
+            {"expense", slice.expense},
+            {"net", slice.net}});
+    }
+    return HttpResponseMapper::json(200, nlohmann::json{
+        {"baseCurrency", result->base_currency},
+        {"valuationAt", TimeCodec::format_rfc3339(result->valuation_at)},
+        {"rateStatus", rate_status_text(result->rate_status)},
+        {"reportPeriodStart", TimeCodec::format_rfc3339(
+            result->report_period_start)},
+        {"reportPeriodEnd", TimeCodec::format_rfc3339(
+            result->report_period_end)},
+        {"dimension", dimension_text(result->dimension)},
+        {"dimensionOverlaps", result->dimension_overlaps},
+        {"netWorthTrend", std::move(trend)},
+        {"breakdown", std::move(breakdown)}});
+}
+
+HttpResponse ReportController::export_transactions(const HttpRequest& request) {
+    auto user = require_user(request);
+    if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
+    static const std::set<std::string> allowed{
+        "accountId", "type", "categoryId", "tagId", "from", "to",
+        "keyword"};
+    for (const auto& [name, _] : request.query) {
+        if (!allowed.contains(name)) {
+            return HttpResponseMapper::error(
+                application::Error::validation(
+                    "Unknown query parameter: " + name),
+                request.trace_id);
+        }
+    }
+    auto account = optional_query_id<domain::AccountId>(request, "accountId");
+    auto category = optional_query_id<domain::CategoryId>(request, "categoryId");
+    auto tag = optional_query_id<domain::TagId>(request, "tagId");
+    auto from = optional_query_time(request, "from");
+    auto to = optional_query_time(request, "to");
+    if (!account) return HttpResponseMapper::error(account.error(), request.trace_id);
+    if (!category) return HttpResponseMapper::error(category.error(), request.trace_id);
+    if (!tag) return HttpResponseMapper::error(tag.error(), request.trace_id);
+    if (!from) return HttpResponseMapper::error(from.error(), request.trace_id);
+    if (!to) return HttpResponseMapper::error(to.error(), request.trace_id);
+
+    std::optional<domain::TransactionType> type;
+    if (const auto found = request.query.find("type");
+        found != request.query.end()) {
+        auto parsed = parse_type(found->second);
+        if (!parsed) return HttpResponseMapper::error(parsed.error(), request.trace_id);
+        type = *parsed;
+    }
+    application::TransactionListQuery query;
+    query.user_id = *user;
+    query.account_id = *account;
+    query.type = type;
+    query.category_id = *category;
+    query.tag_id = *tag;
+    query.occurred_from = *from;
+    query.occurred_to = *to;
+    if (const auto found = request.query.find("keyword");
+        found != request.query.end()) {
+        query.keyword = found->second;
+    }
+    auto result = service_.export_transactions_csv(query);
+    if (!result) return HttpResponseMapper::error(result.error(), request.trace_id);
+
+    HttpResponse response;
+    response.status = 200;
+    response.headers.emplace("Content-Type", "text/csv; charset=utf-8");
+    response.headers.emplace(
+        "Content-Disposition",
+        "attachment; filename=\"" + result->filename + "\"");
+    response.headers.emplace(
+        "X-Export-Row-Count", std::to_string(result->row_count));
+    response.body = std::move(result->content);
+    return response;
 }
 
 } // namespace pfh::presentation

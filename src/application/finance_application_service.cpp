@@ -522,4 +522,30 @@ Result<DashboardSummaryDto> FinanceApplicationService::dashboard_summary(
     return reports.dashboard_summary(user_id, clock_.now());
 }
 
+Result<ReportAnalysisDto> FinanceApplicationService::report_analysis(
+    const ReportAnalysisQuery& query) {
+    auto scope = open_scope(query.user_id);
+    if (!scope) return err(scope.error());
+    ReportQueryService reports(
+        (*scope)->accounts(),
+        (*scope)->transactions(),
+        (*scope)->exchange_rates(),
+        (*scope)->preferences(),
+        &(*scope)->categories());
+    return reports.analysis(query, clock_.now());
+}
+
+Result<CsvExportDto> FinanceApplicationService::export_transactions_csv(
+    const TransactionListQuery& query) {
+    auto scope = open_scope(query.user_id);
+    if (!scope) return err(scope.error());
+    ReportQueryService reports(
+        (*scope)->accounts(),
+        (*scope)->transactions(),
+        (*scope)->exchange_rates(),
+        (*scope)->preferences(),
+        &(*scope)->categories());
+    return reports.export_transactions_csv(query);
+}
+
 } // namespace pfh::application

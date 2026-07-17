@@ -73,7 +73,21 @@ private:
             if (after == history.begin()) {
                 return std::optional<domain::ExchangeRate>{};
             }
-            return std::optional<domain::ExchangeRate>{*std::prev(after)};
+            const auto selected = *std::prev(after);
+            if (selected.fetched_at() + std::chrono::hours(24) < at) {
+                used_historical_rate_ = true;
+            }
+            return std::optional<domain::ExchangeRate>{std::move(selected)};
+        }
+
+        void reset_evidence() noexcept {
+            used_historical_rate_ = false;
+        }
+
+        [[nodiscard]] ReportRateStatus rate_status() const noexcept {
+            return used_historical_rate_
+                ? ReportRateStatus::Historical
+                : ReportRateStatus::Current;
         }
 
     private:
@@ -83,6 +97,7 @@ private:
         std::map<
             std::pair<std::string, std::string>,
             std::vector<domain::ExchangeRate>> histories_;
+        bool used_historical_rate_ = false;
     };
 
     struct ConvertedTransaction {
@@ -367,6 +382,13 @@ public:
         }
         return result;
     }
+
+    [[nodiscard]] Result<ReportAnalysisDto> analysis(
+        const ReportAnalysisQuery& query,
+        TimePoint valuation_at = std::chrono::system_clock::now());
+
+    [[nodiscard]] Result<CsvExportDto> export_transactions_csv(
+        TransactionListQuery query);
 
 private:
     [[nodiscard]] static std::pair<TimePoint, TimePoint> transaction_time_bounds(

@@ -182,6 +182,10 @@ void DrogonHttpAdapter::configure() {
     register_static(
         "/api/v1/reports/dashboard-summary", HttpMethod::Get, drogon::Get);
     register_static(
+        "/api/v1/reports/analysis", HttpMethod::Get, drogon::Get);
+    register_static(
+        "/api/v1/exports/transactions.csv", HttpMethod::Get, drogon::Get);
+    register_static(
         "/api/v1/users/me/preferences", HttpMethod::Get, drogon::Get);
     register_static(
         "/api/v1/users/me/preferences", HttpMethod::Put, drogon::Put);

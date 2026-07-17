@@ -29,7 +29,7 @@ const navigation = computed(() =>
     { key: 'accounts', to: '/accounts', icon: WalletCards },
     { key: 'transactions', to: '/transactions', icon: ReceiptText },
     { key: 'transfers', to: '/transfers', icon: ArrowRightLeft },
-    { key: 'reports', to: '/reports', icon: ChartNoAxesCombined, disabled: true },
+    { key: 'reports', to: '/reports', icon: ChartNoAxesCombined },
     { key: 'settings', to: '/settings', icon: Settings2 },
   ].map((item) => ({
     ...item,
@@ -52,18 +52,14 @@ async function logout(): Promise<void> {
         <RouterLink
           v-for="item in navigation"
           :key="item.label"
-          :to="item.disabled ? route.fullPath : item.to"
+          :to="item.to"
           class="app-nav__item"
           :class="{
             'app-nav__item--active': route.path === item.to || route.path.startsWith(`${item.to}/`),
-            'app-nav__item--disabled': item.disabled,
           }"
-          :aria-disabled="item.disabled || undefined"
-          @click="item.disabled ? $event.preventDefault() : undefined"
         >
           <component :is="item.icon" :size="18" stroke-width="1.8" />
           <span>{{ item.label }}</span>
-          <span v-if="item.disabled" class="nav-soon">Soon</span>
         </RouterLink>
       </nav>
       <div class="sidebar-foot">
@@ -107,18 +103,15 @@ async function logout(): Promise<void> {
             <RouterLink
               v-for="item in navigation"
               :key="item.label"
-              :to="item.disabled ? route.fullPath : item.to"
+              :to="item.to"
               class="app-nav__item"
               :class="{
                 'app-nav__item--active':
                   route.path === item.to || route.path.startsWith(`${item.to}/`),
-                'app-nav__item--disabled': item.disabled,
               }"
-              :aria-disabled="item.disabled || undefined"
-              @click="item.disabled ? $event.preventDefault() : (menuOpen = false)"
+              @click="menuOpen = false"
             >
-              <component :is="item.icon" :size="18" /><span>{{ item.label }}</span
-              ><span v-if="item.disabled" class="nav-soon">Soon</span>
+              <component :is="item.icon" :size="18" /><span>{{ item.label }}</span>
             </RouterLink>
           </nav>
           <button class="button button--quiet button--full" type="button" @click="logout">

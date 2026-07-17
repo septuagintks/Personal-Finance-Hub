@@ -1716,6 +1716,257 @@ a {
   }
 }
 
+.summary-breakdown-list {
+  display: grid;
+  gap: 18px;
+  margin-top: 24px;
+}
+
+.summary-breakdown-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 14px;
+}
+
+.summary-breakdown-row > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.summary-breakdown-row strong,
+.summary-breakdown-row span,
+.dashboard-category-row strong,
+.dashboard-category-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.summary-breakdown-row strong,
+.dashboard-category-row strong {
+  font-size: 0.78rem;
+}
+
+.summary-breakdown-row span,
+.dashboard-category-row span,
+.dashboard-category-row small {
+  color: var(--color-ink-muted);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+}
+
+.summary-breakdown-track {
+  height: 5px;
+  grid-column: 1 / -1;
+  overflow: hidden;
+  background: var(--color-surface-muted);
+  border-radius: 3px;
+}
+
+.summary-breakdown-track span {
+  display: block;
+  height: 100%;
+  background: var(--color-teal);
+  border-radius: inherit;
+}
+
+.dashboard-category-panel {
+  margin-top: 16px;
+}
+
+.dashboard-category-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px 28px;
+  margin-top: 24px;
+}
+
+.dashboard-category-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px 14px;
+  margin-bottom: 8px;
+}
+
+.dashboard-category-row small {
+  grid-column: 1 / -1;
+}
+
+.report-header {
+  margin-bottom: 22px;
+}
+
+.report-toolbar {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(150px, 0.8fr) minmax(180px, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+  margin-bottom: 22px;
+  padding: 16px;
+  background: var(--color-surface);
+  border-block: 1px solid var(--color-line);
+}
+
+.report-toolbar .field {
+  min-width: 0;
+}
+
+.report-toolbar .field input,
+.report-toolbar .field select {
+  width: 100%;
+  min-height: 42px;
+}
+
+.report-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0 0 24px;
+  border-block: 1px solid var(--color-line);
+}
+
+.report-meta > div {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  padding: 14px 18px;
+  border-right: 1px solid var(--color-line);
+}
+
+.report-meta > div:last-child {
+  border-right: 0;
+}
+
+.report-meta dt {
+  color: var(--color-ink-muted);
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.report-meta dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.report-section {
+  padding: 24px 0 30px;
+  border-top: 1px solid var(--color-line);
+}
+
+.report-section + .report-section {
+  margin-top: 8px;
+}
+
+.report-chart {
+  width: 100%;
+  height: 320px;
+  margin-top: 18px;
+}
+
+.report-table-wrap {
+  margin-top: 18px;
+  border: 1px solid var(--color-line);
+  overflow-x: auto;
+}
+
+.report-table {
+  width: 100%;
+  min-width: 680px;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+
+.report-table th,
+.report-table td {
+  padding: 11px 13px;
+  text-align: right;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.report-table th:first-child,
+.report-table td:first-child {
+  text-align: left;
+}
+
+.report-table thead th {
+  color: var(--color-ink-muted);
+  background: var(--color-surface-muted);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+}
+
+.report-table tbody th {
+  max-width: 300px;
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.report-table tbody td {
+  font-family: var(--font-mono);
+}
+
+.report-table tbody tr:last-child th,
+.report-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.report-loading {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+
+@media (max-width: 900px) {
+  .report-toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .report-toolbar .button {
+    width: 100%;
+  }
+
+  .report-loading,
+  .dashboard-category-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 580px) {
+  .report-header {
+    align-items: stretch;
+  }
+
+  .report-header .button {
+    width: 100%;
+  }
+
+  .report-toolbar,
+  .report-meta {
+    grid-template-columns: 1fr;
+  }
+
+  .report-meta > div {
+    border-right: 0;
+    border-bottom: 1px solid var(--color-line);
+  }
+
+  .report-meta > div:last-child {
+    border-bottom: 0;
+  }
+
+  .report-chart {
+    height: 280px;
+  }
+}
+
 /* Transfer aggregate workflow */
 .transfer-filters {
   grid-template-columns: auto minmax(150px, 1fr) minmax(130px, 0.7fr) minmax(130px, 0.7fr) auto;

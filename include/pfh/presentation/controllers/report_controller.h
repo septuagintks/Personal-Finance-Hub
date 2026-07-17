@@ -15,6 +15,8 @@ public:
     [[nodiscard]] HttpResponse net_worth(const HttpRequest& request);
     [[nodiscard]] HttpResponse cash_flow(const HttpRequest& request);
     [[nodiscard]] HttpResponse dashboard_summary(const HttpRequest& request);
+    [[nodiscard]] HttpResponse analysis(const HttpRequest& request);
+    [[nodiscard]] HttpResponse export_transactions(const HttpRequest& request);
 
 private:
     application::FinanceApplicationService& service_;

@@ -23,6 +23,7 @@ Personal Finance Hub 是仓库、后端和 API 的工程名称；面向用户的
 - Candy's Ledger 账户列表、详情、余额、编辑、归档、恢复和危险删除。
 - Candy's Ledger 流水筛选、稳定分页、创建、历史详情、原子更正和软删除。
 - Candy's Ledger 转账聚合列表、三模式创建、历史详情、原子更正和软删除。
+- Candy's Ledger Dashboard、净资产趋势、分类/账户/标签维度和服务端 CSV 导出。
 
 金额与汇率不使用二进制浮点：金额使用 `NUMERIC(20,8)`，汇率使用 `NUMERIC(20,10)`，JSON 金额使用十进制字符串。
 
@@ -129,9 +130,9 @@ Docs/                 Architecture, plans, guides, standards and archive
 | PostgreSQL fixture | 12/12 scenarios PASS |
 | Flyway V1-V6 | migrate/info/validate/no-op PASS |
 | Docker | cold build、healthy、non-root、RLS、Outbox/Scheduler PASS |
-| Phase 2 S01-S02 Windows Debug/Release | 358/358 PASS |
-| Frontend contract/lint/typecheck/unit/build | PASS（28 tests） |
-| Frontend Edge Desktop/Mobile contract E2E + axe | 21/21 PASS |
+| Phase 2 S01-S09 Windows Debug | 375/375 PASS |
+| Frontend contract/lint/typecheck/unit/build | PASS（52 tests） |
+| Frontend Edge Desktop/Mobile contract E2E + axe | 29/29 PASS |
 
 ---
 

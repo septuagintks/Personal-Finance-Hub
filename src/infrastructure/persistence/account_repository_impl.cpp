@@ -305,6 +305,69 @@ AccountRepositoryImpl::balance_of(domain::AccountId id) {
         });
 }
 
+domain::RepositoryResult<std::vector<domain::AccountBalanceAt>>
+AccountRepositoryImpl::balances_at(
+    domain::UserId user_id,
+    std::chrono::system_clock::time_point as_of) {
+    if (user_id != tenant_user_id_) {
+        return std::unexpected(account_not_found());
+    }
+    return postgres::execute_tenant_read<std::vector<domain::AccountBalanceAt>>(
+        db_, tenant_user_id_, "read historical account balances",
+        [&](const auto& transaction) {
+            constexpr const char* kSql = R"SQL(
+                SELECT
+                    account.id, account.user_id, account.name,
+                    account.type::text, account.subtype,
+                    account.category::text, account.currency_code,
+                    account.description, account.is_archived,
+                    account.archived_at, account.created_at,
+                    account.updated_at, account.version,
+                    COALESCE(SUM(entry.amount), 0)::text
+                FROM accounts account
+                LEFT JOIN transactions entry
+                  ON entry.account_id = account.id
+                 AND entry.user_id = account.user_id
+                 AND entry.deleted_at IS NULL
+                 AND entry.transaction_time <= $2
+                WHERE account.user_id = $1
+                  AND (account.archived_at IS NULL OR account.archived_at > $2)
+                GROUP BY
+                    account.id, account.user_id, account.name, account.type,
+                    account.subtype, account.category, account.currency_code,
+                    account.description, account.is_archived,
+                    account.archived_at, account.created_at,
+                    account.updated_at, account.version
+                ORDER BY account.id
+            )SQL";
+            const auto rows = transaction->execSqlSync(
+                kSql, user_id.value(), pg::toDbTimestamp(as_of));
+            std::vector<domain::AccountBalanceAt> result;
+            result.reserve(rows.size());
+            for (const auto& row : rows) {
+                auto account = map_account_row(row);
+                if (!account) {
+                    return domain::RepositoryResult<
+                        std::vector<domain::AccountBalanceAt>>(
+                        std::unexpected(account.error()));
+                }
+                auto amount = domain::Decimal::parse_numeric_20_8(
+                    pg::getNumericAsString(row, 13));
+                if (!amount) {
+                    return domain::RepositoryResult<
+                        std::vector<domain::AccountBalanceAt>>(
+                        std::unexpected(domain::RepositoryError::database(
+                            "Historical account balance is invalid")));
+                }
+                result.push_back(domain::AccountBalanceAt{
+                    *account,
+                    domain::Money(*amount, account->currency())});
+            }
+            return domain::RepositoryResult<
+                std::vector<domain::AccountBalanceAt>>(std::move(result));
+        });
+}
+
 domain::RepositoryResult<domain::AccountId> AccountRepositoryImpl::save(
     domain::ITransactionContext& tx_iface,
     const domain::Account& account) {

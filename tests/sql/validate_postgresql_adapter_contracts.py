@@ -257,6 +257,14 @@ def main() -> int:
         failures,
     )
     require(
+        "AccountRepositoryImpl::balances_at" in account
+        and "entry.transaction_time <= $2" in account
+        and "COALESCE(SUM(entry.amount), 0)::text" in account
+        and "account.archived_at > $2" in account,
+        "S09 historical balances must use tenant-scoped signed SQL aggregation",
+        failures,
+    )
+    require(
         "find_by_id_for_user_for_update" in tag
         and "AND deleted_at IS NULL FOR UPDATE NOWAIT" in tag,
         "Tag delete audit snapshot must be locked in the active transaction",

@@ -12,6 +12,11 @@
 
 namespace pfh::domain {
 
+struct AccountBalanceAt {
+    Account account;
+    Money balance;
+};
+
 class IAccountRepository {
 public:
     virtual ~IAccountRepository() = default;
@@ -53,6 +58,16 @@ public:
 
     /// @brief Return balance snapshot. Implementation owns cache hit/miss/rebuild.
     [[nodiscard]] virtual RepositoryResult<BalanceSnapshot> balance_of(AccountId id) = 0;
+
+    /// @brief Return tenant-owned account balances at an inclusive historical
+    /// valuation instant. Account created_at is record metadata, not a business
+    /// opening date, so backdated entries remain visible. Accounts archived
+    /// at/before the instant are excluded; active transactions with
+    /// occurred_at <= as_of are summed using their persisted signed amount.
+    [[nodiscard]] virtual RepositoryResult<std::vector<AccountBalanceAt>>
+    balances_at(
+        UserId user_id,
+        std::chrono::system_clock::time_point as_of) = 0;
 
     /// @brief Insert or update. Optimistic lock: update requires matching version.
     [[nodiscard]] virtual RepositoryResult<AccountId> save(

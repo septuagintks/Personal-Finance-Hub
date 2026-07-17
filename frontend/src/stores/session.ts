@@ -34,6 +34,7 @@ const availableHomeRoutes: Record<string, string> = {
   dashboard: '/dashboard',
   accounts: '/accounts',
   transactions: '/transactions',
+  reports: '/reports',
 };
 
 installRefreshHandler();

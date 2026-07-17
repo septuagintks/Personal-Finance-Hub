@@ -1518,11 +1518,13 @@ TEST_F(ResourceApiTest, ReportApiUsesUserTimezoneMonthWindowsAndRootCategories) 
 
     const auto post_transaction = [&](std::string type, std::string amount,
                                       std::string occurred_at,
-                                      std::optional<std::int64_t> category) {
+                                      std::optional<std::int64_t> category,
+                                      std::string description) {
         nlohmann::json body{
             {"accountId", account_id}, {"type", std::move(type)},
             {"amount", std::move(amount)}, {"currencyCode", "CNY"},
-            {"occurredAt", std::move(occurred_at)}};
+            {"occurredAt", std::move(occurred_at)},
+            {"description", std::move(description)}};
         if (category.has_value()) body["categoryId"] = *category;
         const auto response = request(
             HttpMethod::Post, "/api/v1/transactions", body, token);
@@ -1530,9 +1532,15 @@ TEST_F(ResourceApiTest, ReportApiUsesUserTimezoneMonthWindowsAndRootCategories) 
     };
     // Local Shanghai month boundary: these are one second apart but belong to
     // June and July respectively.
-    post_transaction("income", "100", "2026-06-30T23:59:59+08:00", std::nullopt);
-    post_transaction("income", "200", "2026-07-01T00:00:00+08:00", std::nullopt);
-    post_transaction("expense", "50", "2026-07-10T12:00:00+08:00", child_id);
+    post_transaction(
+        "income", "100", "2026-06-30T23:59:59+08:00",
+        std::nullopt, "June income");
+    post_transaction(
+        "income", "200", "2026-07-01T00:00:00+08:00",
+        std::nullopt, "=SUM(1,2)");
+    post_transaction(
+        "expense", "50", "2026-07-10T12:00:00+08:00",
+        child_id, "Dining");
 
     const auto cash_flow = request(
         HttpMethod::Get, "/api/v1/reports/cash-flow", {}, token,
@@ -1560,6 +1568,40 @@ TEST_F(ResourceApiTest, ReportApiUsesUserTimezoneMonthWindowsAndRootCategories) 
     ASSERT_EQ(dashboard_body["topExpenseCategories"].size(), 1U);
     EXPECT_EQ(dashboard_body["topExpenseCategories"][0]["categoryId"], root_id);
     EXPECT_EQ(dashboard_body["topExpenseCategories"][0]["categoryName"], "Food Report");
+
+    const auto analysis = request(
+        HttpMethod::Get, "/api/v1/reports/analysis", {}, token,
+        {{"startDate", "2026-06"}, {"endDate", "2026-07"},
+         {"dimension", "root_category"}});
+    ASSERT_EQ(analysis.status, 200) << analysis.body;
+    const auto analysis_body = nlohmann::json::parse(analysis.body);
+    EXPECT_EQ(analysis_body["baseCurrency"], "CNY");
+    EXPECT_EQ(analysis_body["rateStatus"], "historical");
+    EXPECT_EQ(analysis_body["dimension"], "root_category");
+    EXPECT_FALSE(analysis_body["dimensionOverlaps"].get<bool>());
+    ASSERT_EQ(analysis_body["netWorthTrend"].size(), 2U);
+    EXPECT_EQ(analysis_body["netWorthTrend"][0]["netWorth"], "100");
+    EXPECT_EQ(analysis_body["netWorthTrend"][1]["netWorth"], "250");
+    const auto& breakdown = analysis_body["breakdown"];
+    ASSERT_EQ(breakdown.size(), 2U);
+    EXPECT_EQ(breakdown[0]["label"], "Food Report");
+    EXPECT_EQ(breakdown[0]["expense"], "50");
+    EXPECT_EQ(breakdown[1]["label"], "Uncategorized");
+    EXPECT_EQ(breakdown[1]["income"], "300");
+
+    const auto exported = request(
+        HttpMethod::Get, "/api/v1/exports/transactions.csv", {}, token,
+        {{"from", "2026-06-01T00:00:00+08:00"},
+         {"to", "2026-08-01T00:00:00+08:00"}});
+    ASSERT_EQ(exported.status, 200) << exported.body;
+    EXPECT_EQ(exported.headers.at("Content-Type"), "text/csv; charset=utf-8");
+    EXPECT_EQ(exported.headers.at("X-Export-Row-Count"), "3");
+    EXPECT_NE(
+        exported.headers.at("Content-Disposition").find("transactions-20260601-20260731.csv"),
+        std::string::npos);
+    EXPECT_NE(exported.body.find("\"2026-07-01T00:00:00+08:00\""), std::string::npos);
+    EXPECT_NE(exported.body.find("\"'=SUM(1,2)\""), std::string::npos);
+    EXPECT_NE(exported.body.find("\"50\""), std::string::npos);
 
     ASSERT_EQ(request(
         HttpMethod::Delete,
@@ -1623,6 +1665,32 @@ TEST_F(ResourceApiTest, EmptyReportDoesNotLeakAnotherUsersFinancialData) {
         HttpMethod::Get, "/api/v1/reports/net-worth", {}, bob_token);
     ASSERT_EQ(bob_net_worth.status, 200) << bob_net_worth.body;
     EXPECT_EQ(nlohmann::json::parse(bob_net_worth.body)["netWorth"], "0");
+
+    const auto bob_analysis = request(
+        HttpMethod::Get, "/api/v1/reports/analysis", {}, bob_token,
+        {{"startDate", "2026-07"}, {"endDate", "2026-07"},
+         {"dimension", "account"}});
+    ASSERT_EQ(bob_analysis.status, 200) << bob_analysis.body;
+    const auto bob_report = nlohmann::json::parse(bob_analysis.body);
+    ASSERT_EQ(bob_report["netWorthTrend"].size(), 1U);
+    EXPECT_EQ(bob_report["netWorthTrend"][0]["netWorth"], "0");
+    EXPECT_TRUE(bob_report["breakdown"].empty());
+
+    const std::map<std::string, std::string> export_range{
+        {"from", "2026-07-01T00:00:00+08:00"},
+        {"to", "2026-08-01T00:00:00+08:00"}};
+    const auto alice_export = request(
+        HttpMethod::Get, "/api/v1/exports/transactions.csv", {},
+        alice_token, export_range);
+    const auto bob_export = request(
+        HttpMethod::Get, "/api/v1/exports/transactions.csv", {},
+        bob_token, export_range);
+    ASSERT_EQ(alice_export.status, 200) << alice_export.body;
+    ASSERT_EQ(bob_export.status, 200) << bob_export.body;
+    EXPECT_EQ(alice_export.headers.at("X-Export-Row-Count"), "1");
+    EXPECT_EQ(bob_export.headers.at("X-Export-Row-Count"), "0");
+    EXPECT_NE(alice_export.body.find("\"99\""), std::string::npos);
+    EXPECT_EQ(bob_export.body.find("\"99\""), std::string::npos);
 }
 
 } // namespace pfh::test

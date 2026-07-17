@@ -354,9 +354,28 @@ PostgreSQL `TIMESTAMPTZ` 的 6 位微秒精度。所有响应时间规范化为 
 
 ---
 
-### 4.4 分类、标签、用户偏好与货币接口
+### 4.4 净资产趋势与维度分析
 
-### 4.5 获取分类树
+- **HTTP 方法**：`GET`
+- **路径**：`/api/v1/reports/analysis`
+- **请求参数**：`?startDate=2026-01&endDate=2026-07&dimension=root_category`
+- `dimension` 可取 `root_category`、`account` 或 `tag`；范围最多 120 个月且不得位于未来。
+- 响应包含 `baseCurrency`、`valuationAt`、`rateStatus`、服务端报表窗口、月度 `netWorthTrend` 和所选 `breakdown`。标签维度可重叠，由 `dimensionOverlaps` 明示。
+- 任何必要汇率不可用时返回 `422`，不返回部分趋势或 breakdown。
+
+### 4.5 流水 CSV 导出
+
+- **HTTP 方法**：`GET`
+- **路径**：`/api/v1/exports/transactions.csv`
+- **请求参数**：`from`、`to` 必填；可选 `accountId`、`type`、`categoryId`、`tagId` 与 `keyword`。
+- 时间范围为半开窗口且最长 366 天；超过 10,000 行返回 `400`，要求缩小范围。
+- 成功响应为 `text/csv; charset=utf-8`，并返回 `Content-Disposition` 与 `X-Export-Row-Count`。时间按用户时区输出，文本字段执行公式注入防护，金额使用服务端 Decimal 字符串。
+
+---
+
+### 4.6 分类、标签、用户偏好与货币接口
+
+### 4.7 获取分类树
 
 - **HTTP 方法**：`GET`
 - **路径**：`/api/v1/categories`
@@ -385,7 +404,7 @@ PostgreSQL `TIMESTAMPTZ` 的 6 位微秒精度。所有响应时间规范化为 
 ]
 ```
 
-### 4.6 新增或启用分类
+### 4.8 新增或启用分类
 
 - **HTTP 方法**：`POST`
 - **路径**：`/api/v1/categories`
@@ -401,7 +420,7 @@ PostgreSQL `TIMESTAMPTZ` 的 6 位微秒精度。所有响应时间规范化为 
 
 如果 `templateId` 不为空，表示从 `system_category_templates` 启用预设分类。
 
-### 4.7 删除分类
+### 4.9 删除分类
 
 - **HTTP 方法**：`DELETE`
 - **路径**：`/api/v1/categories/{id}`
@@ -409,7 +428,7 @@ PostgreSQL `TIMESTAMPTZ` 的 6 位微秒精度。所有响应时间规范化为 
 
 删除分类使用软删除，历史流水保持引用。
 
-### 4.8 标签接口
+### 4.10 标签接口
 
 ```text
 GET    /api/v1/tags
@@ -430,7 +449,7 @@ Each transaction accepts at most 64 unique tag IDs.
 
 Tag 不参与余额计算，只用于过滤、搜索和报表维度扩展。
 
-### 4.9 用户偏好接口
+### 4.11 用户偏好接口
 
 ```text
 GET /api/v1/users/me/preferences
@@ -456,7 +475,7 @@ PUT /api/v1/users/me/preferences
 字符，只接受由单个 `-` 分隔的 ASCII 字母数字段（例如 `zh-CN`、`en-US`）。
 Application 层必须重复执行同一校验，不能只依赖 JSON Schema。
 
-### 4.10 货币元数据接口
+### 4.12 货币元数据接口
 
 - **HTTP 方法**：`GET`
 - **路径**：`/api/v1/currencies`
@@ -492,7 +511,7 @@ Application 层必须重复执行同一校验，不能只依赖 JSON Schema。
 
 ---
 
-### 4.11 OpenAPI / JSON Schema Contract
+### 4.13 OpenAPI / JSON Schema Contract
 
 当前可执行契约见 [`10_REST_API_OpenAPI.json`](10_REST_API_OpenAPI.json)，采用 OpenAPI 3.1。路由、HTTP 方法、唯一 `operationId`、金额 Schema、Web Cookie 安全方案和 Drogon adapter 注册表由静态门禁逐次比较；前端 DTO 从该文件生成。
 以下规则是 JSON Schema 的全局约束：

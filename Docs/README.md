@@ -38,7 +38,8 @@ Docs/
 │   ├── Phase_2_S05_Delivery_Summary.md
 │   ├── Phase_2_S06_Delivery_Summary.md
 │   ├── Phase_2_S07_Delivery_Summary.md
-│   └── Phase_2_S08_Delivery_Summary.md
+│   ├── Phase_2_S08_Delivery_Summary.md
+│   └── Phase_2_S09_Delivery_Summary.md
 ├── Guides/
 │   ├── Database_Migration_Guide.md
 │   ├── Dependency_Installation_Guide.md
@@ -93,7 +94,7 @@ Phase 1 后端基线已经完成并通过：
 - FreeCurrencyAPI 主源、exchangerate.fun 整批备用和历史降级。
 - Ubuntu 24.04 Docker 冷构建、non-root、双角色、FORCE RLS、Outbox/Scheduler 与优雅停止。
 
-Phase 2 当前分支已完成 S01-S08 的本机实现与契约验收。现有 Web 覆盖认证、账户、分类、标签、偏好、日常流水及 Transfer 聚合工作流；数据库迁移已演进到 V9。真实 Drogon/PostgreSQL、Linux/Docker、100,000 行基准和三浏览器结果按 Phase 2 交付矩阵保留到目标环境验收。Phase 3 保留给账单导入与支付平台生态。
+Phase 2 当前分支已完成 S01-S09 的本机实现与契约验收。现有 Web 覆盖认证、账户、分类、标签、偏好、日常流水、Transfer 聚合、Dashboard、维度报表与 CSV 导出；数据库迁移已演进到 V9。真实 Drogon/PostgreSQL、Linux/Docker、100,000 行基准和三浏览器结果按 Phase 2 交付矩阵保留到目标环境验收。Phase 3 保留给账单导入与支付平台生态。
 
 汇率实时能力当前覆盖 20 种法币与 BTC。其他 12 种加密货币没有实时保证，系统会返回完整历史降级或明确不可用；完整加密货币定价不在当前计划内。
 

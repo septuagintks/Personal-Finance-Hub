@@ -108,6 +108,10 @@ public:
         const CashFlowTrendQuery& query);
     [[nodiscard]] Result<DashboardSummaryDto> dashboard_summary(
         domain::UserId user_id);
+    [[nodiscard]] Result<ReportAnalysisDto> report_analysis(
+        const ReportAnalysisQuery& query);
+    [[nodiscard]] Result<CsvExportDto> export_transactions_csv(
+        const TransactionListQuery& query);
 
 private:
     [[nodiscard]] Result<std::unique_ptr<IRequestScope>> open_scope(

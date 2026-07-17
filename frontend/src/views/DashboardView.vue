@@ -32,6 +32,18 @@ const movementBars = computed(() => {
   ];
 });
 
+const assetRows = computed(() => {
+  const slices = summary.value?.assetDistribution ?? [];
+  const ratios = toChartRatios(slices.map(({ amount }) => amount));
+  return slices.map((slice, index) => ({ ...slice, width: Math.max(2, ratios[index] * 100) }));
+});
+
+const categoryRows = computed(() => {
+  const slices = summary.value?.topExpenseCategories ?? [];
+  const ratios = toChartRatios(slices.map(({ amount }) => amount));
+  return slices.map((slice, index) => ({ ...slice, width: Math.max(2, ratios[index] * 100) }));
+});
+
 function formatNumber(value: string | undefined): string {
   if (!value) return '—';
   return formatDecimalString(value, userContext.preference?.locale ?? 'en-US');
@@ -171,30 +183,47 @@ onBeforeUnmount(() => requestController?.abort());
       <article class="panel">
         <div class="panel-heading">
           <div>
-            <p class="section-kicker">Next step</p>
-            <h2>Make the ledger yours</h2>
+            <p class="section-kicker">Accounts</p>
+            <h2>Asset distribution</h2>
           </div>
         </div>
-        <div class="setup-list">
-          <div class="setup-row setup-row--done">
-            <span>01</span>
-            <div><strong>Secure session</strong><small>Protected and memory-only</small></div>
-            <span class="setup-check">Done</span>
-          </div>
-          <RouterLink class="setup-row setup-row--link" :to="{ name: 'accounts' }">
-            <span>02</span>
+        <div v-if="assetRows.length" class="summary-breakdown-list">
+          <div v-for="slice in assetRows" :key="slice.label" class="summary-breakdown-row">
             <div>
-              <strong>Add an account</strong><small>Connect your first place for money</small>
+              <strong>{{ slice.label }}</strong>
+              <span>{{ formatNumber(slice.amount) }} {{ summary?.baseCurrency }}</span>
             </div>
-            <span class="setup-arrow">→</span>
-          </RouterLink>
-          <div class="setup-row">
-            <span>03</span>
-            <div><strong>Record movement</strong><small>Keep the details exact</small></div>
-            <span class="setup-arrow">→</span>
+            <span>{{ slice.percentage }}</span>
+            <div class="summary-breakdown-track" aria-hidden="true">
+              <span :style="{ width: `${slice.width}%` }"></span>
+            </div>
           </div>
         </div>
+        <div v-else class="empty-state"><p>No account distribution yet.</p></div>
       </article>
+    </section>
+
+    <section class="panel dashboard-category-panel" aria-labelledby="top-categories-title">
+      <div class="panel-heading">
+        <div>
+          <p class="section-kicker">Spending</p>
+          <h2 id="top-categories-title">Top expense categories</h2>
+        </div>
+        <RouterLink class="text-link" :to="{ name: 'reports' }">Open reports</RouterLink>
+      </div>
+      <div v-if="categoryRows.length" class="dashboard-category-grid">
+        <div v-for="category in categoryRows" :key="category.categoryId ?? 'uncategorized'">
+          <div class="dashboard-category-row">
+            <strong>{{ category.categoryName || 'Uncategorized' }}</strong>
+            <span>{{ formatNumber(category.amount) }} {{ summary?.baseCurrency }}</span>
+            <small>{{ category.percentage }}</small>
+          </div>
+          <div class="summary-breakdown-track" aria-hidden="true">
+            <span :style="{ width: `${category.width}%` }"></span>
+          </div>
+        </div>
+      </div>
+      <div v-else class="empty-state"><p>No expenses this month.</p></div>
     </section>
 
     <section class="dashboard-footnote">

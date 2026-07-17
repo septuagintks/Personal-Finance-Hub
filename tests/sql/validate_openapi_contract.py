@@ -43,6 +43,8 @@ EXPECTED = {
     "/api/v1/reports/net-worth": {"get"},
     "/api/v1/reports/cash-flow": {"get"},
     "/api/v1/reports/dashboard-summary": {"get"},
+    "/api/v1/reports/analysis": {"get"},
+    "/api/v1/exports/transactions.csv": {"get"},
 }
 
 ADAPTER_EXPECTED = {
@@ -288,7 +290,8 @@ def main() -> int:
         generated_text = ""
     for marker in (
         "registerWebUser", "refreshWebSession", "Idempotency-Key",
-        "field_errors", "CursorPageMetadata",
+        "field_errors", "CursorPageMetadata", "getReportAnalysis",
+        "exportTransactionsCsv",
     ):
         if marker not in generated_text:
             failures.append(f"Generated frontend API types are missing {marker}")

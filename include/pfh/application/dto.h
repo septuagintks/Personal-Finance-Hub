@@ -421,6 +421,61 @@ struct DashboardSummaryDto {
     std::chrono::system_clock::time_point generated_at{};
 };
 
+enum class ReportDimension {
+    RootCategory,
+    Account,
+    Tag
+};
+
+enum class ReportRateStatus {
+    Current,
+    Historical
+};
+
+struct ReportAnalysisQuery {
+    domain::UserId user_id;
+    int start_year = 0;
+    unsigned start_month = 0;
+    int end_year = 0;
+    unsigned end_month = 0;
+    ReportDimension dimension = ReportDimension::RootCategory;
+};
+
+struct NetWorthTrendPointDto {
+    std::string period;
+    std::string total_assets;
+    std::string total_liabilities;
+    std::string net_worth;
+    std::chrono::system_clock::time_point valued_at{};
+    ReportRateStatus rate_status = ReportRateStatus::Current;
+};
+
+struct ReportBreakdownSliceDto {
+    std::string key;
+    std::string label;
+    std::string income;
+    std::string expense;
+    std::string net;
+};
+
+struct ReportAnalysisDto {
+    std::string base_currency;
+    std::chrono::system_clock::time_point valuation_at{};
+    ReportRateStatus rate_status = ReportRateStatus::Current;
+    std::chrono::system_clock::time_point report_period_start{};
+    std::chrono::system_clock::time_point report_period_end{};
+    ReportDimension dimension = ReportDimension::RootCategory;
+    bool dimension_overlaps = false;
+    std::vector<NetWorthTrendPointDto> net_worth_trend;
+    std::vector<ReportBreakdownSliceDto> breakdown;
+};
+
+struct CsvExportDto {
+    std::string filename;
+    std::string content;
+    std::size_t row_count = 0;
+};
+
 struct RefreshExchangeRatesCommand {
     // Optional target currencies; empty => use active account currencies.
     std::vector<std::string> target_currency_codes;

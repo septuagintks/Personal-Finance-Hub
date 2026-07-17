@@ -223,6 +223,36 @@ public:
         return *snapshot;
     }
 
+    [[nodiscard]] domain::RepositoryResult<std::vector<domain::AccountBalanceAt>>
+    balances_at(
+        domain::UserId user_id,
+        std::chrono::system_clock::time_point as_of) override {
+        auto accounts = find_by_user(user_id, std::nullopt);
+        if (!accounts) return std::unexpected(accounts.error());
+
+        std::vector<domain::AccountBalanceAt> result;
+        result.reserve(accounts->size());
+        for (const auto& account : *accounts) {
+            if (account.archived_at().has_value() &&
+                *account.archived_at() <= as_of) {
+                continue;
+            }
+            auto transactions = transaction_repo_.find_by_account(
+                account.id(), std::nullopt, std::nullopt, false);
+            if (!transactions) return std::unexpected(transactions.error());
+            auto balance = domain::BalanceCalculationService::calculate_balance_at(
+                account.id(), *transactions, account.currency(), as_of);
+            if (!balance) {
+                return std::unexpected(domain::RepositoryError::database(
+                    "Historical balance calculation failed: " +
+                    balance.error().message));
+            }
+            result.push_back(domain::AccountBalanceAt{
+                account, std::move(balance->balance)});
+        }
+        return result;
+    }
+
     [[nodiscard]] domain::RepositoryResult<domain::AccountId> save(
         domain::ITransactionContext& /*tx*/,
         const domain::Account& account) override {
