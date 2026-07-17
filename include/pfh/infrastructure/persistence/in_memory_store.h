@@ -109,6 +109,13 @@ struct InMemoryJobLeaseRecord {
     std::chrono::system_clock::time_point updated_at{};
 };
 
+struct InMemoryTransactionCorrection {
+    domain::UserId user_id;
+    domain::TransactionId original_transaction_id;
+    domain::TransactionId replacement_transaction_id;
+    std::chrono::system_clock::time_point corrected_at{};
+};
+
 struct InMemoryIdempotencyRecord {
     domain::UserId user_id;
     std::string operation;
@@ -146,6 +153,7 @@ struct InMemoryStore {
     std::map<std::int64_t, domain::Tag> tags;
     std::map<std::int64_t, std::set<std::int64_t>> transaction_tag_relations;
     std::map<std::int64_t, InMemoryTransferGroup> transfer_groups;
+    std::map<std::int64_t, InMemoryTransactionCorrection> transaction_corrections;
     std::map<std::int64_t, InMemoryBalanceCache> balance_cache;
     // Append-only: key is exchange_rate id, order of insertion preserved by map id.
     std::map<std::int64_t, domain::ExchangeRate> exchange_rates;
@@ -174,6 +182,8 @@ struct InMemoryStore {
     std::map<std::int64_t, domain::Tag> staged_tags;
     std::map<std::int64_t, std::set<std::int64_t>> staged_transaction_tag_relations;
     std::map<std::int64_t, InMemoryTransferGroup> staged_transfer_groups;
+    std::map<std::int64_t, InMemoryTransactionCorrection>
+        staged_transaction_corrections;
     std::map<std::int64_t, InMemoryBalanceCache> staged_balance_cache;
     std::map<std::int64_t, domain::ExchangeRate> staged_exchange_rates;
     std::vector<OutboxRecord> staged_outbox;
@@ -187,6 +197,7 @@ struct InMemoryStore {
     std::vector<std::int64_t> staged_deleted_transactions;
     std::vector<std::int64_t> staged_deleted_balance_cache;
     std::vector<std::int64_t> staged_deleted_transfer_groups;
+    std::vector<std::int64_t> staged_deleted_transaction_corrections;
     std::vector<std::int64_t> staged_deleted_categories;
     std::vector<std::int64_t> staged_deleted_tags;
 };

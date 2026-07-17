@@ -27,6 +27,14 @@ public:
     [[nodiscard]] domain::RepositoryResult<domain::Transaction> find_by_id(
         domain::TransactionId id) override;
 
+    [[nodiscard]] domain::RepositoryResult<domain::TransactionReadModel> find_detail(
+        domain::TransactionId id,
+        domain::UserId user_id,
+        bool include_deleted = true) override;
+
+    [[nodiscard]] domain::RepositoryResult<domain::TransactionPageResult> find_page(
+        const domain::TransactionPageQuery& query) override;
+
     [[nodiscard]] domain::RepositoryResult<domain::Transaction> find_by_id_for_update(
         domain::ITransactionContext& tx,
         domain::TransactionId id) override;
@@ -66,6 +74,13 @@ public:
         domain::TransactionId id,
         domain::UserId user_id,
         std::chrono::system_clock::time_point deleted_at) override;
+
+    [[nodiscard]] domain::RepositoryResult<
+        domain::TransactionCorrectionPersistResult> save_correction(
+        domain::ITransactionContext& tx,
+        domain::TransactionId original_id,
+        const domain::Transaction& replacement,
+        std::chrono::system_clock::time_point corrected_at) override;
 
     [[nodiscard]] domain::RepositoryVoidResult physical_delete_by_account(
         domain::ITransactionContext& tx,

@@ -283,7 +283,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: operations["listTransactions"];
         put?: never;
         post: operations["createTransaction"];
         delete?: never;
@@ -299,10 +299,26 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: operations["getTransaction"];
         put?: never;
         post?: never;
         delete: operations["deleteTransaction"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/transactions/{transactionId}/correction": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["correctTransaction"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -664,18 +680,39 @@ export interface components {
             description?: string | null;
             /** Format: date-time */
             occurredAt?: string | null;
+            tagIds?: components["schemas"]["Id"][] | null;
+        };
+        /** @enum {string} */
+        TransactionType: "income" | "expense" | "transfer" | "adjustment";
+        TransactionTag: {
+            id: components["schemas"]["Id"];
+            name: string;
+            isDeleted: boolean;
         };
         Transaction: {
             id: components["schemas"]["Id"];
             accountId: components["schemas"]["Id"];
-            /** @enum {string} */
-            type: "income" | "expense" | "adjustment";
+            type: components["schemas"]["TransactionType"];
             amount: components["schemas"]["DecimalString"];
             currencyCode: components["schemas"]["CurrencyCode"];
             categoryId: components["schemas"]["Id"] | null;
+            categoryName: string | null;
+            categoryDeleted: boolean;
+            tags: components["schemas"]["TransactionTag"][];
+            transferGroupId: components["schemas"]["Id"] | null;
+            correctsTransactionId: components["schemas"]["Id"] | null;
+            correctedByTransactionId: components["schemas"]["Id"] | null;
             description: string;
             /** Format: date-time */
             occurredAt: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            deletedAt: string | null;
+        };
+        TransactionPage: {
+            items: components["schemas"]["Transaction"][];
+            nextCursor: string | null;
         };
         CreateTransferRequest: {
             sourceAccountId: components["schemas"]["Id"];
@@ -1525,6 +1562,39 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    listTransactions: {
+        parameters: {
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                pageSize?: components["parameters"]["PageSize"];
+                accountId?: components["schemas"]["Id"];
+                type?: components["schemas"]["TransactionType"];
+                categoryId?: components["schemas"]["Id"];
+                tagId?: components["schemas"]["Id"];
+                from?: string;
+                to?: string;
+                keyword?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Stable cursor page ordered by occurredAt and id descending */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TransactionPage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     createTransaction: {
         parameters: {
             query?: never;
@@ -1557,6 +1627,32 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    getTransaction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                transactionId: components["parameters"]["TransactionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Transaction detail, including historical metadata and correction links */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Transaction"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     deleteTransaction: {
         parameters: {
             query?: never;
@@ -1575,6 +1671,40 @@ export interface operations {
                 };
                 content?: never;
             };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["RuleViolation"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    correctTransaction: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                transactionId: components["parameters"]["TransactionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTransactionRequest"];
+            };
+        };
+        responses: {
+            /** @description Replacement transaction created and original atomically soft deleted */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Transaction"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];

@@ -59,6 +59,7 @@ def main() -> int:
     )
     scheduler_migration = read("migrations/V6__outbox_scheduler_foundation.sql")
     idempotency_migration = read("migrations/V7__request_idempotency.sql")
+    correction_migration = read("migrations/V8__transaction_corrections.sql")
     role_init = read("docker/postgres/init-roles.sql")
     idempotency = read(
         "src/infrastructure/persistence/idempotency_repository_impl.cpp"
@@ -229,8 +230,17 @@ def main() -> int:
         "ALTER TABLE request_idempotency FORCE ROW LEVEL SECURITY"
         in idempotency_migration
         and "request_idempotency" in role_init
-        and "tenant_tables <> 9" in role_init,
+        and "tenant_tables <> 10" in role_init,
         "Role initialization must include the V7 FORCE RLS table",
+        failures,
+    )
+    require(
+        "ALTER TABLE transaction_corrections FORCE ROW LEVEL SECURITY"
+        in correction_migration
+        and "transaction_corrections" in role_init
+        and "save_correction" in transaction
+        and "POSITION(lower($8)" in transaction,
+        "S07 correction and literal-keyword reads must retain tenant and SQL contracts",
         failures,
     )
     require(

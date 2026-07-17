@@ -19,6 +19,7 @@
 #include <chrono>
 #include <algorithm>
 #include <map>
+#include <set>
 #include <string>
 #include <utility>
 
@@ -857,6 +858,273 @@ TEST_F(ResourceApiTest, TransactionSoftDeleteIsOwnedAndConflictSafe) {
     EXPECT_EQ(request(HttpMethod::Delete, path, {}, alice_token).status, 204);
     EXPECT_TRUE(store_.transactions.at(id).is_deleted());
     EXPECT_EQ(request(HttpMethod::Delete, path, {}, alice_token).status, 409);
+}
+
+TEST_F(ResourceApiTest, TransactionLedgerUsesStableCursorAndHistoricalMetadata) {
+    const auto alice = register_user("ledger-alice@example.com");
+    const auto bob = register_user("ledger-bob@example.com");
+    const auto token = alice["accessToken"].get<std::string>();
+    const auto bob_token = bob["accessToken"].get<std::string>();
+    const auto account_id = create_account(token)["id"].get<std::int64_t>();
+
+    const auto category_response = request(
+        HttpMethod::Post,
+        "/api/v1/categories",
+        {{"board", "expense"}, {"name", "Historical meals"}},
+        token);
+    ASSERT_EQ(category_response.status, 201) << category_response.body;
+    const auto category_id = nlohmann::json::parse(
+        category_response.body)["id"].get<std::int64_t>();
+    const auto tag_response = request(
+        HttpMethod::Post,
+        "/api/v1/tags",
+        {{"name", "client-trip"}},
+        token);
+    ASSERT_EQ(tag_response.status, 201) << tag_response.body;
+    const auto tag_id = nlohmann::json::parse(
+        tag_response.body)["id"].get<std::int64_t>();
+
+    std::vector<std::int64_t> ids;
+    for (const auto& [description, amount] :
+         std::vector<std::pair<std::string, std::string>>{
+             {"client lunch", "12.00"},
+             {"client coffee", "4.50"},
+             {"client dinner", "25.00"}}) {
+        const auto created = request(
+            HttpMethod::Post,
+            "/api/v1/transactions",
+            {{"accountId", account_id},
+             {"type", "expense"},
+             {"amount", amount},
+             {"currencyCode", "CNY"},
+             {"categoryId", category_id},
+             {"tagIds", nlohmann::json::array({tag_id})},
+             {"description", description},
+             {"occurredAt", "2026-07-16T08:00:00+08:00"}},
+            token);
+        ASSERT_EQ(created.status, 201) << created.body;
+        const auto body = nlohmann::json::parse(created.body);
+        ids.push_back(body["id"].get<std::int64_t>());
+        ASSERT_EQ(body["tags"].size(), 1U);
+    }
+
+    const auto first = request(
+        HttpMethod::Get,
+        "/api/v1/transactions",
+        {},
+        token,
+        {{"pageSize", "2"}, {"keyword", "client"}});
+    ASSERT_EQ(first.status, 200) << first.body;
+    const auto first_page = nlohmann::json::parse(first.body);
+    ASSERT_EQ(first_page["items"].size(), 2U);
+    EXPECT_EQ(first_page["items"][0]["id"], ids[2]);
+    EXPECT_EQ(first_page["items"][1]["id"], ids[1]);
+    ASSERT_TRUE(first_page["nextCursor"].is_string());
+
+    const auto second = request(
+        HttpMethod::Get,
+        "/api/v1/transactions",
+        {},
+        token,
+        {{"pageSize", "2"},
+         {"keyword", "client"},
+         {"cursor", first_page["nextCursor"].get<std::string>()}});
+    ASSERT_EQ(second.status, 200) << second.body;
+    const auto second_page = nlohmann::json::parse(second.body);
+    ASSERT_EQ(second_page["items"].size(), 1U);
+    EXPECT_EQ(second_page["items"][0]["id"], ids[0]);
+    EXPECT_TRUE(second_page["nextCursor"].is_null());
+
+    const auto filtered = request(
+        HttpMethod::Get,
+        "/api/v1/transactions",
+        {},
+        token,
+        {{"accountId", std::to_string(account_id)},
+         {"type", "expense"},
+         {"categoryId", std::to_string(category_id)},
+         {"tagId", std::to_string(tag_id)},
+         {"from", "2026-07-16T00:00:00Z"},
+         {"to", "2026-07-17T00:00:00Z"}});
+    ASSERT_EQ(filtered.status, 200) << filtered.body;
+    EXPECT_EQ(nlohmann::json::parse(filtered.body)["items"].size(), 3U);
+
+    EXPECT_EQ(request(
+        HttpMethod::Delete,
+        "/api/v1/categories/" + std::to_string(category_id),
+        {}, token).status, 204);
+    EXPECT_EQ(request(
+        HttpMethod::Delete,
+        "/api/v1/tags/" + std::to_string(tag_id),
+        {}, token).status, 204);
+    const auto detail = request(
+        HttpMethod::Get,
+        "/api/v1/transactions/" + std::to_string(ids[0]),
+        {}, token);
+    ASSERT_EQ(detail.status, 200) << detail.body;
+    const auto detail_body = nlohmann::json::parse(detail.body);
+    EXPECT_EQ(detail_body["categoryName"], "Historical meals");
+    EXPECT_TRUE(detail_body["categoryDeleted"]);
+    ASSERT_EQ(detail_body["tags"].size(), 1U);
+    EXPECT_EQ(detail_body["tags"][0]["name"], "client-trip");
+    EXPECT_TRUE(detail_body["tags"][0]["isDeleted"]);
+    EXPECT_EQ(request(
+        HttpMethod::Get,
+        "/api/v1/transactions/" + std::to_string(ids[0]),
+        {}, bob_token).status, 404);
+
+    EXPECT_EQ(request(
+        HttpMethod::Get,
+        "/api/v1/transactions",
+        {}, token,
+        {{"from", "2025-01-01T00:00:00Z"},
+         {"to", "2026-07-17T00:00:00Z"}}).status, 400);
+    EXPECT_EQ(request(
+        HttpMethod::Get,
+        "/api/v1/transactions",
+        {}, token,
+        {{"cursor", "not-a-valid-cursor"}}).status, 400);
+}
+
+TEST_F(ResourceApiTest, TransactionCorrectionIsAtomicIdempotentAndTraceable) {
+    const auto user = register_user("correction@example.com");
+    const auto token = user["accessToken"].get<std::string>();
+    const auto account_id = create_account(token)["id"].get<std::int64_t>();
+    const auto tag_response = request(
+        HttpMethod::Post, "/api/v1/tags", {{"name", "verified"}}, token);
+    ASSERT_EQ(tag_response.status, 201) << tag_response.body;
+    const auto tag_id = nlohmann::json::parse(
+        tag_response.body)["id"].get<std::int64_t>();
+    const auto created = request(
+        HttpMethod::Post,
+        "/api/v1/transactions",
+        {{"accountId", account_id},
+         {"type", "expense"},
+         {"amount", "10.00"},
+         {"currencyCode", "CNY"},
+         {"description", "wrong amount"}},
+        token);
+    ASSERT_EQ(created.status, 201) << created.body;
+    const auto original_id = nlohmann::json::parse(
+        created.body)["id"].get<std::int64_t>();
+    const nlohmann::json correction_body{
+        {"accountId", account_id},
+        {"type", "expense"},
+        {"amount", "12.50"},
+        {"currencyCode", "CNY"},
+        {"tagIds", nlohmann::json::array({tag_id})},
+        {"description", "correct amount"},
+        {"occurredAt", "2026-07-16T12:30:00Z"}};
+    const auto correction_path =
+        "/api/v1/transactions/" + std::to_string(original_id) + "/correction";
+    const std::map<std::string, std::string> key{
+        {"Idempotency-Key", "correction-key-1"}};
+    const auto transactions_before = store_.transactions.size();
+    const auto audits_before = store_.audit_logs.size();
+    const auto outbox_before = store_.outbox.size();
+
+    const auto corrected = request(
+        HttpMethod::Post, correction_path, correction_body, token, {}, key);
+    const auto replay = request(
+        HttpMethod::Post, correction_path, correction_body, token, {}, key);
+    ASSERT_EQ(corrected.status, 201) << corrected.body;
+    ASSERT_EQ(replay.status, 201) << replay.body;
+    EXPECT_EQ(replay.body, corrected.body);
+    const auto replacement = nlohmann::json::parse(corrected.body);
+    const auto replacement_id = replacement["id"].get<std::int64_t>();
+    EXPECT_EQ(replacement["amount"], "12.5");
+    EXPECT_EQ(replacement["correctsTransactionId"], original_id);
+    EXPECT_TRUE(store_.transactions.at(original_id).is_deleted());
+    EXPECT_FALSE(store_.transactions.at(replacement_id).is_deleted());
+    EXPECT_EQ(store_.transactions.size(), transactions_before + 1U);
+    ASSERT_TRUE(store_.transaction_corrections.contains(original_id));
+    EXPECT_EQ(
+        store_.transaction_corrections.at(original_id)
+            .replacement_transaction_id.value(),
+        replacement_id);
+    EXPECT_EQ(store_.audit_logs.size(), audits_before + 1U);
+    EXPECT_EQ(store_.outbox.size(), outbox_before + 1U);
+    EXPECT_EQ(store_.outbox.back().event_name, "TransactionCorrected");
+
+    const auto original_detail = request(
+        HttpMethod::Get,
+        "/api/v1/transactions/" + std::to_string(original_id),
+        {}, token);
+    ASSERT_EQ(original_detail.status, 200) << original_detail.body;
+    const auto original_json = nlohmann::json::parse(original_detail.body);
+    EXPECT_EQ(original_json["correctedByTransactionId"], replacement_id);
+    EXPECT_FALSE(original_json["deletedAt"].is_null());
+
+    const auto list = request(
+        HttpMethod::Get, "/api/v1/transactions", {}, token);
+    ASSERT_EQ(list.status, 200) << list.body;
+    const auto items = nlohmann::json::parse(list.body)["items"];
+    ASSERT_EQ(items.size(), 1U);
+    EXPECT_EQ(items[0]["id"], replacement_id);
+
+    EXPECT_EQ(request(
+        HttpMethod::Post,
+        correction_path,
+        correction_body,
+        token,
+        {},
+        {{"Idempotency-Key", "correction-key-2"}}).status, 409);
+
+    const auto active = request(
+        HttpMethod::Post,
+        "/api/v1/transactions",
+        {{"accountId", account_id},
+         {"type", "expense"},
+         {"amount", "3"},
+         {"currencyCode", "CNY"}},
+        token);
+    ASSERT_EQ(active.status, 201) << active.body;
+    const auto active_id = nlohmann::json::parse(active.body)["id"].get<std::int64_t>();
+    auto invalid_tags = correction_body;
+    invalid_tags["tagIds"] = nlohmann::json::array({999999});
+    const auto failed = request(
+        HttpMethod::Post,
+        "/api/v1/transactions/" + std::to_string(active_id) + "/correction",
+        invalid_tags,
+        token,
+        {},
+        {{"Idempotency-Key", "correction-invalid-tag"}});
+    ASSERT_EQ(failed.status, 404) << failed.body;
+    EXPECT_FALSE(store_.transactions.at(active_id).is_deleted());
+    EXPECT_FALSE(store_.transaction_corrections.contains(active_id));
+
+    const auto target_response = request(
+        HttpMethod::Post,
+        "/api/v1/accounts",
+        {{"name", "Correction transfer target"},
+         {"type", "savings"},
+         {"subtype", "bank"},
+         {"currencyCode", "CNY"}},
+        token);
+    ASSERT_EQ(target_response.status, 201) << target_response.body;
+    const auto target_id = nlohmann::json::parse(
+        target_response.body)["id"].get<std::int64_t>();
+    const auto transfer = request(
+        HttpMethod::Post,
+        "/api/v1/transfers",
+        {{"sourceAccountId", account_id},
+         {"targetAccountId", target_id},
+         {"mode", "BothAmounts"},
+         {"outgoingAmount", "5"},
+         {"incomingAmount", "5"}},
+        token);
+    ASSERT_EQ(transfer.status, 201) << transfer.body;
+    const auto transfer_id = nlohmann::json::parse(
+        transfer.body)["outgoingTransactionId"].get<std::int64_t>();
+    const auto transfer_correction = request(
+        HttpMethod::Post,
+        "/api/v1/transactions/" + std::to_string(transfer_id) + "/correction",
+        correction_body,
+        token,
+        {},
+        {{"Idempotency-Key", "reject-transfer-leg-correction"}});
+    ASSERT_EQ(transfer_correction.status, 422) << transfer_correction.body;
+    EXPECT_FALSE(store_.transactions.at(transfer_id).is_deleted());
 }
 
 TEST_F(ResourceApiTest, TransferApiPersistsSignedAggregateAndQueriesMagnitudes) {

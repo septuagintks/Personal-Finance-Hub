@@ -6,11 +6,13 @@
 #include "pfh/application/use_cases/account_query_use_cases.h"
 #include "pfh/application/use_cases/delete_account_use_case.h"
 #include "pfh/application/use_cases/create_transaction_use_case.h"
+#include "pfh/application/use_cases/correct_transaction_use_case.h"
 #include "pfh/application/use_cases/delete_transaction_use_case.h"
 #include "pfh/application/use_cases/create_transfer_use_case.h"
 #include "pfh/application/use_cases/get_transfer_use_case.h"
 #include "pfh/application/query/report_query_service.h"
 #include "pfh/application/use_cases/resource_use_cases.h"
+#include "pfh/application/use_cases/transaction_query_use_cases.h"
 
 #include <utility>
 
@@ -40,6 +42,10 @@ void append_optional_time(
         result, command.category_id.has_value()
             ? command.category_id->to_string() : "null");
     append_optional_time(result, command.occurred_at);
+    append_canonical_field(result, std::to_string(command.tag_ids.size()));
+    for (const auto tag_id : command.tag_ids) {
+        append_canonical_field(result, tag_id.to_string());
+    }
     return result;
 }
 
@@ -64,6 +70,31 @@ void append_optional_time(
             ? command.fee_account_id->to_string() : "null");
     append_canonical_field(result, command.description);
     append_optional_time(result, command.occurred_at);
+    return result;
+}
+
+[[nodiscard]] std::string correction_fingerprint_input(
+    const CorrectTransactionCommand& command) {
+    std::string result;
+    result.reserve(320 + command.description.size());
+    append_canonical_field(result, "correct_transaction:v1");
+    append_canonical_field(result, command.user_id.to_string());
+    append_canonical_field(
+        result, command.original_transaction_id.to_string());
+    append_canonical_field(result, command.account_id.to_string());
+    append_canonical_field(
+        result, std::to_string(static_cast<int>(command.type)));
+    append_canonical_field(result, command.amount);
+    append_canonical_field(result, command.currency_code);
+    append_canonical_field(result, command.description);
+    append_canonical_field(
+        result, command.category_id.has_value()
+            ? command.category_id->to_string() : "null");
+    append_optional_time(result, command.occurred_at);
+    append_canonical_field(result, std::to_string(command.tag_ids.size()));
+    for (const auto tag_id : command.tag_ids) {
+        append_canonical_field(result, tag_id.to_string());
+    }
     return result;
 }
 
@@ -248,8 +279,47 @@ Result<TransactionDto> FinanceApplicationService::create_transaction(
         (*scope)->accounts(),
         (*scope)->categories(),
         (*scope)->transactions(),
-        (*scope)->unit_of_work())
+        (*scope)->unit_of_work(),
+        nullptr,
+        &(*scope)->tags())
         .execute(command);
+}
+
+Result<CursorPage<TransactionDto>> FinanceApplicationService::list_transactions(
+    const TransactionListQuery& query) {
+    auto scope = open_scope(query.user_id);
+    if (!scope) return err(scope.error());
+    return ListTransactionsUseCase((*scope)->transactions()).execute(query);
+}
+
+Result<TransactionDto> FinanceApplicationService::get_transaction(
+    domain::UserId user_id,
+    domain::TransactionId transaction_id) {
+    auto scope = open_scope(user_id);
+    if (!scope) return err(scope.error());
+    return GetTransactionUseCase((*scope)->transactions()).execute(
+        user_id, transaction_id);
+}
+
+Result<TransactionDto> FinanceApplicationService::correct_transaction(
+    const CorrectTransactionCommand& command,
+    std::string_view idempotency_key) {
+    auto fingerprint = request_hasher_.sha256(
+        correction_fingerprint_input(command));
+    if (!fingerprint) return err(fingerprint.error());
+    auto scope = open_scope(command.user_id);
+    if (!scope) return err(scope.error());
+    return CorrectTransactionUseCase(
+        (*scope)->accounts(),
+        (*scope)->categories(),
+        (*scope)->tags(),
+        (*scope)->transactions(),
+        (*scope)->audit_logs(),
+        (*scope)->unit_of_work(),
+        clock_,
+        &(*scope)->idempotency())
+        .execute(command, IdempotencyRequest{
+            std::string(idempotency_key), *fingerprint, clock_.now()});
 }
 
 Result<TagDto> FinanceApplicationService::update_tag(
@@ -301,7 +371,8 @@ Result<TransactionDto> FinanceApplicationService::create_transaction(
         (*scope)->categories(),
         (*scope)->transactions(),
         (*scope)->unit_of_work(),
-        &(*scope)->idempotency())
+        &(*scope)->idempotency(),
+        &(*scope)->tags())
         .execute(command, IdempotencyRequest{
             std::string(idempotency_key), *fingerprint, clock_.now()});
 }

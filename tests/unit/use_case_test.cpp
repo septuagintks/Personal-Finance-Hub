@@ -1385,6 +1385,14 @@ public:
     RepositoryResult<Transaction> find_by_id(TransactionId id) override {
         return delegate_.find_by_id(id);
     }
+    RepositoryResult<TransactionReadModel> find_detail(
+        TransactionId id, UserId user_id, bool include_deleted) override {
+        return delegate_.find_detail(id, user_id, include_deleted);
+    }
+    RepositoryResult<TransactionPageResult> find_page(
+        const TransactionPageQuery& query) override {
+        return delegate_.find_page(query);
+    }
     RepositoryResult<Transaction> find_by_id_for_update(
         ITransactionContext& tx, TransactionId id) override {
         return delegate_.find_by_id_for_update(tx, id);
@@ -1427,6 +1435,14 @@ public:
         ITransactionContext& tx, TransactionId id, UserId user_id,
         std::chrono::system_clock::time_point deleted_at) override {
         return delegate_.soft_delete(tx, id, user_id, deleted_at);
+    }
+    RepositoryResult<TransactionCorrectionPersistResult> save_correction(
+        ITransactionContext& tx,
+        TransactionId original_id,
+        const Transaction& replacement,
+        std::chrono::system_clock::time_point corrected_at) override {
+        return delegate_.save_correction(
+            tx, original_id, replacement, corrected_at);
     }
     RepositoryVoidResult physical_delete_by_account(
         ITransactionContext& tx, AccountId account_id) override {

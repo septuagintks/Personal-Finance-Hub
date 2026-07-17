@@ -10,8 +10,10 @@
 #include "pfh/domain/repositories/i_transaction_repository.h"
 #include "pfh/infrastructure/persistence/in_memory_store.h"
 #include <algorithm>
+#include <cctype>
 #include <map>
 #include <set>
+#include <string>
 #include <utility>
 
 namespace pfh::infrastructure {
@@ -37,6 +39,91 @@ public:
         }
         return std::unexpected(domain::RepositoryError::not_found(
             "Transaction not found: " + id.to_string()));
+    }
+
+    [[nodiscard]] domain::RepositoryResult<domain::TransactionReadModel> find_detail(
+        domain::TransactionId id,
+        domain::UserId user_id,
+        bool include_deleted = true) override {
+        auto transaction = find_by_id(id);
+        if (!transaction || transaction->user_id() != user_id ||
+            (!include_deleted && transaction->is_deleted())) {
+            return std::unexpected(domain::RepositoryError::not_found(
+                "Transaction not found for user"));
+        }
+        return make_read_model(*transaction);
+    }
+
+    [[nodiscard]] domain::RepositoryResult<domain::TransactionPageResult> find_page(
+        const domain::TransactionPageQuery& query) override {
+        if (!query.user_id.is_valid() || query.limit == 0 || query.limit > 200) {
+            return std::unexpected(domain::RepositoryError::validation(
+                "Transaction page query is invalid"));
+        }
+
+        const auto lowered_keyword = lowercase(query.keyword);
+        std::vector<domain::Transaction> matched;
+        for (const auto& [_, transaction] : merge_transactions()) {
+            if (transaction.user_id() != query.user_id || transaction.is_deleted()) {
+                continue;
+            }
+            if (query.account_id.has_value() &&
+                transaction.account_id() != *query.account_id) {
+                continue;
+            }
+            if (query.type.has_value() && transaction.type() != *query.type) {
+                continue;
+            }
+            if (query.category_id.has_value() &&
+                transaction.category_id() != query.category_id) {
+                continue;
+            }
+            if (query.tag_id.has_value() &&
+                !transaction_has_tag(transaction.id(), *query.tag_id)) {
+                continue;
+            }
+            if (query.occurred_from.has_value() &&
+                transaction.occurred_at() < *query.occurred_from) {
+                continue;
+            }
+            if (query.occurred_to.has_value() &&
+                transaction.occurred_at() >= *query.occurred_to) {
+                continue;
+            }
+            if (!lowered_keyword.empty() &&
+                lowercase(transaction.description()).find(lowered_keyword) ==
+                    std::string::npos) {
+                continue;
+            }
+            if (query.before.has_value()) {
+                const auto& cursor = *query.before;
+                if (transaction.occurred_at() > cursor.occurred_at ||
+                    (transaction.occurred_at() == cursor.occurred_at &&
+                     transaction.id() >= cursor.id)) {
+                    continue;
+                }
+            }
+            matched.push_back(transaction);
+        }
+        std::sort(matched.begin(), matched.end(), [](const auto& lhs, const auto& rhs) {
+            if (lhs.occurred_at() != rhs.occurred_at()) {
+                return lhs.occurred_at() > rhs.occurred_at();
+            }
+            return lhs.id() > rhs.id();
+        });
+
+        domain::TransactionPageResult result;
+        result.has_more = matched.size() > query.limit;
+        if (result.has_more) {
+            matched.erase(
+                matched.begin() + static_cast<std::ptrdiff_t>(query.limit),
+                matched.end());
+        }
+        result.items.reserve(matched.size());
+        for (const auto& transaction : matched) {
+            result.items.push_back(make_read_model(transaction));
+        }
+        return result;
     }
 
     [[nodiscard]] domain::RepositoryResult<domain::Transaction> find_by_id_for_update(
@@ -439,6 +526,48 @@ public:
         return {};
     }
 
+    [[nodiscard]] domain::RepositoryResult<domain::TransactionCorrectionPersistResult>
+    save_correction(
+        domain::ITransactionContext& tx,
+        domain::TransactionId original_id,
+        const domain::Transaction& replacement,
+        std::chrono::system_clock::time_point corrected_at) override {
+        if (!store_.in_transaction) {
+            return std::unexpected(domain::RepositoryError::database(
+                "save_correction requires an active transaction"));
+        }
+        auto original = find_by_id(original_id);
+        if (!original || original->user_id() != replacement.user_id()) {
+            return std::unexpected(domain::RepositoryError::not_found(
+                "Transaction not found for user"));
+        }
+        if (original->is_deleted()) {
+            return std::unexpected(domain::RepositoryError::conflict(
+                "Transaction is already deleted"));
+        }
+        if (original->type() == domain::TransactionType::Transfer ||
+            original->transfer_group_id().has_value()) {
+            return std::unexpected(domain::RepositoryError::validation(
+                "Transfer aggregate members cannot be corrected independently"));
+        }
+        if (merged_corrections().contains(original_id.value())) {
+            return std::unexpected(domain::RepositoryError::conflict(
+                "Transaction is already corrected"));
+        }
+
+        auto saved = save_single(tx, replacement);
+        if (!saved) return std::unexpected(saved.error());
+        auto deleted = soft_delete(
+            tx, original_id, replacement.user_id(), corrected_at);
+        if (!deleted) return std::unexpected(deleted.error());
+
+        store_.staged_transaction_corrections.insert_or_assign(
+            original_id.value(),
+            InMemoryTransactionCorrection{
+                replacement.user_id(), original_id, saved->id(), corrected_at});
+        return domain::TransactionCorrectionPersistResult{*saved};
+    }
+
     [[nodiscard]] domain::RepositoryVoidResult physical_delete_by_account(
         domain::ITransactionContext& /*tx*/,
         domain::AccountId account_id) override {
@@ -453,6 +582,7 @@ public:
             // counterpart leg and the transfer_groups row go with them.
             if (tx.account_id() == account_id &&
                 tx.type() != domain::TransactionType::Transfer) {
+                stage_correction_deletions_for(id);
                 store_.staged_transactions.erase(id);
                 store_.staged_deleted_transactions.push_back(id);
                 store_.staged_transaction_tag_relations.insert_or_assign(
@@ -488,6 +618,7 @@ public:
         for (const auto& [id, tx] : merged) {
             if (tx.transfer_group_id().has_value() &&
                 group_ids.count(tx.transfer_group_id()->value()) > 0) {
+                stage_correction_deletions_for(id);
                 store_.staged_transactions.erase(id);
                 store_.staged_deleted_transactions.push_back(id);
                 store_.staged_transaction_tag_relations.insert_or_assign(
@@ -505,6 +636,124 @@ public:
     }
 
 private:
+    [[nodiscard]] static std::string lowercase(std::string value) {
+        std::transform(value.begin(), value.end(), value.begin(), [](char raw) {
+            return static_cast<char>(
+                std::tolower(static_cast<unsigned char>(raw)));
+        });
+        return value;
+    }
+
+    [[nodiscard]] std::map<std::int64_t, domain::Category>
+    merged_categories() const {
+        auto merged = store_.categories;
+        if (store_.in_transaction) {
+            for (const auto& [id, value] : store_.staged_categories) {
+                merged.insert_or_assign(id, value);
+            }
+            for (const auto id : store_.staged_deleted_categories) {
+                merged.erase(id);
+            }
+        }
+        return merged;
+    }
+
+    [[nodiscard]] std::map<std::int64_t, domain::Tag> merged_tags() const {
+        auto merged = store_.tags;
+        if (store_.in_transaction) {
+            for (const auto& [id, value] : store_.staged_tags) {
+                merged.insert_or_assign(id, value);
+            }
+            for (const auto id : store_.staged_deleted_tags) {
+                merged.erase(id);
+            }
+        }
+        return merged;
+    }
+
+    [[nodiscard]] std::set<std::int64_t> tag_relations(
+        domain::TransactionId transaction_id) const {
+        if (store_.in_transaction) {
+            if (const auto staged = store_.staged_transaction_tag_relations.find(
+                    transaction_id.value());
+                staged != store_.staged_transaction_tag_relations.end()) {
+                return staged->second;
+            }
+        }
+        if (const auto found = store_.transaction_tag_relations.find(
+                transaction_id.value());
+            found != store_.transaction_tag_relations.end()) {
+            return found->second;
+        }
+        return {};
+    }
+
+    [[nodiscard]] bool transaction_has_tag(
+        domain::TransactionId transaction_id,
+        domain::TagId tag_id) const {
+        return tag_relations(transaction_id).contains(tag_id.value());
+    }
+
+    [[nodiscard]] std::map<std::int64_t, InMemoryTransactionCorrection>
+    merged_corrections() const {
+        auto merged = store_.transaction_corrections;
+        if (store_.in_transaction) {
+            for (const auto& [id, value] : store_.staged_transaction_corrections) {
+                merged.insert_or_assign(id, value);
+            }
+            for (const auto id : store_.staged_deleted_transaction_corrections) {
+                merged.erase(id);
+            }
+        }
+        return merged;
+    }
+
+    [[nodiscard]] domain::TransactionReadModel make_read_model(
+        const domain::Transaction& transaction) const {
+        domain::TransactionReadModel result{
+            transaction, std::nullopt, false, {}, std::nullopt, std::nullopt};
+        if (transaction.category_id().has_value()) {
+            const auto categories = merged_categories();
+            if (const auto found = categories.find(
+                    transaction.category_id()->value());
+                found != categories.end()) {
+                result.category_name = found->second.name();
+                result.category_deleted = found->second.is_deleted();
+            }
+        }
+        const auto tags = merged_tags();
+        for (const auto tag_id : tag_relations(transaction.id())) {
+            if (const auto found = tags.find(tag_id); found != tags.end()) {
+                result.tags.push_back(found->second);
+            }
+        }
+        std::sort(result.tags.begin(), result.tags.end(), [](const auto& lhs, const auto& rhs) {
+            if (lhs.name() != rhs.name()) return lhs.name() < rhs.name();
+            return lhs.id() < rhs.id();
+        });
+        for (const auto& [_, correction] : merged_corrections()) {
+            if (correction.original_transaction_id == transaction.id()) {
+                result.corrected_by_transaction_id =
+                    correction.replacement_transaction_id;
+            }
+            if (correction.replacement_transaction_id == transaction.id()) {
+                result.corrects_transaction_id =
+                    correction.original_transaction_id;
+            }
+        }
+        return result;
+    }
+
+    void stage_correction_deletions_for(std::int64_t transaction_id) {
+        for (const auto& [original_id, correction] : merged_corrections()) {
+            if (original_id == transaction_id ||
+                correction.replacement_transaction_id.value() == transaction_id) {
+                store_.staged_transaction_corrections.erase(original_id);
+                store_.staged_deleted_transaction_corrections.push_back(original_id);
+            }
+        }
+    }
+
     [[nodiscard]] static domain::RepositoryVoidResult validate_amount_for_storage(
         const domain::Money& amount) {
         if (amount.is_zero()) {

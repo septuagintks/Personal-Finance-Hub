@@ -14,6 +14,7 @@
 #include "pfh/domain/transfer_aggregate.h"
 #include "pfh/domain/user.h"
 #include "pfh/domain/user_preference.h"
+#include "pfh/application/pagination.h"
 #include <chrono>
 #include <cstdint>
 #include <optional>
@@ -97,6 +98,12 @@ struct BalanceDto {
     std::chrono::system_clock::time_point updated_at{};
 };
 
+struct TransactionTagDto {
+    domain::TagId id;
+    std::string name;
+    bool is_deleted = false;
+};
+
 struct TransactionDto {
     domain::TransactionId id;
     domain::UserId user_id;
@@ -108,6 +115,13 @@ struct TransactionDto {
     std::optional<domain::CategoryId> category_id;
     std::optional<domain::TransferGroupId> transfer_group_id;
     std::chrono::system_clock::time_point occurred_at{};
+    std::chrono::system_clock::time_point created_at{};
+    std::optional<std::chrono::system_clock::time_point> deleted_at;
+    std::optional<std::string> category_name;
+    bool category_deleted = false;
+    std::vector<TransactionTagDto> tags;
+    std::optional<domain::TransactionId> corrects_transaction_id;
+    std::optional<domain::TransactionId> corrected_by_transaction_id;
 };
 
 struct CreateTransactionCommand {
@@ -122,6 +136,32 @@ struct CreateTransactionCommand {
     // default to epoch 0 (1970), which would corrupt current-month reports and
     // point-in-time historical rate selection.
     std::optional<std::chrono::system_clock::time_point> occurred_at;
+    std::vector<domain::TagId> tag_ids;
+};
+
+struct TransactionListQuery {
+    domain::UserId user_id;
+    std::optional<domain::AccountId> account_id;
+    std::optional<domain::TransactionType> type;
+    std::optional<domain::CategoryId> category_id;
+    std::optional<domain::TagId> tag_id;
+    std::optional<std::chrono::system_clock::time_point> occurred_from;
+    std::optional<std::chrono::system_clock::time_point> occurred_to;
+    std::string keyword;
+    CursorPageRequest page;
+};
+
+struct CorrectTransactionCommand {
+    domain::UserId user_id;
+    domain::TransactionId original_transaction_id;
+    domain::AccountId account_id;
+    domain::TransactionType type = domain::TransactionType::Expense;
+    std::string amount;
+    std::string currency_code;
+    std::string description;
+    std::optional<domain::CategoryId> category_id;
+    std::optional<std::chrono::system_clock::time_point> occurred_at;
+    std::vector<domain::TagId> tag_ids;
 };
 
 struct DeleteTransactionCommand {

@@ -147,6 +147,8 @@ set(PFH_APPLICATION_SOURCES
     src/application/auth_service.cpp
     src/application/resource_use_cases.cpp
     src/application/finance_application_service.cpp
+    src/application/transaction_query_use_cases.cpp
+    src/application/correct_transaction_use_case.cpp
     src/application/local_event_bus.cpp
     src/application/outbox_publisher.cpp
     src/application/supplemental_audit_handler.cpp

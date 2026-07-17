@@ -76,6 +76,14 @@ public:
     [[nodiscard]] Result<TransactionDto> create_transaction(
         const CreateTransactionCommand& command,
         std::string_view idempotency_key);
+    [[nodiscard]] Result<CursorPage<TransactionDto>> list_transactions(
+        const TransactionListQuery& query);
+    [[nodiscard]] Result<TransactionDto> get_transaction(
+        domain::UserId user_id,
+        domain::TransactionId transaction_id);
+    [[nodiscard]] Result<TransactionDto> correct_transaction(
+        const CorrectTransactionCommand& command,
+        std::string_view idempotency_key);
     [[nodiscard]] VoidResult delete_transaction(
         const DeleteTransactionCommand& command);
 

@@ -33,8 +33,9 @@ EXPECTED = {
     "/api/v1/tags/{tagId}": {"put", "delete"},
     "/api/v1/tags/{tagId}/restore": {"post"},
     "/api/v1/users/me/preferences": {"get", "put"},
-    "/api/v1/transactions": {"post"},
-    "/api/v1/transactions/{transactionId}": {"delete"},
+    "/api/v1/transactions": {"get", "post"},
+    "/api/v1/transactions/{transactionId}": {"get", "delete"},
+    "/api/v1/transactions/{transactionId}/correction": {"post"},
     "/api/v1/transactions/{transactionId}/tags": {"put"},
     "/api/v1/transfers": {"post"},
     "/api/v1/transfers/{transferGroupId}": {"get"},
@@ -160,7 +161,11 @@ def main() -> int:
             failures.append(f"{path} does not define secure cookie response headers")
 
     idempotency_ref = "#/components/parameters/IdempotencyKey"
-    for path in ("/api/v1/transactions", "/api/v1/transfers"):
+    for path in (
+        "/api/v1/transactions",
+        "/api/v1/transactions/{transactionId}/correction",
+        "/api/v1/transfers",
+    ):
         operation = paths.get(path, {}).get("post", {})
         parameters = operation.get("parameters", [])
         if not any(item.get("$ref") == idempotency_ref for item in parameters):
@@ -258,7 +263,9 @@ def main() -> int:
         "RegisterRequest": ("baseCurrency", "preferredLocale"),
         "CreateAccountRequest": ("description",),
         "CreateCategoryRequest": ("board", "name", "parentId", "templateId"),
-        "CreateTransactionRequest": ("categoryId", "description", "occurredAt"),
+        "CreateTransactionRequest": (
+            "categoryId", "description", "occurredAt", "tagIds",
+        ),
         "CreateTransferRequest": (
             "outgoingAmount", "incomingAmount", "rate", "feeAmount",
             "feeSource", "feeAccountId", "description", "occurredAt",

@@ -98,5 +98,18 @@ export const useUserContextStore = defineStore('user-context', () => {
     applyPresentation(null);
   }
 
-  return { preference, currencies, status, aggregationRevision, load, update, clear };
+  function invalidateAggregates(): void {
+    aggregationRevision.value += 1;
+  }
+
+  return {
+    preference,
+    currencies,
+    status,
+    aggregationRevision,
+    load,
+    update,
+    invalidateAggregates,
+    clear,
+  };
 });

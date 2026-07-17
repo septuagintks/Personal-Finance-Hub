@@ -26,7 +26,7 @@ const navigation = computed(() =>
   [
     { key: 'overview', to: '/dashboard', icon: LayoutDashboard },
     { key: 'accounts', to: '/accounts', icon: WalletCards },
-    { key: 'transactions', to: '/transactions', icon: ReceiptText, disabled: true },
+    { key: 'transactions', to: '/transactions', icon: ReceiptText },
     { key: 'reports', to: '/reports', icon: ChartNoAxesCombined, disabled: true },
     { key: 'settings', to: '/settings', icon: Settings2 },
   ].map((item) => ({

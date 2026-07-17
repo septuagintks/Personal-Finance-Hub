@@ -71,6 +71,7 @@ private:
         store_.staged_tags.clear();
         store_.staged_transaction_tag_relations.clear();
         store_.staged_transfer_groups.clear();
+        store_.staged_transaction_corrections.clear();
         store_.staged_balance_cache.clear();
         store_.staged_exchange_rates.clear();
         store_.staged_outbox.clear();
@@ -84,6 +85,7 @@ private:
         store_.staged_deleted_transactions.clear();
         store_.staged_deleted_balance_cache.clear();
         store_.staged_deleted_transfer_groups.clear();
+        store_.staged_deleted_transaction_corrections.clear();
         store_.staged_deleted_categories.clear();
         store_.staged_deleted_tags.clear();
 
@@ -108,6 +110,7 @@ private:
             store_.staged_tags.clear();
             store_.staged_transaction_tag_relations.clear();
             store_.staged_transfer_groups.clear();
+            store_.staged_transaction_corrections.clear();
             store_.staged_balance_cache.clear();
             store_.staged_exchange_rates.clear();
             store_.staged_outbox.clear();
@@ -121,6 +124,7 @@ private:
             store_.staged_deleted_transactions.clear();
             store_.staged_deleted_balance_cache.clear();
             store_.staged_deleted_transfer_groups.clear();
+            store_.staged_deleted_transaction_corrections.clear();
             store_.staged_deleted_categories.clear();
             store_.staged_deleted_tags.clear();
             pending_events_.clear();
@@ -175,6 +179,10 @@ private:
         for (auto& [id, tg] : store_.staged_transfer_groups) {
             store_.transfer_groups.insert_or_assign(id, std::move(tg));
         }
+        for (auto& [id, correction] : store_.staged_transaction_corrections) {
+            store_.transaction_corrections.insert_or_assign(
+                id, std::move(correction));
+        }
         for (auto& [id, cache] : store_.staged_balance_cache) {
             store_.balance_cache.insert_or_assign(id, std::move(cache));
         }
@@ -214,6 +222,9 @@ private:
         for (const auto id : store_.staged_deleted_transfer_groups) {
             store_.transfer_groups.erase(id);
         }
+        for (const auto id : store_.staged_deleted_transaction_corrections) {
+            store_.transaction_corrections.erase(id);
+        }
         for (const auto id : store_.staged_deleted_categories) {
             store_.categories.erase(id);
         }
@@ -230,6 +241,7 @@ private:
         store_.staged_tags.clear();
         store_.staged_transaction_tag_relations.clear();
         store_.staged_transfer_groups.clear();
+        store_.staged_transaction_corrections.clear();
         store_.staged_balance_cache.clear();
         store_.staged_exchange_rates.clear();
         store_.staged_outbox.clear();
@@ -243,6 +255,7 @@ private:
         store_.staged_deleted_transactions.clear();
         store_.staged_deleted_balance_cache.clear();
         store_.staged_deleted_transfer_groups.clear();
+        store_.staged_deleted_transaction_corrections.clear();
         store_.staged_deleted_categories.clear();
         store_.staged_deleted_tags.clear();
         pending_events_.clear();

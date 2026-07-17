@@ -6,10 +6,13 @@
 
 #include "pfh/domain/repositories/i_transaction_context.h"
 #include "pfh/domain/repositories/repository_error.h"
+#include "pfh/domain/tag.h"
 #include "pfh/domain/transaction.h"
 #include "pfh/domain/transfer_aggregate.h"
 #include <chrono>
+#include <cstddef>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace pfh::domain {
@@ -36,11 +39,61 @@ struct TransferSnapshot {
     std::vector<Transaction> transactions;
 };
 
+/// @brief Stable keyset used by the ledger read path. The public cursor is an
+/// opaque Application concern; repositories receive the decoded values only.
+struct TransactionPageCursor {
+    std::chrono::system_clock::time_point occurred_at{};
+    TransactionId id;
+};
+
+/// @brief Tenant-scoped ledger filters. `occurred_from` is inclusive and
+/// `occurred_to` is exclusive. Results never include soft-deleted rows.
+struct TransactionPageQuery {
+    UserId user_id;
+    std::optional<AccountId> account_id;
+    std::optional<TransactionType> type;
+    std::optional<CategoryId> category_id;
+    std::optional<TagId> tag_id;
+    std::optional<std::chrono::system_clock::time_point> occurred_from;
+    std::optional<std::chrono::system_clock::time_point> occurred_to;
+    std::string keyword;
+    std::optional<TransactionPageCursor> before;
+    std::size_t limit = 50;
+};
+
+/// @brief Ledger projection preserving historical metadata and correction
+/// links. A deleted category/tag remains visible on an old transaction.
+struct TransactionReadModel {
+    Transaction transaction;
+    std::optional<std::string> category_name;
+    bool category_deleted = false;
+    std::vector<Tag> tags;
+    std::optional<TransactionId> corrects_transaction_id;
+    std::optional<TransactionId> corrected_by_transaction_id;
+};
+
+struct TransactionPageResult {
+    std::vector<TransactionReadModel> items;
+    bool has_more = false;
+};
+
+struct TransactionCorrectionPersistResult {
+    Transaction replacement;
+};
+
 class ITransactionRepository {
 public:
     virtual ~ITransactionRepository() = default;
 
     [[nodiscard]] virtual RepositoryResult<Transaction> find_by_id(TransactionId id) = 0;
+
+    [[nodiscard]] virtual RepositoryResult<TransactionReadModel> find_detail(
+        TransactionId id,
+        UserId user_id,
+        bool include_deleted = true) = 0;
+
+    [[nodiscard]] virtual RepositoryResult<TransactionPageResult> find_page(
+        const TransactionPageQuery& query) = 0;
 
     /// @brief Load a transaction inside the active transaction and take a row
     /// lock (PostgreSQL `SELECT ... FOR UPDATE`). Write paths that check state
@@ -98,6 +151,17 @@ public:
         TransactionId id,
         UserId user_id,
         std::chrono::system_clock::time_point deleted_at) = 0;
+
+    /// @brief Atomically persist an append-only correction: create the
+    /// replacement, soft-delete the active original, link both facts and
+    /// invalidate every affected balance cache. The caller must already hold
+    /// the original transaction lock inside the supplied context.
+    [[nodiscard]] virtual RepositoryResult<TransactionCorrectionPersistResult>
+    save_correction(
+        ITransactionContext& tx,
+        TransactionId original_id,
+        const Transaction& replacement,
+        std::chrono::system_clock::time_point corrected_at) = 0;
 
     /// @brief Physically delete this account's NON-transfer transactions only.
     /// Associated transaction_tag_relations are deleted first. Transfer legs

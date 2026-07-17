@@ -18,6 +18,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace pfh::presentation {
 
@@ -115,6 +116,34 @@ public:
             return application::err(id.error());
         }
         return std::optional<TypedId>(*id);
+    }
+
+    template <typename TypedId>
+    [[nodiscard]] static application::Result<std::vector<TypedId>> optional_id_array(
+        const Json& object,
+        std::string_view field,
+        std::size_t maximum_count = 64) {
+        const auto key = std::string(field);
+        const auto it = object.find(key);
+        if (it == object.end() || it->is_null()) return std::vector<TypedId>{};
+        if (!it->is_array() || it->size() > maximum_count) {
+            return application::err(application::Error::validation(
+                key + " must be an array with at most " +
+                std::to_string(maximum_count) + " entries"));
+        }
+        std::vector<TypedId> result;
+        result.reserve(it->size());
+        for (const auto& raw : *it) {
+            auto value = positive_integer(raw, field);
+            if (!value) return application::err(value.error());
+            TypedId id(*value);
+            if (!id.is_valid()) {
+                return application::err(application::Error::validation(
+                    key + " must contain positive integers"));
+            }
+            result.push_back(id);
+        }
+        return result;
     }
 
     [[nodiscard]] static application::Result<std::optional<

@@ -10,8 +10,12 @@
 #include "pfh/infrastructure/persistence/postgres_repository_support.h"
 #include "pfh/infrastructure/persistence/postgres_result_set.h"
 
+#include <nlohmann/json.hpp>
+
 #include <cstdint>
+#include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -24,6 +28,15 @@ constexpr const char* kTransactionColumns = R"SQL(
     id, user_id, account_id, category_id, type::text, amount::text,
     currency_code, description, transfer_group_id, deleted_at,
     transaction_time, created_at
+)SQL";
+
+constexpr const char* kTransactionReadColumns = R"SQL(
+    t.id, t.user_id, t.account_id, t.category_id, t.type::text,
+    t.amount::text, t.currency_code, t.description, t.transfer_group_id,
+    t.deleted_at, t.transaction_time, t.created_at,
+    c.name, (c.id IS NOT NULL AND c.deleted_at IS NOT NULL),
+    replacement_link.original_transaction_id,
+    original_link.replacement_transaction_id
 )SQL";
 
 domain::RepositoryError transaction_not_found() {
@@ -69,6 +82,89 @@ domain::RepositoryResult<domain::Transaction> map_transaction_row(
         return std::unexpected(domain::RepositoryError::database(
             "Stored transaction row is invalid"));
     }
+}
+
+domain::RepositoryResult<domain::Tag> map_transaction_tag_row(
+    const drogon::orm::Row& row) {
+    try {
+        return domain::Tag(
+            domain::TagId(pg::getBigInt(row, 1)),
+            domain::UserId(pg::getBigInt(row, 2)),
+            pg::getString(row, 3),
+            pg::getOptionalTimestamp(row, 4),
+            pg::getTimestamp(row, 5),
+            pg::getTimestamp(row, 6));
+    } catch (const std::exception&) {
+        return std::unexpected(domain::RepositoryError::database(
+            "Stored transaction tag row is invalid"));
+    }
+}
+
+domain::RepositoryResult<domain::TransactionReadModel>
+map_transaction_read_row(const drogon::orm::Row& row) {
+    auto transaction = map_transaction_row(row);
+    if (!transaction) return std::unexpected(transaction.error());
+    try {
+        domain::TransactionReadModel result{
+            *transaction,
+            pg::getOptionalString(row, 12),
+            pg::getBool(row, 13),
+            {},
+            std::nullopt,
+            std::nullopt};
+        if (const auto original = pg::getOptionalBigInt(row, 14);
+            original.has_value()) {
+            result.corrects_transaction_id = domain::TransactionId(*original);
+        }
+        if (const auto replacement = pg::getOptionalBigInt(row, 15);
+            replacement.has_value()) {
+            result.corrected_by_transaction_id =
+                domain::TransactionId(*replacement);
+        }
+        return result;
+    } catch (const std::exception&) {
+        return std::unexpected(domain::RepositoryError::database(
+            "Stored transaction projection is invalid"));
+    }
+}
+
+domain::RepositoryVoidResult append_transaction_tags(
+    drogon::orm::Transaction& database,
+    domain::UserId user_id,
+    std::vector<domain::TransactionReadModel>& models) {
+    if (models.empty()) return {};
+
+    nlohmann::json ids = nlohmann::json::array();
+    std::map<std::int64_t, std::size_t> positions;
+    for (std::size_t index = 0; index < models.size(); ++index) {
+        const auto id = models[index].transaction.id().value();
+        ids.push_back(id);
+        positions.emplace(id, index);
+    }
+    constexpr const char* kTagsSql = R"SQL(
+        SELECT relation.transaction_id, tag.id, tag.user_id, tag.name,
+               tag.deleted_at, tag.created_at, tag.updated_at
+        FROM jsonb_array_elements_text($1::jsonb) WITH ORDINALITY
+             AS requested(id, position)
+        JOIN transaction_tag_relations relation
+          ON relation.transaction_id = requested.id::bigint
+         AND relation.user_id = $2
+        JOIN transaction_tags tag
+          ON tag.id = relation.tag_id AND tag.user_id = relation.user_id
+        ORDER BY requested.position, tag.name, tag.id
+    )SQL";
+    const auto rows = database.execSqlSync(kTagsSql, ids.dump(), user_id.value());
+    for (const auto& row : rows) {
+        const auto position = positions.find(pg::getBigInt(row, 0));
+        if (position == positions.end()) {
+            return std::unexpected(domain::RepositoryError::database(
+                "Transaction tag projection referenced an unknown row"));
+        }
+        auto tag = map_transaction_tag_row(row);
+        if (!tag) return std::unexpected(tag.error());
+        models[position->second].tags.push_back(std::move(*tag));
+    }
+    return {};
 }
 
 domain::RepositoryVoidResult validate_amount_for_storage(
@@ -215,6 +311,135 @@ TransactionRepositoryImpl::find_by_id(domain::TransactionId id) {
                     std::unexpected(transaction_not_found()));
             }
             return map_transaction_row(result[0]);
+        });
+}
+
+domain::RepositoryResult<domain::TransactionReadModel>
+TransactionRepositoryImpl::find_detail(
+    domain::TransactionId id,
+    domain::UserId user_id,
+    bool include_deleted) {
+    if (user_id != tenant_user_id_) {
+        return std::unexpected(transaction_not_found());
+    }
+    return postgres::execute_tenant_read<domain::TransactionReadModel>(
+        db_, tenant_user_id_, "find transaction detail", [&](const auto& transaction) {
+            std::string sql = std::string("SELECT ") + kTransactionReadColumns + R"SQL(
+                FROM transactions t
+                LEFT JOIN categories c
+                  ON c.id = t.category_id AND c.user_id = t.user_id
+                LEFT JOIN transaction_corrections replacement_link
+                  ON replacement_link.replacement_transaction_id = t.id
+                 AND replacement_link.user_id = t.user_id
+                LEFT JOIN transaction_corrections original_link
+                  ON original_link.original_transaction_id = t.id
+                 AND original_link.user_id = t.user_id
+                WHERE t.id = $1 AND t.user_id = $2
+            )SQL";
+            if (!include_deleted) sql += " AND t.deleted_at IS NULL";
+            const auto rows = transaction->execSqlSync(
+                sql, id.value(), user_id.value());
+            if (rows.empty()) {
+                return domain::RepositoryResult<domain::TransactionReadModel>(
+                    std::unexpected(transaction_not_found()));
+            }
+            auto model = map_transaction_read_row(rows[0]);
+            if (!model) return model;
+            std::vector<domain::TransactionReadModel> models;
+            models.push_back(std::move(*model));
+            if (auto tags = append_transaction_tags(
+                    *transaction, user_id, models);
+                !tags) {
+                return domain::RepositoryResult<domain::TransactionReadModel>(
+                    std::unexpected(tags.error()));
+            }
+            return domain::RepositoryResult<domain::TransactionReadModel>(
+                std::move(models.front()));
+        });
+}
+
+domain::RepositoryResult<domain::TransactionPageResult>
+TransactionRepositoryImpl::find_page(
+    const domain::TransactionPageQuery& query) {
+    if (query.user_id != tenant_user_id_ || query.limit == 0 ||
+        query.limit > 200) {
+        return std::unexpected(domain::RepositoryError::validation(
+            "Transaction page query is invalid"));
+    }
+    return postgres::execute_tenant_read<domain::TransactionPageResult>(
+        db_, tenant_user_id_, "list transaction page", [&](const auto& transaction) {
+            const std::string sql = std::string("SELECT ") +
+                kTransactionReadColumns + R"SQL(
+                FROM transactions t
+                LEFT JOIN categories c
+                  ON c.id = t.category_id AND c.user_id = t.user_id
+                LEFT JOIN transaction_corrections replacement_link
+                  ON replacement_link.replacement_transaction_id = t.id
+                 AND replacement_link.user_id = t.user_id
+                LEFT JOIN transaction_corrections original_link
+                  ON original_link.original_transaction_id = t.id
+                 AND original_link.user_id = t.user_id
+                WHERE t.user_id = $1 AND t.deleted_at IS NULL
+                  AND ($2::bigint IS NULL OR t.account_id = $2)
+                  AND ($3::text IS NULL OR t.type = $3::transaction_type)
+                  AND ($4::bigint IS NULL OR t.category_id = $4)
+                  AND ($5::bigint IS NULL OR EXISTS (
+                      SELECT 1 FROM transaction_tag_relations filtered_tag
+                      WHERE filtered_tag.transaction_id = t.id
+                        AND filtered_tag.user_id = t.user_id
+                        AND filtered_tag.tag_id = $5))
+                  AND ($6::timestamptz IS NULL OR t.transaction_time >= $6)
+                  AND ($7::timestamptz IS NULL OR t.transaction_time < $7)
+                  AND ($8::text = '' OR
+                       POSITION(lower($8) IN lower(COALESCE(t.description, ''))) > 0)
+                  AND ($9::timestamptz IS NULL OR
+                       (t.transaction_time, t.id) < ($9, $10::bigint))
+                ORDER BY t.transaction_time DESC, t.id DESC
+                LIMIT $11
+            )SQL";
+
+            std::optional<std::int64_t> account;
+            if (query.account_id.has_value()) account = query.account_id->value();
+            std::optional<std::string> type;
+            if (query.type.has_value()) type = pg::toSqlText(*query.type);
+            std::optional<std::int64_t> category;
+            if (query.category_id.has_value()) category = query.category_id->value();
+            std::optional<std::int64_t> tag;
+            if (query.tag_id.has_value()) tag = query.tag_id->value();
+            const auto from = pg::toDbTimestamp(query.occurred_from);
+            const auto to = pg::toDbTimestamp(query.occurred_to);
+            std::optional<trantor::Date> cursor_time;
+            std::optional<std::int64_t> cursor_id;
+            if (query.before.has_value()) {
+                cursor_time = pg::toDbTimestamp(query.before->occurred_at);
+                cursor_id = query.before->id.value();
+            }
+            const auto rows = transaction->execSqlSync(
+                sql,
+                query.user_id.value(), account, type, category, tag, from, to,
+                query.keyword, cursor_time, cursor_id,
+                static_cast<std::int64_t>(query.limit + 1U));
+
+            domain::TransactionPageResult page;
+            page.has_more = rows.size() > query.limit;
+            const auto count = page.has_more ? query.limit : rows.size();
+            page.items.reserve(count);
+            for (std::size_t index = 0; index < count; ++index) {
+                auto model = map_transaction_read_row(rows[index]);
+                if (!model) {
+                    return domain::RepositoryResult<domain::TransactionPageResult>(
+                        std::unexpected(model.error()));
+                }
+                page.items.push_back(std::move(*model));
+            }
+            if (auto tags = append_transaction_tags(
+                    *transaction, query.user_id, page.items);
+                !tags) {
+                return domain::RepositoryResult<domain::TransactionPageResult>(
+                    std::unexpected(tags.error()));
+            }
+            return domain::RepositoryResult<domain::TransactionPageResult>(
+                std::move(page));
         });
 }
 
@@ -710,6 +935,62 @@ domain::RepositoryVoidResult TransactionRepositoryImpl::soft_delete(
     } catch (const std::exception& error) {
         return std::unexpected(
             postgres::unexpected_error("soft-delete transaction", error));
+    }
+}
+
+domain::RepositoryResult<domain::TransactionCorrectionPersistResult>
+TransactionRepositoryImpl::save_correction(
+    domain::ITransactionContext& tx_iface,
+    domain::TransactionId original_id,
+    const domain::Transaction& replacement,
+    std::chrono::system_clock::time_point corrected_at) {
+    if (replacement.user_id() != tenant_user_id_) {
+        return std::unexpected(transaction_not_found());
+    }
+    auto context = postgres::require_transaction(tx_iface, tenant_user_id_);
+    if (!context) return std::unexpected(context.error());
+
+    try {
+        auto original = find_by_id_for_update(tx_iface, original_id);
+        if (!original) return std::unexpected(original.error());
+        if (original->is_deleted()) {
+            return std::unexpected(domain::RepositoryError::conflict(
+                "Transaction is already deleted"));
+        }
+        if (original->type() == domain::TransactionType::Transfer ||
+            original->transfer_group_id().has_value()) {
+            return std::unexpected(domain::RepositoryError::validation(
+                "Transfer aggregate members cannot be corrected independently"));
+        }
+
+        const auto existing_link = (*context)->transaction().execSqlSync(
+            "SELECT 1 FROM transaction_corrections "
+            "WHERE original_transaction_id = $1 AND user_id = $2",
+            original_id.value(), tenant_user_id_.value());
+        if (!existing_link.empty()) {
+            return std::unexpected(domain::RepositoryError::conflict(
+                "Transaction is already corrected"));
+        }
+
+        auto saved = save_single(tx_iface, replacement);
+        if (!saved) return std::unexpected(saved.error());
+        auto deleted = soft_delete(
+            tx_iface, original_id, tenant_user_id_, corrected_at);
+        if (!deleted) return std::unexpected(deleted.error());
+
+        (*context)->transaction().execSqlSync(
+            "INSERT INTO transaction_corrections "
+            "(original_transaction_id, replacement_transaction_id, user_id, corrected_at) "
+            "VALUES ($1, $2, $3, $4)",
+            original_id.value(), saved->id().value(), tenant_user_id_.value(),
+            pg::toDbTimestamp(corrected_at));
+        return domain::TransactionCorrectionPersistResult{*saved};
+    } catch (const drogon::orm::DrogonDbException& error) {
+        return std::unexpected(postgres::database_error(
+            "save transaction correction", error));
+    } catch (const std::exception& error) {
+        return std::unexpected(postgres::unexpected_error(
+            "save transaction correction", error));
     }
 }
 

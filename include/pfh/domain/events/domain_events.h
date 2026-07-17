@@ -215,6 +215,51 @@ private:
     AccountId account_id_;
 };
 
+/// @brief TransactionCorrected links the immutable original fact to its
+/// replacement after both persistence changes commit atomically.
+class TransactionCorrectedEvent final : public UserScopedEvent {
+public:
+    TransactionCorrectedEvent(
+        UserId user_id,
+        TransactionId original_transaction_id,
+        TransactionId replacement_transaction_id,
+        AccountId original_account_id,
+        AccountId replacement_account_id,
+        std::chrono::system_clock::time_point occurred_at)
+        : UserScopedEvent(user_id, occurred_at),
+          original_transaction_id_(original_transaction_id),
+          replacement_transaction_id_(replacement_transaction_id),
+          original_account_id_(original_account_id),
+          replacement_account_id_(replacement_account_id) {}
+
+    [[nodiscard]] std::string event_name() const override {
+        return "TransactionCorrected";
+    }
+    [[nodiscard]] std::string aggregate_type() const override {
+        return "Transaction";
+    }
+    [[nodiscard]] std::string aggregate_id() const override {
+        return replacement_transaction_id_.to_string();
+    }
+    [[nodiscard]] std::string payload_json() const override {
+        return "{" + base_payload() +
+               ",\"originalTransactionId\":" +
+               std::to_string(original_transaction_id_.value()) +
+               ",\"replacementTransactionId\":" +
+               std::to_string(replacement_transaction_id_.value()) +
+               ",\"originalAccountId\":" +
+               std::to_string(original_account_id_.value()) +
+               ",\"replacementAccountId\":" +
+               std::to_string(replacement_account_id_.value()) + "}";
+    }
+
+private:
+    TransactionId original_transaction_id_;
+    TransactionId replacement_transaction_id_;
+    AccountId original_account_id_;
+    AccountId replacement_account_id_;
+};
+
 class AccountUpdatedEvent final : public UserScopedEvent {
 public:
     AccountUpdatedEvent(
