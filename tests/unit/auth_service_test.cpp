@@ -298,8 +298,31 @@ TEST_F(AuthServiceTest, Logout_RevokesRefreshAndCurrentAccessTokenAtomically) {
     EXPECT_TRUE(store_.refresh_tokens.at(refresh_hash).revoked_at.has_value());
     const auto access_key = claims->issuer + "\n" + claims->token_id;
     EXPECT_TRUE(store_.revoked_access_tokens.contains(access_key));
+    EXPECT_TRUE(store_.revoked_sessions.contains(claims->session_id));
     EXPECT_EQ(store_.audit_logs.back().action, AuditAction::Logout);
     EXPECT_EQ(store_.outbox.back().event_name, "UserLoggedOut");
+}
+
+TEST_F(AuthServiceTest, Logout_WithRotatedTokenRevokesReplacementSession) {
+    const auto registered = register_alice();
+    auto claims = tokens_.validate_access_token(
+        registered.tokens.access_token, clock_.now());
+    ASSERT_TRUE(claims.has_value());
+    const auto rotated = service_.refresh(
+        RefreshCommand{registered.tokens.refresh_token});
+    ASSERT_TRUE(rotated.has_value()) << rotated.error().message;
+
+    // A logout already in flight may still carry the just-rotated token. It
+    // remains sufficient to identify and revoke the whole session.
+    const auto logged_out = service_.logout(
+        LogoutCommand{*claims, registered.tokens.refresh_token});
+    ASSERT_TRUE(logged_out.has_value()) << logged_out.error().message;
+
+    const auto replacement = service_.refresh(
+        RefreshCommand{rotated->refresh_token});
+    ASSERT_FALSE(replacement.has_value());
+    EXPECT_EQ(replacement.error().code, ErrorCode::InvalidToken);
+    EXPECT_TRUE(store_.revoked_sessions.contains(claims->session_id));
 }
 
 TEST(BootstrapTransactionTest, TenantCanOnlyBeBoundOnce) {

@@ -76,6 +76,7 @@ def main() -> int:
 
     operation_ids: list[str] = []
     overload_ref = "#/components/responses/ServiceUnavailable"
+    unauthorized_ref = "#/components/responses/Unauthorized"
     for path, path_item in paths.items():
         for method, operation in path_item.items():
             if method not in {"get", "post", "put", "delete", "patch"}:
@@ -88,6 +89,14 @@ def main() -> int:
             if operation.get("responses", {}).get("503", {}).get("$ref") != overload_ref:
                 failures.append(
                     f"{method.upper()} {path} must publish the bounded-queue 503 response"
+                )
+            security = operation.get("security", document.get("security", []))
+            if security and (
+                operation.get("responses", {}).get("401", {}).get("$ref")
+                != unauthorized_ref
+            ):
+                failures.append(
+                    f"{method.upper()} {path} must publish the authenticated 401 response"
                 )
     if len(operation_ids) != len(set(operation_ids)):
         failures.append("OpenAPI operationId values must be unique")

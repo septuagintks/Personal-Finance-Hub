@@ -44,8 +44,15 @@ HttpResponse ApiApplication::handle(HttpRequest request) noexcept {
     if (request.trace_id.empty()) {
         request.trace_id = generate_trace_id();
     }
+    const bool prevent_storage =
+        !JwtFilter::is_public_route(request.method, request.path) ||
+        request.path.starts_with("/api/v1/auth/") ||
+        request.path.starts_with("/api/v1/web/auth/");
     auto finalize = [&](HttpResponse response) {
         response.headers.insert_or_assign("X-Trace-Id", request.trace_id);
+        if (prevent_storage) {
+            response.headers.insert_or_assign("Cache-Control", "no-store");
+        }
         return response;
     };
     try {

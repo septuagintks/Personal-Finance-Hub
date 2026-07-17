@@ -187,6 +187,7 @@ TEST_F(AuthApiTest, Register_ReturnsCreatedTokenPairWithoutSensitiveFields) {
 
     ASSERT_EQ(response.status, 201) << response.body;
     EXPECT_TRUE(response.headers.contains("X-Trace-Id"));
+    EXPECT_EQ(response.headers.at("Cache-Control"), "no-store");
     const auto body = nlohmann::json::parse(response.body);
     EXPECT_TRUE(body["userId"].is_number_integer());
     EXPECT_TRUE(body["accessToken"].is_string());
@@ -216,6 +217,7 @@ TEST_F(AuthApiTest, Login_UsesStableUnauthorizedResponseForWrongPassword) {
         {{"username", "alice@example.com"}, {"password", "wrong password"}});
 
     ASSERT_EQ(response.status, 401);
+    EXPECT_EQ(response.headers.at("Cache-Control"), "no-store");
     const auto body = nlohmann::json::parse(response.body);
     EXPECT_EQ(body["message"], "Invalid or expired access token");
     EXPECT_FALSE(response.body.contains("password"));

@@ -153,9 +153,19 @@ export const useSessionStore = defineStore('session', () => {
 
   async function logout(): Promise<void> {
     const shouldRevokeServerSession = isAuthenticated.value;
-    clearRefreshState();
     try {
-      if (shouldRevokeServerSession) await logoutWeb();
+      if (shouldRevokeServerSession) {
+        await serializeRefresh(async () => {
+          try {
+            await logoutWeb();
+          } catch (error) {
+            if (!(error instanceof ApiError) || error.details.status !== 401) throw error;
+            const pair = await refreshWeb();
+            setAccessToken(pair.accessToken);
+            await logoutWeb();
+          }
+        });
+      }
     } finally {
       clear();
       broadcastSessionState('anonymous');

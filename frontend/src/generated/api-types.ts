@@ -1162,6 +1162,7 @@ export interface operations {
                     "application/json": components["schemas"]["CategoryTree"][];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -1188,6 +1189,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
             503: components["responses"]["ServiceUnavailable"];
@@ -1211,6 +1213,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             503: components["responses"]["ServiceUnavailable"];
@@ -1234,6 +1237,7 @@ export interface operations {
                     "application/json": components["schemas"]["Tag"][];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -1260,6 +1264,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
             409: components["responses"]["Conflict"];
             503: components["responses"]["ServiceUnavailable"];
         };
@@ -1282,6 +1287,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             503: components["responses"]["ServiceUnavailable"];
         };
@@ -1304,6 +1310,7 @@ export interface operations {
                     "application/json": components["schemas"]["UserPreference"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -1330,6 +1337,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -1358,6 +1366,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
@@ -1382,6 +1391,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
@@ -1413,6 +1423,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             503: components["responses"]["ServiceUnavailable"];
         };
@@ -1442,6 +1453,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
@@ -1468,6 +1480,7 @@ export interface operations {
                     "application/json": components["schemas"]["Transfer"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             503: components["responses"]["ServiceUnavailable"];
         };
@@ -1490,6 +1503,7 @@ export interface operations {
                     "application/json": components["schemas"]["NetWorth"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             422: components["responses"]["RuleViolation"];
             503: components["responses"]["ServiceUnavailable"];
         };
@@ -1517,6 +1531,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
             422: components["responses"]["RuleViolation"];
             503: components["responses"]["ServiceUnavailable"];
         };
@@ -1539,6 +1554,7 @@ export interface operations {
                     "application/json": components["schemas"]["DashboardSummary"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             422: components["responses"]["RuleViolation"];
             503: components["responses"]["ServiceUnavailable"];
         };

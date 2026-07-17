@@ -22,6 +22,7 @@ Architecture: Clean Architecture (Presentation Layer)
 
 - 成功响应：直接返回数据对象（对象或数组）。
 - 失败响应：统一采用标准错误格式：`error_code`、`message`、`trace_id`、`retryable` 和 `field_errors`。
+- 认证资源和所有令牌端点统一返回 `Cache-Control: no-store`；公共货币目录保留独立的公开缓存与 ETag 规则。
 
 ### 1.2 C++23 std::expected 与 HTTP 状态码映射矩阵
 
@@ -43,14 +44,14 @@ Architecture: Clean Architecture (Presentation Layer)
 写请求发生暂时性基础设施故障时，`retryable` 由服务端决定；前端不得据此自动重试非幂等请求。
 所有已注册 API 都可能在进入 Application 前因有界请求队列饱和返回 `503`；该响应使用 `SERVICE_UNAVAILABLE`、原请求 `trace_id`、`retryable: true` 和 `Retry-After: 1`，且不会开始业务事务。
 
-### 1.4 幂等与并发
+### 1.3 幂等与并发
 
 - `POST /api/v1/transactions` 和 `POST /api/v1/transfers` 必须携带可打印 ASCII 的 `Idempotency-Key`，长度为 1 至 128。
 - 同一用户、操作和键的同一请求返回原始 DTO；请求指纹不同返回 `409 Conflict`。
 - 用户主动重试同一写入意图时复用原键；客户端超时不得自动生成新键。
 - 版本保护使用一个强 ETag，例如 `If-Match: "3"`；弱 ETag、多个值和非法版本返回结构化 `400`，版本冲突返回 `409`。
 
-### 1.3 金额与符号边界
+### 1.4 金额与符号边界
 
 REST、Application、Domain 与 PostgreSQL 必须按以下边界转换，禁止把数据库符号约定直接泄漏给调用方：
 

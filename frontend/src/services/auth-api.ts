@@ -41,7 +41,7 @@ export async function refreshWeb(signal?: AbortSignal): Promise<WebTokenPair> {
 }
 
 export async function logoutWeb(): Promise<void> {
-  await http.post('/api/v1/web/auth/logout', undefined, { _pfhReplayAfterRefresh: true });
+  await http.post('/api/v1/web/auth/logout', undefined, skipRefresh());
 }
 
 export function installRefreshHandler(): void {

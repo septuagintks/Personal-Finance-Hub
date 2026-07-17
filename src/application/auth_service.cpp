@@ -448,12 +448,19 @@ VoidResult AuthService::logout(const LogoutCommand& command) {
                 return std::unexpected(domain::RepositoryError::validation(
                     "Refresh token session mismatch"));
             }
-            if (!refresh->revoked_at.has_value()) {
-                if (auto revoked = sessions_.revoke_refresh_token(
-                        tx, *refresh_hash, now);
-                    !revoked) {
-                    return revoked;
-                }
+            // Logout invalidates the whole login session, not only the refresh
+            // token presented by this request. This closes the rotation race
+            // where a concurrent refresh has already created a replacement
+            // token in the same session.
+            if (auto revoked = sessions_.revoke_session(
+                    tx,
+                    command.access_claims.user_id,
+                    command.access_claims.session_id,
+                    now,
+                    now + tokens_.refresh_token_lifetime(),
+                    "logout");
+                !revoked) {
+                return revoked;
             }
             if (auto revoked = sessions_.revoke_access_token(
                     tx, command.access_claims, now);

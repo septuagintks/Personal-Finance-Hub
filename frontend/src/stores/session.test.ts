@@ -1,7 +1,7 @@
-import { HttpResponse, http as mockHttp } from 'msw';
+import { HttpResponse, delay, http as mockHttp } from 'msw';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
-import { getAccessToken } from '../services/http';
+import { getAccessToken, http } from '../services/http';
 import { server } from '../test/server';
 import { useSessionStore } from './session';
 import { useAccountStore } from './accounts';
@@ -99,6 +99,57 @@ describe('session context lifecycle', () => {
     expect(session.status).toBe('anonymous');
     expect(session.isAuthenticated).toBe(false);
     expect(context.preference).toBeNull();
+    expect(getAccessToken()).toBeNull();
+  });
+
+  it('waits for an in-flight refresh before revoking the rotated session', async () => {
+    installSessionHandlers();
+    const session = useSessionStore();
+    await session.login({ username: 'user-a@example.com', password: 'correct password' });
+
+    let releaseRefresh: () => void = () => {};
+    const refreshGate = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    let markRefreshStarted: () => void = () => {};
+    const refreshStarted = new Promise<void>((resolve) => {
+      markRefreshStarted = resolve;
+    });
+    let probeCalls = 0;
+    let logoutAuthorization = '';
+    server.use(
+      mockHttp.get('*/api/v1/session-race-probe', () => {
+        probeCalls += 1;
+        return probeCalls === 1
+          ? HttpResponse.json({}, { status: 401 })
+          : HttpResponse.json({ ok: true });
+      }),
+      mockHttp.post('*/api/v1/web/auth/refresh', async () => {
+        markRefreshStarted();
+        await refreshGate;
+        return HttpResponse.json({
+          accessToken: 'access-rotated',
+          expiresIn: 900,
+          tokenType: 'Bearer',
+        });
+      }),
+      mockHttp.post('*/api/v1/web/auth/logout', ({ request }) => {
+        logoutAuthorization = request.headers.get('authorization') ?? '';
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    const probe = http.get('/api/v1/session-race-probe');
+    await refreshStarted;
+    const logout = session.logout();
+    await delay(20);
+    expect(logoutAuthorization).toBe('');
+
+    releaseRefresh();
+    await expect(probe).resolves.toBeDefined();
+    await expect(logout).resolves.toBeUndefined();
+    expect(logoutAuthorization).toBe('Bearer access-rotated');
+    expect(session.status).toBe('anonymous');
     expect(getAccessToken()).toBeNull();
   });
 });

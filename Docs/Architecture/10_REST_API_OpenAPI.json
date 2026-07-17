@@ -532,6 +532,9 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
@@ -569,6 +572,9 @@
           "422": {
             "$ref": "#/components/responses/RuleViolation"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
@@ -593,6 +599,9 @@
           "409": {
             "$ref": "#/components/responses/Conflict"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
@@ -615,6 +624,9 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
@@ -650,6 +662,9 @@
           "409": {
             "$ref": "#/components/responses/Conflict"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
@@ -671,6 +686,9 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
@@ -690,6 +708,9 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
@@ -721,6 +742,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
@@ -764,6 +788,9 @@
           "422": {
             "$ref": "#/components/responses/RuleViolation"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
@@ -795,6 +822,9 @@
           },
           "422": {
             "$ref": "#/components/responses/RuleViolation"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
@@ -840,6 +870,9 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
@@ -882,6 +915,9 @@
           "422": {
             "$ref": "#/components/responses/RuleViolation"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
@@ -915,6 +951,9 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
@@ -937,6 +976,9 @@
           },
           "422": {
             "$ref": "#/components/responses/RuleViolation"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
@@ -993,6 +1035,9 @@
           "422": {
             "$ref": "#/components/responses/RuleViolation"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
@@ -1015,6 +1060,9 @@
           },
           "422": {
             "$ref": "#/components/responses/RuleViolation"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
