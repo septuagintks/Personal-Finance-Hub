@@ -218,16 +218,15 @@ void DrogonHttpAdapter::configure() {
         drogon::Post);
 
     drogon::app().setExceptionHandler(
-        [](const std::exception& error,
+        [](const std::exception&,
            const drogon::HttpRequestPtr& request,
            std::function<void(const drogon::HttpResponsePtr&)>&& callback) {
             const auto trace_id = ApiApplication::generate_trace_id();
             spdlog::error(
-                "Unhandled HTTP exception trace_id={} method={} path={} error={}",
+                "Unhandled HTTP exception trace_id={} method={} path={}",
                 trace_id,
                 request->methodString(),
-                request->path(),
-                error.what());
+                request->path());
             auto response = HttpResponseMapper::unexpected(trace_id);
             response.headers.insert_or_assign("X-Trace-Id", trace_id);
             callback(to_drogon(std::move(response)));

@@ -16,6 +16,7 @@ import {
   type CreateCategoryRequest,
   type Tag,
 } from '../services/metadata-api';
+import { createIntentKeyTracker } from '../services/idempotency';
 
 export const useMetadataStore = defineStore('metadata', () => {
   const categories = ref<CategoryTree[]>([]);
@@ -28,6 +29,8 @@ export const useMetadataStore = defineStore('metadata', () => {
   let categoryController: AbortController | null = null;
   let tagController: AbortController | null = null;
   let actionController: AbortController | null = null;
+  const categoryCreateIntent = createIntentKeyTracker('category');
+  const tagCreateIntent = createIntentKeyTracker('tag');
 
   async function loadCategories(): Promise<boolean> {
     const currentLifecycle = lifecycle;
@@ -109,10 +112,22 @@ export const useMetadataStore = defineStore('metadata', () => {
     actionController = null;
   }
 
+  function releaseFailedAction(action: { controller: AbortController }): void {
+    if (actionController === action.controller) actionController = null;
+  }
+
   async function createCategoryItem(payload: CreateCategoryRequest): Promise<Category> {
     const action = beginAction();
-    const result = await createCategory(payload, action.controller.signal);
+    const intentKey = categoryCreateIntent.keyFor(payload);
+    let result: Category;
+    try {
+      result = await createCategory(payload, intentKey, action.controller.signal);
+    } catch (error) {
+      releaseFailedAction(action);
+      throw error;
+    }
     ensureCurrent(action);
+    categoryCreateIntent.complete(intentKey);
     await loadCategories();
     return result;
   }
@@ -145,8 +160,17 @@ export const useMetadataStore = defineStore('metadata', () => {
 
   async function createTagItem(name: string): Promise<Tag> {
     const action = beginAction();
-    const result = await createTag({ name }, action.controller.signal);
+    const payload = { name };
+    const intentKey = tagCreateIntent.keyFor(payload);
+    let result: Tag;
+    try {
+      result = await createTag(payload, intentKey, action.controller.signal);
+    } catch (error) {
+      releaseFailedAction(action);
+      throw error;
+    }
     ensureCurrent(action);
+    tagCreateIntent.complete(intentKey);
     await loadTags();
     return result;
   }
@@ -180,6 +204,8 @@ export const useMetadataStore = defineStore('metadata', () => {
     categoryController?.abort();
     tagController?.abort();
     actionController?.abort();
+    categoryCreateIntent.clear();
+    tagCreateIntent.clear();
     categoryController = null;
     tagController = null;
     actionController = null;

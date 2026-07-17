@@ -56,7 +56,15 @@ SELECT format(
     :'request_user')
 \gexec
 SELECT format(
-    'GRANT SELECT ON public.accounts, public.users TO %I',
+    'REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM %I',
+    :'background_user')
+\gexec
+SELECT format(
+    'GRANT SELECT (currency_code, is_archived) ON public.accounts TO %I',
+    :'background_user')
+\gexec
+SELECT format(
+    'GRANT SELECT (base_currency_code) ON public.users TO %I',
     :'background_user')
 \gexec
 

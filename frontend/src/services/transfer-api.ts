@@ -12,11 +12,6 @@ export interface TransferFilters {
   pageSize?: number;
 }
 
-export function newTransferIntentKey(correction = false): string {
-  const random = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
-  return `${correction ? 'transfer-correction' : 'transfer'}-${random}`;
-}
-
 export async function listTransfers(
   filters: TransferFilters,
   cursor?: string,

@@ -38,11 +38,11 @@ const update: UpdateAccountRequest = {
 };
 
 describe('account API contract', () => {
-  it('assigns a new replay-safe intent key to each account create', async () => {
-    const keys: string[] = [];
+  it('forwards the caller-owned intent key on account creation', async () => {
+    let receivedKey = '';
     server.use(
       mockHttp.post('*/api/v1/accounts', ({ request }) => {
-        keys.push(request.headers.get('idempotency-key') ?? '');
+        receivedKey = request.headers.get('idempotency-key') ?? '';
         return HttpResponse.json(account, { status: 201 });
       }),
     );
@@ -55,12 +55,9 @@ describe('account API contract', () => {
       currencyCode: account.currencyCode,
       description: account.description,
     };
-    await createAccount(payload);
-    await createAccount(payload);
+    await createAccount(payload, 'account-stable-intent');
 
-    expect(keys[0]).toMatch(/^account-\S+$/);
-    expect(keys[1]).toMatch(/^account-\S+$/);
-    expect(keys[0]).not.toBe(keys[1]);
+    expect(receivedKey).toBe('account-stable-intent');
   });
 
   it('passes the requested archive status to the list endpoint', async () => {

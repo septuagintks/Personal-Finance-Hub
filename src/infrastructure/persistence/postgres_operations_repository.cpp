@@ -163,7 +163,7 @@ PostgresOperationsRepository::list_dead_letters(
         if (cursor_value.has_value()) {
             const auto exists = db_->execSqlSync(
                 "SELECT 1 FROM domain_events_outbox "
-                "WHERE id = $1::uuid AND status = 'dead_letter'::outbox_status",
+                "WHERE id = $1::uuid",
                 *cursor_value);
             if (exists.empty()) {
                 return std::unexpected(domain::RepositoryError::validation(

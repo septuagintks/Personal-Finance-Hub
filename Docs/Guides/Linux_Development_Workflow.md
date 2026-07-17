@@ -108,7 +108,7 @@ Production runtime 要求：
 
 - request role：non-superuser、non-BYPASSRLS。
 - background role：独立、non-superuser、BYPASSRLS、`default_transaction_read_only=on`。
-- background role 只具有批准的跨租户只读权限。
+- background role 仅具有 `accounts(currency_code, is_archived)` 与 `users(base_currency_code)` 的列级 `SELECT` 权限；`users.password_hash` 等其他字段必须不可读。
 - 租户表保持 ENABLE/FORCE RLS。
 - USER/OPERATOR 是 `users.role` 中的应用授权事实，不是数据库角色；Operator HTTP 请求仍使用 request role。
 - V10 幂等清理函数只向 request role 授予 EXECUTE，不授予 `request_idempotency` 的跨租户直接读写。

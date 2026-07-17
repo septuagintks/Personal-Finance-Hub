@@ -17,11 +17,6 @@ export interface TransactionFilters {
   pageSize?: number;
 }
 
-export function newFinancialIntentKey(prefix: 'transaction' | 'correction'): string {
-  const random = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
-  return `${prefix}-${random}`;
-}
-
 export async function listTransactions(
   filters: TransactionFilters,
   cursor?: string,

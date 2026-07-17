@@ -11,6 +11,7 @@ import {
   type OperationsSummary,
 } from '../services/operations-api';
 import { formatInstant } from '../services/presentation';
+import { createIntentKeyTracker } from '../services/idempotency';
 import { useUserContextStore } from '../stores/user-context';
 
 const userContext = useUserContextStore();
@@ -23,7 +24,10 @@ const retryingId = ref('');
 const error = ref('');
 const errorTraceId = ref('');
 let requestController: AbortController | null = null;
+let loadMoreController: AbortController | null = null;
 let retryController: AbortController | null = null;
+let requestGeneration = 0;
+const retryIntent = createIntentKeyTracker('dead-letter');
 
 const presentationLocale = computed(() => ({
   locale: userContext.preference?.locale ?? 'en-US',
@@ -61,8 +65,11 @@ function displayTime(value: string | null): string {
 }
 
 async function load(): Promise<void> {
-  if (loading.value) return;
+  const generation = ++requestGeneration;
   requestController?.abort();
+  loadMoreController?.abort();
+  loadMoreController = null;
+  loadingMore.value = false;
   const controller = new AbortController();
   requestController = controller;
   loading.value = true;
@@ -72,12 +79,14 @@ async function load(): Promise<void> {
       getOperationsSummary(controller.signal),
       listDeadLetters(undefined, 50, controller.signal),
     ]);
-    if (controller.signal.aborted) return;
+    if (generation !== requestGeneration || controller.signal.aborted) return;
     summary.value = overview;
     deadLetters.value = page.items;
     nextCursor.value = page.nextCursor;
   } catch (reason) {
-    if (!controller.signal.aborted) showError(reason, 'Operational status could not be loaded.');
+    if (generation === requestGeneration && !controller.signal.aborted) {
+      showError(reason, 'Operational status could not be loaded.');
+    }
   } finally {
     if (requestController === controller) {
       requestController = null;
@@ -88,16 +97,27 @@ async function load(): Promise<void> {
 
 async function loadMore(): Promise<void> {
   if (!nextCursor.value || loadingMore.value) return;
+  const cursor = nextCursor.value;
+  const generation = requestGeneration;
+  loadMoreController?.abort();
+  const controller = new AbortController();
+  loadMoreController = controller;
   loadingMore.value = true;
   clearError();
   try {
-    const page = await listDeadLetters(nextCursor.value, 50);
+    const page = await listDeadLetters(cursor, 50, controller.signal);
+    if (generation !== requestGeneration || controller.signal.aborted) return;
     deadLetters.value = [...deadLetters.value, ...page.items];
     nextCursor.value = page.nextCursor;
   } catch (reason) {
-    showError(reason, 'More dead letters could not be loaded.');
+    if (generation === requestGeneration && !controller.signal.aborted) {
+      showError(reason, 'More dead letters could not be loaded.');
+    }
   } finally {
-    loadingMore.value = false;
+    if (loadMoreController === controller) {
+      loadMoreController = null;
+      loadingMore.value = false;
+    }
   }
 }
 
@@ -108,9 +128,13 @@ async function retry(item: DeadLetterItem): Promise<void> {
   retryController = controller;
   retryingId.value = item.id;
   clearError();
+  const intentKey = retryIntent.keyFor({ outboxId: item.id });
   try {
-    await retryDeadLetter(item.id, controller.signal);
-    if (!controller.signal.aborted) await load();
+    await retryDeadLetter(item.id, intentKey, controller.signal);
+    if (!controller.signal.aborted) {
+      retryIntent.complete(intentKey);
+      await load();
+    }
   } catch (reason) {
     if (!controller.signal.aborted) showError(reason, 'The dead letter could not be retried.');
   } finally {
@@ -123,8 +147,11 @@ async function retry(item: DeadLetterItem): Promise<void> {
 
 onMounted(load);
 onBeforeUnmount(() => {
+  requestGeneration += 1;
   requestController?.abort();
+  loadMoreController?.abort();
   retryController?.abort();
+  retryIntent.clear();
 });
 </script>
 

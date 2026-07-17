@@ -4,7 +4,7 @@ import { server } from '../test/server';
 import { createCategory, createTag } from './metadata-api';
 
 describe('metadata API contract', () => {
-  it('uses distinct intent keys for category and tag creates', async () => {
+  it('forwards the caller-owned category and tag intent keys', async () => {
     const keys: string[] = [];
     server.use(
       mockHttp.post('*/api/v1/categories', ({ request }) => {
@@ -42,11 +42,12 @@ describe('metadata API contract', () => {
       }),
     );
 
-    await createCategory({ name: 'Food', board: 'expense', parentId: null });
-    await createTag({ name: 'tax' });
+    await createCategory(
+      { name: 'Food', board: 'expense', parentId: null },
+      'category-stable-intent',
+    );
+    await createTag({ name: 'tax' }, 'tag-stable-intent');
 
-    expect(keys[0]).toMatch(/^category-\S+$/);
-    expect(keys[1]).toMatch(/^tag-\S+$/);
-    expect(keys[0]).not.toBe(keys[1]);
+    expect(keys).toEqual(['category-stable-intent', 'tag-stable-intent']);
   });
 });

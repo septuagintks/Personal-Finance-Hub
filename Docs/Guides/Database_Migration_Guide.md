@@ -162,7 +162,7 @@ flyway validate
 3. `info`、`validate` 与第二次 no-op。
 4. 种子数量、父子关系、enum cast、CHECK、FK 和索引。
 5. FORCE RLS、两用户隔离与未绑定 tenant fail closed。
-6. request/background 角色权限。
+6. request/background 角色权限；background 仅能读取活跃币种查询所需三列，不能读取 `users.password_hash` 或执行写入。
 7. V10 USER/OPERATOR 数据、Operator retry command、Audit/TraceId 与 `SECURITY DEFINER` 函数权限。
 8. `NUMERIC`、事务、Repository 和 Outbox fixture。
 9. Docker cold start 与应用 runtime smoke。

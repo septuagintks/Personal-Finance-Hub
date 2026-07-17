@@ -95,7 +95,7 @@ test/         test setup、MSW 与 fixtures
 - OpenAPI operation 必须有唯一 `operationId`。
 - API DTO 从 OpenAPI 生成，生成结果漂移会使质量门禁失败。
 - 列表使用稳定游标和确定性排序，不把全量流水加载到浏览器。
-- 账户、分类、标签和金融创建请求携带 `Idempotency-Key`；同一操作意图重试时复用该键。
+- 账户、分类、标签、金融创建/更正和 dead-letter 重试携带 `Idempotency-Key`。Store 以规范化请求负载标识用户意图：响应未确认时，同一意图重试必须复用原键；只有成功响应、负载改变或会话清理后才能释放该键。
 - 非幂等写请求不会被 Axios 自动重试。
 - `409` 表达幂等冲突或版本冲突，前端必须保留用户输入并显示可恢复动作。
 
@@ -106,7 +106,7 @@ test/         test setup、MSW 与 fixtures
 - Refresh Token 只存在于 `HttpOnly`、`Secure`、`SameSite=Strict` Cookie，JavaScript 不可读取。
 - 应用启动执行一次静默 refresh；单标签页并发 401 共享同一 Promise。
 - 跨标签页使用 Web Locks（不可用时使用租约式 localStorage mutex）串行 refresh，并通过 `BroadcastChannel` 只广播会话状态，不广播 Token。
-- Session Store 只在内存保存服务端返回的唯一 `USER` 或 `OPERATOR` role；自动 refresh 后必须同步替换 role，不能沿用旧 Token 的权限投影。
+- Session Store 只在内存保存服务端返回的唯一 `USER` 或 `OPERATOR` role；自动 refresh 只有通过当前会话 generation 校验后，才能同时接纳新 Access Token 和 role，退出或新认证开始前发出的迟到 refresh 不得更新权限投影。
 - Logout、reuse detection 或 session 撤销会清除内存 Token、用户 Store 和路由状态。
 - 现有 `/api/v1/auth/*` JSON Token API 只服务非浏览器调用方，Web 前端不得使用。
 

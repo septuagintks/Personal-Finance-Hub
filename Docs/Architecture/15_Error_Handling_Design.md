@@ -274,28 +274,25 @@ Drogon 支持通过 `setExceptionHandler` 注册全局异常处理器：
 #include <uuid/uuid.h> // 或使用 Boost.UUID
 
 void setupGlobalExceptionHandler() {
-    drogon::app().setExceptionHandler([](const std::exception& e,
+    drogon::app().setExceptionHandler([](const std::exception&,
                                           const drogon::HttpRequestPtr& req,
                                           std::function<void(drogon::HttpResponsePtr)>&& callback) {
         // 1. 生成唯一追踪 ID
         std::string traceId = generateTraceId();
 
-        // 2. 记录服务端日志（包含完整异常信息）
+        // 2. 只记录受控定位字段，不记录任意 exception.what() 文本
         LOG_ERROR << "[trace_id=" << traceId << "] "
-                  << "Unhandled exception: " << e.what()
-                  << " | path=" << req->path()
-                  << " | method=" << req->methodString();
-
-        // 可选：记录堆栈跟踪（生产环境推荐）
-        // LOG_ERROR << "Stack trace: " << getStackTrace();
+                  << "Unhandled HTTP exception"
+                  << " | method=" << req->methodString()
+                  << " | path=" << req->path();
 
         // 3. 构造安全的前端响应（不泄露敏感信息）
         Json::Value errorBody;
         errorBody["error_code"] = "INTERNAL_SERVER_ERROR";
         errorBody["message"] = "An unexpected error occurred. Please contact support if the problem persists.";
         errorBody["trace_id"] = traceId;
-        errorBody["path"] = req->path();
-        errorBody["timestamp"] = getCurrentTimestampISO8601();
+        errorBody["retryable"] = false;
+        errorBody["field_errors"] = Json::Value(Json::objectValue);
 
         auto response = drogon::HttpResponse::newHttpJsonResponse(errorBody);
         response->setStatusCode(drogon::k500InternalServerError);
@@ -365,14 +362,14 @@ std::expected<Account, RepositoryError> AccountRepositoryImpl::findById(int64_t 
 
         return mapToAccount(result[0]);
 
-    } catch (const drogon::orm::DrogonDbException& e) {
-        LOG_ERROR << "Database exception in findById: " << e.base().what();
+    } catch (const drogon::orm::DrogonDbException&) {
+        LOG_ERROR << "Database operation failed operation=find_account_by_id";
         return std::unexpected(RepositoryError{
             RepositoryStatus::DatabaseError,
             "Database query failed"
         });
-    } catch (const std::exception& e) {
-        LOG_ERROR << "Unexpected exception in findById: " << e.what();
+    } catch (const std::exception&) {
+        LOG_ERROR << "Unexpected repository failure operation=find_account_by_id";
         return std::unexpected(RepositoryError{
             RepositoryStatus::DatabaseError,
             "Unexpected database error"
@@ -444,18 +441,17 @@ void TransferController::createTransfer(
    - 数据库连接字符串
    - JWT 密钥或 token 内容
 
-2. **必须记录到服务端日志**：
-   - 完整异常信息 `e.what()`
+2. **顶层兜底日志只记录受控字段**：
    - 请求路径和方法
    - TraceId
    - 用户 ID（如果已认证）
-   - 可选：堆栈跟踪
+   - 固定的异常类别或操作名
+   - 不得记录任意 `e.what()`、SQL、连接串、Provider 响应、认证材料或未经清洗的用户输入；需要深度诊断时使用访问受限且经过脱敏的遥测通道
 
 3. **前端响应只包含**：
    - 固定的通用错误消息
    - TraceId（用户可提供给客服）
-   - 时间戳
-   - 请求路径（不泄露参数）
+   - 固定错误码、`retryable` 和受控 `field_errors`
 
 4. **监控告警**：
    - 全局异常处理器触发时，应发送监控告警

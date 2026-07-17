@@ -62,6 +62,7 @@ describe('user context store', () => {
     expect(store.status).toBe('idle');
     expect(store.preference).toBeNull();
     expect(store.currencies).toEqual([]);
+    await delay(90);
   });
 
   it('keeps only the newest user context during a user switch', async () => {
@@ -91,6 +92,7 @@ describe('user context store', () => {
     await expect(first).resolves.toBe(false);
     expect(store.preference?.baseCurrency).toBe('CNY');
     expect(store.currencies.map(({ code }) => code)).toEqual(['CNY']);
+    await delay(90);
   });
 
   it('does not retain partial data when either request fails', async () => {
@@ -147,6 +149,7 @@ describe('user context store', () => {
     await expect(first).rejects.toBeDefined();
     expect(store.preference?.baseCurrency).toBe('USD');
     expect(store.aggregationRevision).toBe(1);
+    await delay(70);
     store.clear();
   });
 });

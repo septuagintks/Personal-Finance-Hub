@@ -94,7 +94,7 @@ public:
 系统级“活跃币种”查询不属于租户账户仓储。它必须合并所有未归档账户币种与 `users.base_currency_code`；否则用户把报表基准币种设为一个没有对应账户的币种时，USD 枢纽刷新会缺少该侧汇率。后台任务不携带 `UserId`，而 `accounts` 已启用 FORCE RLS；若把该方法留在 request-scoped `IAccountRepository`，它只能看到单个租户或在未设置 GUC 时返回空集合。因此 Application 单独定义 `IActiveCurrencyQuery::list_active_currencies()` 端口：
 
 - In-Memory adapter 可直接遍历全部未归档账户。
-- PostgreSQL adapter 必须使用独立的后台只读 DbClient/数据库角色，该角色具备跨租户读取所需权限。
+- PostgreSQL adapter 必须使用独立的后台只读 DbClient/数据库角色；该角色仅获授 `accounts(currency_code, is_archived)` 与 `users(base_currency_code)` 的列级 `SELECT` 权限。
 - request-serving DbClient 不得复用该特权角色，`PostgresActiveCurrencyQuery` 也不得注入 Controller 或普通用户 Use Case。
 - 角色、连接与最小权限的实际装配在 P1-S10-04 完成，并在 S12 验证 request 连接无法绕过 RLS。
 

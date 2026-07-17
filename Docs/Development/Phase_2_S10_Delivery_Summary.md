@@ -26,10 +26,17 @@ Status: Implementation Complete; Target-Environment Validation Pending
 - Full CTest, including maintenance, authorization, operations, OpenAPI, and PostgreSQL structural contracts: `380/380 PASS`.
 - OpenAPI parse/static route checks and Flyway enum-cast structural gate: PASS.
 - Frontend TypeScript, ESLint, Prettier, generated-type drift, and production build: PASS.
-- Vitest/MSW: `59/59 PASS`.
+- Vitest/MSW: `61/61 PASS`.
 - Full Edge E2E: `34/34 PASS`; S10 Desktop/Mobile maintenance and operations slice: `5/5 PASS`, with axe and page-overflow checks.
 
-## 4. Remaining Target Validation
+## 4. S06-S10 Review Closure
+
+- Browser write intents retain one canonical-payload idempotency key across unconfirmed responses. Successful acceptance, changed input, or session cleanup is required before a new key is issued.
+- Automatic refresh applies token and role changes only after the current session generation accepts the result. Maintenance and Operations pagination cancel superseded requests and reject late responses.
+- Dead-letter cursors remain valid when the cursor event is concurrently rescheduled; result rows still expose only current dead letters and approved metadata.
+- The background database role can read only the three columns required by active-currency discovery. Top-level HTTP exception logs retain TraceId, method, and path without arbitrary exception text.
+
+## 5. Remaining Target Validation
 
 - Execute V1-V10 migrate/info/validate/no-op and role initialization against a fresh PostgreSQL 16+ database.
 - Re-run RLS, role grants, pooled-connection isolation, balance rebuild, idempotency cleanup, and concurrent dead-letter retry against real PostgreSQL.

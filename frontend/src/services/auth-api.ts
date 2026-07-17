@@ -48,8 +48,10 @@ export function installRefreshHandler(onRefreshed?: (pair: WebTokenPair) => void
   registerRefreshHandler((signal) =>
     serializeRefresh(async () => {
       const response = await refreshWeb(signal);
-      onRefreshed?.(response);
-      return response.accessToken;
+      return {
+        accessToken: response.accessToken,
+        onAccepted: () => onRefreshed?.(response),
+      };
     }),
   );
 }

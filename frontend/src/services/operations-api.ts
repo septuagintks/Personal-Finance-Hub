@@ -1,6 +1,5 @@
 import type { components } from '../generated/api-types';
 import { http } from './http';
-import { newIntentKey } from './idempotency';
 
 export type OperationsSummary = components['schemas']['OperationsSummary'];
 export type DeadLetterItem = components['schemas']['DeadLetterItem'];
@@ -34,13 +33,14 @@ export async function listDeadLetters(
 
 export async function retryDeadLetter(
   outboxId: string,
+  idempotencyKey: string,
   signal?: AbortSignal,
 ): Promise<DeadLetterRetryResponse> {
   const response = await http.post<DeadLetterRetryResponse>(
     `/api/v1/operations/dead-letters/${encodeURIComponent(outboxId)}/retry`,
     undefined,
     {
-      headers: { 'Idempotency-Key': newIntentKey('dead-letter') },
+      headers: { 'Idempotency-Key': idempotencyKey },
       signal,
     },
   );

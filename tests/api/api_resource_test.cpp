@@ -1936,8 +1936,12 @@ TEST_F(ResourceApiTest, OperatorRoutesUseCurrentServerRoleAndSanitizeDeadLetters
     ASSERT_EQ(login_body["roles"], nlohmann::json::array({"OPERATOR"}));
     const auto operator_token = login_body["accessToken"].get<std::string>();
 
+    const std::string newest_dead_letter_id =
+        "00000000-0000-4000-8000-000000000002";
+    const std::string older_dead_letter_id =
+        "00000000-0000-4000-8000-000000000001";
     application::OutboxMessage dead_letter;
-    dead_letter.id = "dead-letter-1";
+    dead_letter.id = newest_dead_letter_id;
     dead_letter.event_name = "SensitiveEvent";
     dead_letter.aggregate_type = "Account";
     dead_letter.aggregate_id = "42";
@@ -1950,16 +1954,22 @@ TEST_F(ResourceApiTest, OperatorRoutesUseCurrentServerRoleAndSanitizeDeadLetters
     dead_letter.last_failed_at = clock_.now();
     dead_letter.created_at = clock_.now();
     store_.outbox.push_back(dead_letter);
+    dead_letter.id = older_dead_letter_id;
+    dead_letter.created_at -= std::chrono::seconds{1};
+    store_.outbox.push_back(dead_letter);
 
     const auto listed = request(
         HttpMethod::Get,
         "/api/v1/operations/dead-letters",
         {},
-        operator_token);
+        operator_token,
+        {{"pageSize", "1"}});
     ASSERT_EQ(listed.status, 200) << listed.body;
     EXPECT_EQ(listed.body.find("must-not-leak"), std::string::npos);
     const auto listed_body = nlohmann::json::parse(listed.body);
     ASSERT_EQ(listed_body["items"].size(), 1U);
+    ASSERT_TRUE(listed_body["nextCursor"].is_string());
+    EXPECT_EQ(listed_body["items"][0]["id"], newest_dead_letter_id);
     EXPECT_FALSE(listed_body["items"][0].contains("payload"));
     EXPECT_FALSE(listed_body["items"][0].contains("lastError"));
 
@@ -1967,21 +1977,21 @@ TEST_F(ResourceApiTest, OperatorRoutesUseCurrentServerRoleAndSanitizeDeadLetters
         {"Idempotency-Key", "dead-letter-retry-1"}};
     EXPECT_EQ(request(
         HttpMethod::Post,
-        "/api/v1/operations/dead-letters/dead-letter-1/retry",
+        "/api/v1/operations/dead-letters/00000000-0000-4000-8000-000000000002/retry",
         {},
         operator_token,
         {},
         {{"Idempotency-Key", "invalid key"}}).status, 400);
     const auto retried = request(
         HttpMethod::Post,
-        "/api/v1/operations/dead-letters/dead-letter-1/retry",
+        "/api/v1/operations/dead-letters/00000000-0000-4000-8000-000000000002/retry",
         {},
         operator_token,
         {},
         retry_key);
     const auto replayed = request(
         HttpMethod::Post,
-        "/api/v1/operations/dead-letters/dead-letter-1/retry",
+        "/api/v1/operations/dead-letters/00000000-0000-4000-8000-000000000002/retry",
         {},
         operator_token,
         {},
@@ -1990,9 +2000,23 @@ TEST_F(ResourceApiTest, OperatorRoutesUseCurrentServerRoleAndSanitizeDeadLetters
     ASSERT_EQ(replayed.status, 202) << replayed.body;
     EXPECT_FALSE(nlohmann::json::parse(retried.body)["replayed"]);
     EXPECT_TRUE(nlohmann::json::parse(replayed.body)["replayed"]);
+    const auto continued = request(
+        HttpMethod::Get,
+        "/api/v1/operations/dead-letters",
+        {},
+        operator_token,
+        {{"pageSize", "1"},
+         {"cursor", listed_body["nextCursor"].get<std::string>()}});
+    ASSERT_EQ(continued.status, 200) << continued.body;
+    const auto continued_body = nlohmann::json::parse(continued.body);
+    ASSERT_EQ(continued_body["items"].size(), 1U);
+    EXPECT_EQ(continued_body["items"][0]["id"], older_dead_letter_id);
+    EXPECT_TRUE(continued_body["nextCursor"].is_null());
     const auto retried_event = std::ranges::find_if(
         store_.outbox,
-        [](const auto& message) { return message.id == "dead-letter-1"; });
+        [&](const auto& message) {
+            return message.id == newest_dead_letter_id;
+        });
     ASSERT_NE(retried_event, store_.outbox.end());
     EXPECT_EQ(retried_event->status, application::OutboxStatus::Failed);
     EXPECT_EQ(store_.outbox_retry_commands.size(), 1U);

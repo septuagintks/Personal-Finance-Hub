@@ -31,6 +31,7 @@ const selectedAccountId = ref('');
 const rebuildItems = ref<BalanceCacheRebuildItem[]>([]);
 let auditController: AbortController | null = null;
 let rebuildController: AbortController | null = null;
+let auditGeneration = 0;
 
 const actionOptions: UserAuditAction[] = [
   'create',
@@ -76,11 +77,17 @@ function isoInput(value: string): string | undefined {
 }
 
 async function loadAudit(reset = true): Promise<void> {
-  if (auditLoading.value) return;
+  if (!reset && !nextCursor.value) return;
+  const cursor = reset ? undefined : (nextCursor.value ?? undefined);
+  const generation = ++auditGeneration;
   auditController?.abort();
   const controller = new AbortController();
   auditController = controller;
   auditLoading.value = true;
+  if (reset) {
+    auditItems.value = [];
+    nextCursor.value = null;
+  }
   clearError();
   try {
     const page = await listUserAuditLogs(
@@ -91,14 +98,16 @@ async function loadAudit(reset = true): Promise<void> {
         to: isoInput(toInput.value),
         pageSize: 50,
       },
-      reset ? undefined : (nextCursor.value ?? undefined),
+      cursor,
       controller.signal,
     );
-    if (controller.signal.aborted) return;
+    if (generation !== auditGeneration || controller.signal.aborted) return;
     auditItems.value = reset ? page.items : [...auditItems.value, ...page.items];
     nextCursor.value = page.nextCursor;
   } catch (reason) {
-    if (!controller.signal.aborted) showError(reason, 'Audit activity could not be loaded.');
+    if (generation === auditGeneration && !controller.signal.aborted) {
+      showError(reason, 'Audit activity could not be loaded.');
+    }
   } finally {
     if (auditController === controller) {
       auditController = null;
@@ -155,6 +164,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  auditGeneration += 1;
   auditController?.abort();
   rebuildController?.abort();
 });

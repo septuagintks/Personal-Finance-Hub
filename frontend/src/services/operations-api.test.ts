@@ -51,11 +51,11 @@ describe('operations API contract', () => {
     );
 
     await listDeadLetters('opaque-cursor', 25);
-    const result = await retryDeadLetter('dead-letter-1');
+    const result = await retryDeadLetter('dead-letter-1', 'dead-letter-stable-intent');
 
     expect(received.searchParams.get('cursor')).toBe('opaque-cursor');
     expect(received.searchParams.get('pageSize')).toBe('25');
-    expect(retryKey).toMatch(/^dead-letter-\S+$/);
+    expect(retryKey).toBe('dead-letter-stable-intent');
     expect(result.status).toBe('retry_scheduled');
   });
 });

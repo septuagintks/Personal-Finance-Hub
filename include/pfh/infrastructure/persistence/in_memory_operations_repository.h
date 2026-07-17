@@ -68,9 +68,25 @@ public:
                 "Dead-letter query is invalid"));
         }
         std::scoped_lock lock(store_.mutex);
+        const application::OutboxMessage* cursor_message = nullptr;
+        if (cursor.has_value()) {
+            const auto found = std::ranges::find_if(
+                store_.outbox,
+                [&](const auto& message) { return message.id == *cursor; });
+            if (found == store_.outbox.end()) {
+                return std::unexpected(domain::RepositoryError::validation(
+                    "Dead-letter cursor is invalid"));
+            }
+            cursor_message = &*found;
+        }
         std::vector<const application::OutboxMessage*> dead_letters;
         for (const auto& message : store_.outbox) {
-            if (message.status == application::OutboxStatus::DeadLetter) {
+            const bool follows_cursor = !cursor_message ||
+                message.created_at < cursor_message->created_at ||
+                (message.created_at == cursor_message->created_at &&
+                 message.id < cursor_message->id);
+            if (message.status == application::OutboxStatus::DeadLetter &&
+                follows_cursor) {
                 dead_letters.push_back(&message);
             }
         }
@@ -80,21 +96,9 @@ public:
             }
             return left->id > right->id;
         });
-        std::size_t start = 0;
-        if (cursor.has_value()) {
-            const auto found = std::ranges::find_if(
-                dead_letters,
-                [&](const auto* message) { return message->id == *cursor; });
-            if (found == dead_letters.end()) {
-                return std::unexpected(domain::RepositoryError::validation(
-                    "Dead-letter cursor is invalid"));
-            }
-            start = static_cast<std::size_t>(
-                std::distance(dead_letters.begin(), found)) + 1;
-        }
         application::DeadLetterPage page;
-        const auto end = std::min(dead_letters.size(), start + limit);
-        for (auto index = start; index < end; ++index) {
+        const auto end = std::min(dead_letters.size(), limit);
+        for (std::size_t index = 0; index < end; ++index) {
             const auto& message = *dead_letters[index];
             page.items.push_back(application::DeadLetterSummary{
                 message.id,

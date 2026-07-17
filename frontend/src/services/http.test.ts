@@ -28,11 +28,13 @@ describe('HTTP refresh lifecycle', () => {
     );
 
     let refreshSignal: AbortSignal | undefined;
-    let resolveRefresh: ((token: string) => void) | undefined;
+    const accepted = vi.fn();
+    let resolveRefresh:
+      ((result: { accessToken: string; onAccepted: () => void }) => void) | undefined;
     const refreshStarted = new Promise<void>((resolve) => {
       registerRefreshHandler(
         (signal) =>
-          new Promise<string>((resolveToken) => {
+          new Promise<{ accessToken: string; onAccepted: () => void }>((resolveToken) => {
             refreshSignal = signal;
             resolveRefresh = resolveToken;
             resolve();
@@ -48,10 +50,11 @@ describe('HTTP refresh lifecycle', () => {
     clearRefreshState();
     setAccessToken('new-access');
     expect(refreshSignal?.aborted).toBe(true);
-    resolveRefresh?.('stale-access');
+    resolveRefresh?.({ accessToken: 'stale-access', onAccepted: accepted });
 
     await expect(request).rejects.toBeDefined();
     expect(getAccessToken()).toBe('new-access');
+    expect(accepted).not.toHaveBeenCalled();
     expect(expired).not.toHaveBeenCalled();
   });
 });

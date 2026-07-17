@@ -154,6 +154,8 @@ def main() -> int:
         failures.append("Drogon liveness dispatch must bypass the application queue")
     if 'response.headers.insert_or_assign("X-Trace-Id", trace_id)' not in adapter_source:
         failures.append("Drogon exception responses must expose their trace id header")
+    if "error.what()" in adapter_source:
+        failures.append("Drogon top-level exception logs must not expose raw exception text")
 
     schemas = document.get("components", {}).get("schemas", {})
     components = document.get("components", {})

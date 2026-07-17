@@ -19,7 +19,12 @@ let accessToken: string | null = null;
 let refreshPromise: Promise<string | null> | null = null;
 let refreshGeneration = 0;
 let refreshController: AbortController | null = null;
-let refreshHandler: ((signal: AbortSignal) => Promise<string>) | null = null;
+export interface RefreshResult {
+  accessToken: string;
+  onAccepted?: () => void;
+}
+
+let refreshHandler: ((signal: AbortSignal) => Promise<RefreshResult>) | null = null;
 let sessionExpiredHandler: (() => void) | null = null;
 
 export const http: AxiosInstance = axios.create({
@@ -37,7 +42,9 @@ export function getAccessToken(): string | null {
   return accessToken;
 }
 
-export function registerRefreshHandler(handler: (signal: AbortSignal) => Promise<string>): void {
+export function registerRefreshHandler(
+  handler: (signal: AbortSignal) => Promise<RefreshResult>,
+): void {
   refreshHandler = handler;
 }
 
@@ -66,10 +73,11 @@ async function refreshOnce(): Promise<string | null> {
     const controller = new AbortController();
     refreshController = controller;
     const pending = refreshHandler(controller.signal)
-      .then((token) => {
+      .then((result) => {
         if (generation !== refreshGeneration) return null;
-        setAccessToken(token);
-        return token;
+        setAccessToken(result.accessToken);
+        result.onAccepted?.();
+        return result.accessToken;
       })
       .catch(() => null)
       .finally(() => {

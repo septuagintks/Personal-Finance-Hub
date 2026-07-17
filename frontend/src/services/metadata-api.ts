@@ -1,6 +1,5 @@
 import type { components } from '../generated/api-types';
 import { http } from './http';
-import { newIntentKey } from './idempotency';
 
 export type Category = components['schemas']['Category'];
 export type CategoryTree = components['schemas']['CategoryTree'];
@@ -25,10 +24,11 @@ export async function listCategories(
 
 export async function createCategory(
   payload: CreateCategoryRequest,
+  idempotencyKey: string,
   signal?: AbortSignal,
 ): Promise<Category> {
   const response = await http.post<Category>('/api/v1/categories', payload, {
-    headers: { 'Idempotency-Key': newIntentKey('category') },
+    headers: { 'Idempotency-Key': idempotencyKey },
     signal,
   });
   return response.data;
@@ -70,9 +70,13 @@ export async function listTags(
   return response.data;
 }
 
-export async function createTag(payload: CreateTagRequest, signal?: AbortSignal): Promise<Tag> {
+export async function createTag(
+  payload: CreateTagRequest,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<Tag> {
   const response = await http.post<Tag>('/api/v1/tags', payload, {
-    headers: { 'Idempotency-Key': newIntentKey('tag') },
+    headers: { 'Idempotency-Key': idempotencyKey },
     signal,
   });
   return response.data;

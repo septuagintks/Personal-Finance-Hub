@@ -318,8 +318,23 @@ TEST_F(PostgreSQLIntegrationTest, RequestRoleRlsIsFailClosedAndPoolContextDoesNo
         scalar_count(database->request, "SELECT count(*) FROM accounts"),
         0);
     EXPECT_EQ(
-        scalar_count(database->background, "SELECT count(*) FROM accounts"),
+        scalar_count(
+            database->background,
+            "SELECT count(currency_code) FROM accounts "
+            "WHERE is_archived = FALSE"),
         6);
+    EXPECT_EQ(
+        scalar_count(
+            database->background,
+            "SELECT has_column_privilege("
+            "current_user,'public.users','base_currency_code','SELECT')::int"),
+        1);
+    EXPECT_EQ(
+        scalar_count(
+            database->background,
+            "SELECT has_column_privilege("
+            "current_user,'public.users','password_hash','SELECT')::int"),
+        0);
     EXPECT_EQ(
         database->background->execSqlSync("SHOW default_transaction_read_only")[0][0]
             .as<std::string>(),
@@ -335,6 +350,15 @@ TEST_F(PostgreSQLIntegrationTest, RequestRoleRlsIsFailClosedAndPoolContextDoesNo
         background_write_rejected = true;
     }
     EXPECT_TRUE(background_write_rejected);
+
+    bool background_secret_read_rejected = false;
+    try {
+        database->background->execSqlSync(
+            "SELECT password_hash FROM users LIMIT 1");
+    } catch (const drogon::orm::DrogonDbException&) {
+        background_secret_read_rejected = true;
+    }
+    EXPECT_TRUE(background_secret_read_rejected);
 }
 
 TEST_F(PostgreSQLIntegrationTest, CoreRepositoriesRoundTripAndEnforceTenantIsolation) {

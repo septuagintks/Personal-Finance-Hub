@@ -65,25 +65,36 @@ describe('transaction store', () => {
   });
 
   it('replaces a corrected selection and invalidates financial aggregates once', async () => {
+    const intentKeys: string[] = [];
+    let correctionAttempts = 0;
     server.use(
       mockHttp.get('*/api/v1/transactions/7', () => HttpResponse.json(transaction(7))),
-      mockHttp.post('*/api/v1/transactions/7/correction', () =>
-        HttpResponse.json({ ...transaction(8), correctsTransactionId: 7 }, { status: 201 }),
-      ),
+      mockHttp.post('*/api/v1/transactions/7/correction', ({ request }) => {
+        correctionAttempts += 1;
+        intentKeys.push(request.headers.get('idempotency-key') ?? '');
+        return correctionAttempts === 1
+          ? HttpResponse.json({ message: 'response lost' }, { status: 503 })
+          : HttpResponse.json({ ...transaction(8), correctsTransactionId: 7 }, { status: 201 });
+      }),
     );
     const store = useTransactionStore();
     const context = useUserContextStore();
     await store.loadDetail(7);
 
-    await expect(
-      store.correctSelected({
-        accountId: 4,
-        type: 'expense',
-        amount: '8',
-        currencyCode: 'CNY',
-        tagIds: [],
-      }),
-    ).resolves.toMatchObject({ id: 8, correctsTransactionId: 7 });
+    const payload = {
+      accountId: 4,
+      type: 'expense' as const,
+      amount: '8',
+      currencyCode: 'CNY',
+      tagIds: [],
+    };
+    await expect(store.correctSelected(payload)).rejects.toBeDefined();
+    await expect(store.correctSelected(payload)).resolves.toMatchObject({
+      id: 8,
+      correctsTransactionId: 7,
+    });
+    expect(intentKeys[0]).toMatch(/^correction-\S+$/);
+    expect(intentKeys[1]).toBe(intentKeys[0]);
     expect(store.selected?.id).toBe(8);
     expect(context.aggregationRevision).toBe(1);
   });

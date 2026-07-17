@@ -1,6 +1,5 @@
 import type { components } from '../generated/api-types';
 import { http } from './http';
-import { newIntentKey } from './idempotency';
 
 export type Account = components['schemas']['Account'];
 export type AccountBalance = components['schemas']['Balance'];
@@ -39,10 +38,11 @@ export async function listAccounts(
 
 export async function createAccount(
   payload: CreateAccountRequest,
+  idempotencyKey: string,
   signal?: AbortSignal,
 ): Promise<Account> {
   const response = await http.post<Account>('/api/v1/accounts', payload, {
-    headers: { 'Idempotency-Key': newIntentKey('account') },
+    headers: { 'Idempotency-Key': idempotencyKey },
     signal,
   });
   return response.data;

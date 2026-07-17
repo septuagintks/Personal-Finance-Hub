@@ -6,11 +6,11 @@ import {
   deleteTransfer,
   getTransfer,
   listTransfers,
-  newTransferIntentKey,
   type CreateTransferRequest,
   type Transfer,
   type TransferFilters,
 } from '../services/transfer-api';
+import { createIntentKeyTracker } from '../services/idempotency';
 import { useTransactionStore } from './transactions';
 import { useUserContextStore } from './user-context';
 
@@ -27,6 +27,8 @@ export const useTransferStore = defineStore('transfers', () => {
   let listController: AbortController | null = null;
   let detailController: AbortController | null = null;
   let actionController: AbortController | null = null;
+  const createIntent = createIntentKeyTracker('transfer');
+  const correctionIntent = createIntentKeyTracker('correction');
 
   async function load(filters: TransferFilters): Promise<boolean> {
     actionController?.abort();
@@ -146,6 +148,10 @@ export const useTransferStore = defineStore('transfers', () => {
     actionController = null;
   }
 
+  function releaseFailedAction(action: { controller: AbortController }): void {
+    if (actionController === action.controller) actionController = null;
+  }
+
   function invalidateFinancialViews(): void {
     useTransactionStore().clear();
     useUserContextStore().invalidateAggregates();
@@ -153,8 +159,16 @@ export const useTransferStore = defineStore('transfers', () => {
 
   async function create(payload: CreateTransferRequest): Promise<Transfer> {
     const action = beginAction();
-    const result = await createTransfer(payload, newTransferIntentKey(), action.controller.signal);
+    const intentKey = createIntent.keyFor(payload);
+    let result: Transfer;
+    try {
+      result = await createTransfer(payload, intentKey, action.controller.signal);
+    } catch (error) {
+      releaseFailedAction(action);
+      throw error;
+    }
     ensureCurrent(action);
+    createIntent.complete(intentKey);
     invalidateFinancialViews();
     return result;
   }
@@ -163,13 +177,16 @@ export const useTransferStore = defineStore('transfers', () => {
     if (!selected.value) throw new Error('No current transfer is available.');
     const originalId = selected.value.transferGroupId;
     const action = beginAction();
-    const result = await correctTransfer(
-      originalId,
-      payload,
-      newTransferIntentKey(true),
-      action.controller.signal,
-    );
+    const intentKey = correctionIntent.keyFor({ transferGroupId: originalId, payload });
+    let result: Transfer;
+    try {
+      result = await correctTransfer(originalId, payload, intentKey, action.controller.signal);
+    } catch (error) {
+      releaseFailedAction(action);
+      throw error;
+    }
     ensureCurrent(action);
+    correctionIntent.complete(intentKey);
     items.value = items.value.filter(({ transferGroupId }) => transferGroupId !== originalId);
     selected.value = result;
     invalidateFinancialViews();
@@ -195,6 +212,8 @@ export const useTransferStore = defineStore('transfers', () => {
     listController?.abort();
     detailController?.abort();
     actionController?.abort();
+    createIntent.clear();
+    correctionIntent.clear();
     listController = null;
     detailController = null;
     actionController = null;

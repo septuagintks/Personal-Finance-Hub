@@ -136,7 +136,7 @@ CREATE TABLE scheduled_job_leases (
 
 ## 6. 数据库角色边界
 
-- background role：`BYPASSRLS`、默认只读，只注入 `PostgresActiveCurrencyQuery`。
+- background role：`BYPASSRLS`、默认只读，仅可读取 `accounts(currency_code, is_archived)` 与 `users(base_currency_code)`，并且只注入 `PostgresActiveCurrencyQuery`。
 - request role：执行汇率 append、Outbox 状态转换、补充审计、Session/Idempotency cleanup 和租约写入。
 - background client 不得注入 Controller、认证服务、普通 Repository 或任何写 adapter。
 - 两个角色必须是不同的非 superuser，production composition root 在启动时验证权限。

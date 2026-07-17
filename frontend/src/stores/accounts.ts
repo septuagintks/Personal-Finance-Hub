@@ -15,6 +15,7 @@ import {
   type CreateAccountRequest,
   type UpdateAccountRequest,
 } from '../services/account-api';
+import { createIntentKeyTracker } from '../services/idempotency';
 
 export const useAccountStore = defineStore('accounts', () => {
   const items = ref<Account[]>([]);
@@ -30,6 +31,7 @@ export const useAccountStore = defineStore('accounts', () => {
   let listController: AbortController | null = null;
   let detailController: AbortController | null = null;
   let actionController: AbortController | null = null;
+  const createIntent = createIntentKeyTracker('account');
 
   const selectedId = computed(() => selected.value?.id ?? null);
 
@@ -64,6 +66,10 @@ export const useAccountStore = defineStore('accounts', () => {
       actionController === action.controller &&
       !action.controller.signal.aborted
     );
+  }
+
+  function releaseFailedAction(action: { controller: AbortController }): void {
+    if (actionController === action.controller) actionController = null;
   }
 
   function staleAction(): never {
@@ -159,8 +165,16 @@ export const useAccountStore = defineStore('accounts', () => {
 
   async function create(payload: CreateAccountRequest): Promise<Account> {
     const action = beginAction();
-    const account = await createAccount(payload, action.controller.signal);
+    const intentKey = createIntent.keyFor(payload);
+    let account: Account;
+    try {
+      account = await createAccount(payload, intentKey, action.controller.signal);
+    } catch (error) {
+      releaseFailedAction(action);
+      throw error;
+    }
     if (!actionIsCurrent(action)) return staleAction();
+    createIntent.complete(intentKey);
     replaceItem(account);
     actionController = null;
     return account;
@@ -230,6 +244,7 @@ export const useAccountStore = defineStore('accounts', () => {
     listController?.abort();
     detailController?.abort();
     cancelAction();
+    createIntent.clear();
     listController = null;
     detailController = null;
     items.value = [];

@@ -357,6 +357,15 @@ def main() -> int:
         failures,
     )
     require(
+        "REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public" in role_init
+        and "GRANT SELECT (currency_code, is_archived) ON public.accounts"
+        in role_init
+        and "GRANT SELECT (base_currency_code) ON public.users" in role_init
+        and "GRANT SELECT ON public.accounts, public.users" not in role_init,
+        "Background role must expose only active-currency columns",
+        failures,
+    )
+    require(
         "CREATE TABLE revoked_sessions" in auth_migration
         and "security_event" in auth_migration,
         "V4 must persist session-family revocation and authentication audit actions",
@@ -436,11 +445,13 @@ def main() -> int:
     require(
         "event.payload" not in operations
         and "event.last_error" not in operations
+        and "WHERE id = $1::uuid AND status" not in operations
+        and "WHERE id = $1::uuid" in operations
         and "FOR UPDATE" in operations
         and "outbox_retry_commands" in operations
         and "'operator'::audit_actor_type" in operations
         and "'retry'::audit_action" in operations,
-        "Operations adapter must sanitize dead letters and retry atomically",
+        "Operations adapter must keep cursors stable, sanitize dead letters, and retry atomically",
         failures,
     )
     require(

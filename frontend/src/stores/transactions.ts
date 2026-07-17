@@ -6,11 +6,11 @@ import {
   deleteTransaction,
   getTransaction,
   listTransactions,
-  newFinancialIntentKey,
   type CreateTransactionRequest,
   type Transaction,
   type TransactionFilters,
 } from '../services/transaction-api';
+import { createIntentKeyTracker } from '../services/idempotency';
 import { useUserContextStore } from './user-context';
 
 export const useTransactionStore = defineStore('transactions', () => {
@@ -26,6 +26,8 @@ export const useTransactionStore = defineStore('transactions', () => {
   let listController: AbortController | null = null;
   let detailController: AbortController | null = null;
   let actionController: AbortController | null = null;
+  const createIntent = createIntentKeyTracker('transaction');
+  const correctionIntent = createIntentKeyTracker('correction');
 
   function replaceItem(transaction: Transaction): void {
     const index = items.value.findIndex(({ id }) => id === transaction.id);
@@ -150,26 +152,45 @@ export const useTransactionStore = defineStore('transactions', () => {
     actionController = null;
   }
 
+  function releaseFailedAction(action: { controller: AbortController }): void {
+    if (actionController === action.controller) actionController = null;
+  }
+
   async function create(payload: CreateTransactionRequest): Promise<Transaction> {
     const action = beginAction();
-    const intentKey = newFinancialIntentKey('transaction');
-    const result = await createTransaction(payload, intentKey, action.controller.signal);
+    const intentKey = createIntent.keyFor(payload);
+    let result: Transaction;
+    try {
+      result = await createTransaction(payload, intentKey, action.controller.signal);
+    } catch (error) {
+      releaseFailedAction(action);
+      throw error;
+    }
     ensureCurrent(action);
+    createIntent.complete(intentKey);
     useUserContextStore().invalidateAggregates();
     return result;
   }
 
   async function correctSelected(payload: CreateTransactionRequest): Promise<Transaction> {
     if (!selected.value) throw new Error('No current transaction is available.');
+    const transactionId = selected.value.id;
     const action = beginAction();
-    const intentKey = newFinancialIntentKey('correction');
-    const result = await correctTransaction(
-      selected.value.id,
-      payload,
-      intentKey,
-      action.controller.signal,
-    );
+    const intentKey = correctionIntent.keyFor({ transactionId, payload });
+    let result: Transaction;
+    try {
+      result = await correctTransaction(
+        transactionId,
+        payload,
+        intentKey,
+        action.controller.signal,
+      );
+    } catch (error) {
+      releaseFailedAction(action);
+      throw error;
+    }
     ensureCurrent(action);
+    correctionIntent.complete(intentKey);
     items.value = items.value.filter(({ id }) => id !== selected.value?.id);
     selected.value = result;
     useUserContextStore().invalidateAggregates();
@@ -195,6 +216,8 @@ export const useTransactionStore = defineStore('transactions', () => {
     listController?.abort();
     detailController?.abort();
     actionController?.abort();
+    createIntent.clear();
+    correctionIntent.clear();
     listController = null;
     detailController = null;
     actionController = null;
