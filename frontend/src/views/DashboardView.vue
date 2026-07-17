@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { ArrowDownRight, ArrowUpRight, CircleAlert, RefreshCw, WalletCards } from '@lucide/vue';
 import AppShell from '../components/AppShell.vue';
 import { getDashboardSummary, type DashboardSummary } from '../services/dashboard-api';
@@ -68,6 +68,7 @@ async function load(): Promise<void> {
 }
 
 onMounted(load);
+watch(() => userContext.aggregationRevision, load);
 onBeforeUnmount(() => requestController?.abort());
 </script>
 

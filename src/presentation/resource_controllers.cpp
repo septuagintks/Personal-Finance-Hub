@@ -13,6 +13,7 @@
 #include <charconv>
 #include <cstdint>
 #include <iomanip>
+#include <limits>
 #include <optional>
 #include <set>
 #include <sstream>
@@ -117,6 +118,15 @@ using Json = nlohmann::json;
         "board must be income or expense"));
 }
 
+[[nodiscard]] application::Result<application::MetadataListStatus>
+parse_metadata_status(const std::string& value) {
+    if (value == "active") return application::MetadataListStatus::Active;
+    if (value == "deleted") return application::MetadataListStatus::Deleted;
+    if (value == "all") return application::MetadataListStatus::All;
+    return application::err(application::Error::validation(
+        "status must be active, deleted, or all"));
+}
+
 [[nodiscard]] std::string source_text(domain::CategorySource value) {
     return value == domain::CategorySource::System ? "system" : "user";
 }
@@ -148,7 +158,12 @@ using Json = nlohmann::json;
             ? Json(value.parent_id->value()) : Json(nullptr)},
         {"templateId", value.template_id.has_value()
             ? Json(*value.template_id) : Json(nullptr)},
-        {"sortOrder", value.sort_order}};
+        {"sortOrder", value.sort_order},
+        {"isDeleted", value.is_deleted},
+        {"deletedAt", value.deleted_at.has_value()
+            ? Json(TimeCodec::format_rfc3339(*value.deleted_at)) : Json(nullptr)},
+        {"createdAt", TimeCodec::format_rfc3339(value.created_at)},
+        {"updatedAt", TimeCodec::format_rfc3339(value.updated_at)}};
     return result;
 }
 
@@ -163,7 +178,14 @@ using Json = nlohmann::json;
 }
 
 [[nodiscard]] Json tag_json(const application::TagDto& value) {
-    return Json{{"id", value.id.value()}, {"name", value.name}};
+    return Json{
+        {"id", value.id.value()},
+        {"name", value.name},
+        {"isDeleted", value.is_deleted},
+        {"deletedAt", value.deleted_at.has_value()
+            ? Json(TimeCodec::format_rfc3339(*value.deleted_at)) : Json(nullptr)},
+        {"createdAt", TimeCodec::format_rfc3339(value.created_at)},
+        {"updatedAt", TimeCodec::format_rfc3339(value.updated_at)}};
 }
 
 [[nodiscard]] std::string theme_text(domain::ThemeMode value) {
@@ -445,18 +467,69 @@ HttpResponse CategoryController::list(const HttpRequest& request) {
     auto user = require_user(request);
     if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
     std::optional<domain::CategoryBoard> board;
+    auto status = application::MetadataListStatus::Active;
     if (const auto found = request.query.find("board"); found != request.query.end()) {
         auto parsed = parse_board(found->second);
         if (!parsed) return HttpResponseMapper::error(parsed.error(), request.trace_id);
         board = *parsed;
     }
-    auto result = service_.list_categories(*user, board);
+    if (const auto found = request.query.find("status"); found != request.query.end()) {
+        auto parsed = parse_metadata_status(found->second);
+        if (!parsed) return HttpResponseMapper::error(parsed.error(), request.trace_id);
+        status = *parsed;
+    }
+    auto result = service_.list_categories(*user, board, status);
     if (!result) return HttpResponseMapper::error(result.error(), request.trace_id);
     Json body = Json::array();
     for (const auto& category : *result) {
         body.push_back(category_tree_json(category));
     }
     return HttpResponseMapper::json(200, body);
+}
+
+HttpResponse CategoryController::update(
+    const HttpRequest& request, std::string_view category_id) {
+    auto user = require_user(request);
+    auto id = JsonRequestParser::path_id<domain::CategoryId>(category_id, "categoryId");
+    if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
+    if (!id) return HttpResponseMapper::error(id.error(), request.trace_id);
+    auto body = JsonRequestParser::parse_object(request);
+    if (!body) return HttpResponseMapper::error(body.error(), request.trace_id);
+    if (auto fields = JsonRequestParser::reject_unknown_fields(
+            *body, {"name", "sortOrder"}); !fields) {
+        return HttpResponseMapper::error(fields.error(), request.trace_id);
+    }
+    auto name = JsonRequestParser::required_string(*body, "name", 128);
+    if (!name) return HttpResponseMapper::error(name.error(), request.trace_id);
+    const auto sort = body->find("sortOrder");
+    if (sort == body->end() || !sort->is_number_integer()) {
+        return HttpResponseMapper::error(
+            application::Error::validation("sortOrder must be an integer"),
+            request.trace_id);
+    }
+    const auto raw_sort = sort->get<std::int64_t>();
+    if (raw_sort < std::numeric_limits<int>::min() ||
+        raw_sort > std::numeric_limits<int>::max()) {
+        return HttpResponseMapper::error(
+            application::Error::validation("sortOrder is outside int32 range"),
+            request.trace_id);
+    }
+    auto result = service_.update_category(application::UpdateCategoryCommand{
+        *user, *id, *name, static_cast<int>(raw_sort)});
+    return result ? HttpResponseMapper::json(200, category_json(*result))
+                  : HttpResponseMapper::error(result.error(), request.trace_id);
+}
+
+HttpResponse CategoryController::restore(
+    const HttpRequest& request, std::string_view category_id) {
+    auto user = require_user(request);
+    auto id = JsonRequestParser::path_id<domain::CategoryId>(category_id, "categoryId");
+    if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
+    if (!id) return HttpResponseMapper::error(id.error(), request.trace_id);
+    auto result = service_.restore_category(
+        application::RestoreCategoryCommand{*user, *id});
+    return result ? HttpResponseMapper::json(200, category_json(*result))
+                  : HttpResponseMapper::error(result.error(), request.trace_id);
 }
 
 HttpResponse CategoryController::create(const HttpRequest& request) {
@@ -509,11 +582,48 @@ HttpResponse CategoryController::remove(
 HttpResponse TagController::list(const HttpRequest& request) {
     auto user = require_user(request);
     if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
-    auto result = service_.list_tags(*user);
+    auto status = application::MetadataListStatus::Active;
+    if (const auto found = request.query.find("status"); found != request.query.end()) {
+        auto parsed = parse_metadata_status(found->second);
+        if (!parsed) return HttpResponseMapper::error(parsed.error(), request.trace_id);
+        status = *parsed;
+    }
+    auto result = service_.list_tags(*user, status);
     if (!result) return HttpResponseMapper::error(result.error(), request.trace_id);
     Json body = Json::array();
     for (const auto& tag : *result) body.push_back(tag_json(tag));
     return HttpResponseMapper::json(200, body);
+}
+
+HttpResponse TagController::update(
+    const HttpRequest& request, std::string_view tag_id) {
+    auto user = require_user(request);
+    auto id = JsonRequestParser::path_id<domain::TagId>(tag_id, "tagId");
+    if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
+    if (!id) return HttpResponseMapper::error(id.error(), request.trace_id);
+    auto body = JsonRequestParser::parse_object(request);
+    if (!body) return HttpResponseMapper::error(body.error(), request.trace_id);
+    if (auto fields = JsonRequestParser::reject_unknown_fields(*body, {"name"});
+        !fields) {
+        return HttpResponseMapper::error(fields.error(), request.trace_id);
+    }
+    auto name = JsonRequestParser::required_string(*body, "name", 64);
+    if (!name) return HttpResponseMapper::error(name.error(), request.trace_id);
+    auto result = service_.update_tag(
+        application::UpdateTagCommand{*user, *id, *name});
+    return result ? HttpResponseMapper::json(200, tag_json(*result))
+                  : HttpResponseMapper::error(result.error(), request.trace_id);
+}
+
+HttpResponse TagController::restore(
+    const HttpRequest& request, std::string_view tag_id) {
+    auto user = require_user(request);
+    auto id = JsonRequestParser::path_id<domain::TagId>(tag_id, "tagId");
+    if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
+    if (!id) return HttpResponseMapper::error(id.error(), request.trace_id);
+    auto result = service_.restore_tag(application::RestoreTagCommand{*user, *id});
+    return result ? HttpResponseMapper::json(200, tag_json(*result))
+                  : HttpResponseMapper::error(result.error(), request.trace_id);
 }
 
 HttpResponse TagController::create(const HttpRequest& request) {

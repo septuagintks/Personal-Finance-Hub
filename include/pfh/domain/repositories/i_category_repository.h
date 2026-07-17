@@ -41,6 +41,23 @@ public:
         CategoryId id,
         UserId user_id) = 0;
 
+    /// @brief Lock an owned category regardless of soft-deletion state.
+    [[nodiscard]] virtual RepositoryResult<Category>
+    find_by_id_for_user_including_deleted_for_update(
+        ITransactionContext& tx,
+        CategoryId id,
+        UserId user_id) = 0;
+
+    /// @brief Lock the identity used by create-or-restore. System categories
+    /// match by template id; user categories match by board, parent and name.
+    [[nodiscard]] virtual RepositoryResult<Category> find_identity_for_update(
+        ITransactionContext& tx,
+        UserId user_id,
+        CategoryBoard board,
+        const std::optional<CategoryId>& parent_id,
+        const std::string& name,
+        const std::optional<std::int64_t>& template_id) = 0;
+
     /// @brief All non-deleted categories on a board for the user.
     [[nodiscard]] virtual RepositoryResult<std::vector<Category>> find_by_board(
         UserId user_id,

@@ -33,6 +33,17 @@ public:
         domain::TagId tag_id,
         domain::UserId user_id) override;
 
+    [[nodiscard]] domain::RepositoryResult<domain::Tag>
+    find_by_id_for_user_including_deleted_for_update(
+        domain::ITransactionContext& tx,
+        domain::TagId tag_id,
+        domain::UserId user_id) override;
+
+    [[nodiscard]] domain::RepositoryResult<domain::Tag> find_by_name_for_update(
+        domain::ITransactionContext& tx,
+        domain::UserId user_id,
+        const std::string& name) override;
+
     [[nodiscard]] domain::RepositoryResult<std::vector<domain::Tag>>
     find_by_transaction(
         domain::TransactionId transaction_id,

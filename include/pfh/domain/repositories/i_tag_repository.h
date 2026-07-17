@@ -31,6 +31,17 @@ public:
         TagId tag_id,
         UserId user_id) = 0;
 
+    [[nodiscard]] virtual RepositoryResult<Tag>
+    find_by_id_for_user_including_deleted_for_update(
+        ITransactionContext& tx,
+        TagId tag_id,
+        UserId user_id) = 0;
+
+    [[nodiscard]] virtual RepositoryResult<Tag> find_by_name_for_update(
+        ITransactionContext& tx,
+        UserId user_id,
+        const std::string& name) = 0;
+
     [[nodiscard]] virtual RepositoryResult<std::vector<Tag>> find_by_transaction(
         TransactionId transaction_id,
         UserId user_id) = 0;

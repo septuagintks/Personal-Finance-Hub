@@ -45,14 +45,23 @@ public:
 
     [[nodiscard]] Result<std::vector<CategoryTreeDto>> list_categories(
         domain::UserId user_id,
-        std::optional<domain::CategoryBoard> board);
+        std::optional<domain::CategoryBoard> board,
+        MetadataListStatus status = MetadataListStatus::Active);
     [[nodiscard]] Result<CategoryDto> create_category(
         const CreateCategoryCommand& command);
     [[nodiscard]] VoidResult delete_category(const DeleteCategoryCommand& command);
+    [[nodiscard]] Result<CategoryDto> update_category(
+        const UpdateCategoryCommand& command);
+    [[nodiscard]] Result<CategoryDto> restore_category(
+        const RestoreCategoryCommand& command);
 
-    [[nodiscard]] Result<std::vector<TagDto>> list_tags(domain::UserId user_id);
+    [[nodiscard]] Result<std::vector<TagDto>> list_tags(
+        domain::UserId user_id,
+        MetadataListStatus status = MetadataListStatus::Active);
     [[nodiscard]] Result<TagDto> create_tag(const CreateTagCommand& command);
     [[nodiscard]] VoidResult delete_tag(const DeleteTagCommand& command);
+    [[nodiscard]] Result<TagDto> update_tag(const UpdateTagCommand& command);
+    [[nodiscard]] Result<TagDto> restore_tag(const RestoreTagCommand& command);
     [[nodiscard]] Result<std::vector<TagDto>> replace_transaction_tags(
         const ReplaceTransactionTagsCommand& command);
 

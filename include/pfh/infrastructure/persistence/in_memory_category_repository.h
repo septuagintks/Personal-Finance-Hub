@@ -61,6 +61,45 @@ public:
         return find_by_id_for_user(id, user_id);
     }
 
+    [[nodiscard]] domain::RepositoryResult<domain::Category>
+    find_by_id_for_user_including_deleted_for_update(
+        domain::ITransactionContext& /*tx*/,
+        domain::CategoryId id,
+        domain::UserId user_id) override {
+        if (!store_.in_transaction) {
+            return std::unexpected(domain::RepositoryError::database(
+                "Historical category lock requires an active transaction"));
+        }
+        return find_by_id_for_user_including_deleted(id, user_id);
+    }
+
+    [[nodiscard]] domain::RepositoryResult<domain::Category>
+    find_identity_for_update(
+        domain::ITransactionContext& /*tx*/,
+        domain::UserId user_id,
+        domain::CategoryBoard board,
+        const std::optional<domain::CategoryId>& parent_id,
+        const std::string& name,
+        const std::optional<std::int64_t>& template_id) override {
+        if (!store_.in_transaction) {
+            return std::unexpected(domain::RepositoryError::database(
+                "Category identity lock requires an active transaction"));
+        }
+        for (const auto& [_, category] : merged()) {
+            if (category.owner() != user_id) continue;
+            const bool matches = template_id.has_value()
+                ? category.template_id() == template_id &&
+                      category.board() == board &&
+                      category.parent_id() == parent_id
+                : category.board() == board &&
+                      category.parent_id() == parent_id &&
+                      category.name() == name;
+            if (matches) return category;
+        }
+        return std::unexpected(domain::RepositoryError::not_found(
+            "Category identity not found for user"));
+    }
+
     [[nodiscard]] domain::RepositoryResult<std::vector<domain::Category>> find_by_board(
         domain::UserId user_id,
         domain::CategoryBoard board) override {

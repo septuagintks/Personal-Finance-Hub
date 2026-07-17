@@ -53,7 +53,17 @@ using TimePoint = std::chrono::system_clock::time_point;
         category.source(),
         category.parent_id(),
         category.template_id(),
-        category.sort_order()};
+        category.sort_order(),
+        category.is_deleted(),
+        category.deleted_at(),
+        category.created_at(),
+        category.updated_at()};
+}
+
+[[nodiscard]] TagDto tag_dto(const domain::Tag& tag) {
+    return TagDto{
+        tag.id(), tag.name(), tag.is_deleted(), tag.deleted_at(),
+        tag.created_at(), tag.updated_at()};
 }
 
 [[nodiscard]] UserPreferenceDto preference_dto(
@@ -393,30 +403,29 @@ VoidResult RestoreAccountUseCase::execute(
 
 Result<std::vector<CategoryTreeDto>> ListCategoriesUseCase::execute(
     domain::UserId user_id,
-    std::optional<domain::CategoryBoard> board) {
+    std::optional<domain::CategoryBoard> board,
+    MetadataListStatus status) {
     if (!user_id.is_valid() ||
         (board.has_value() && !valid_category_board(*board))) {
         return err(Error::validation("User id or category board is invalid"));
     }
-    auto categories = board.has_value()
-        ? categories_.find_by_board(user_id, *board)
-        : categories_.find_all_for_user(user_id);
+    auto categories = status == MetadataListStatus::Active
+        ? (board.has_value()
+              ? categories_.find_by_board(user_id, *board)
+              : categories_.find_all_for_user(user_id))
+        : categories_.find_all_for_user_including_deleted(user_id);
     if (!categories) {
         return err(from_repository(categories.error()));
     }
+    std::erase_if(*categories, [&](const domain::Category& category) {
+        if (board.has_value() && category.board() != *board) return true;
+        return status == MetadataListStatus::Deleted && !category.is_deleted();
+    });
 
     std::map<std::int64_t, const domain::Category*> by_id;
     for (const auto& category : *categories) {
         by_id.emplace(category.id().value(), &category);
     }
-    for (const auto& category : *categories) {
-        if (category.parent_id().has_value() &&
-            !by_id.contains(category.parent_id()->value())) {
-            return err(Error::infrastructure_failure(
-                "Category tree contains an unavailable parent"));
-        }
-    }
-
     std::set<std::int64_t> active_path;
     std::set<std::int64_t> completed;
     std::function<Result<CategoryTreeDto>(const domain::Category&, int)> build =
@@ -445,9 +454,12 @@ Result<std::vector<CategoryTreeDto>> ListCategoriesUseCase::execute(
         return node;
     };
 
+    // A deleted-only view may omit an active parent. Such a node is a display
+    // root while retaining parentId for historical explanation.
     std::vector<CategoryTreeDto> roots;
     for (const auto& category : *categories) {
-        if (!category.parent_id().has_value()) {
+        if (!category.parent_id().has_value() ||
+            !by_id.contains(category.parent_id()->value())) {
             auto root = build(category, 0);
             if (!root) {
                 return err(root.error());
@@ -520,11 +532,13 @@ Result<CategoryDto> CreateCategoryUseCase::execute(
     }
 
     const auto now = std::chrono::system_clock::now();
-    const domain::Category category(
+    const domain::Category requested_category(
         domain::CategoryId{}, command.user_id, name, *board,
         command.parent_id, source, command.template_id, sort_order,
         std::nullopt, now, now);
     domain::CategoryId persisted_id;
+    domain::Category persisted_category = requested_category;
+    bool restored = false;
     std::optional<Error> app_error;
     auto write = uow_.execute_in_transaction(
         [&](domain::ITransactionContext& tx) -> domain::RepositoryVoidResult {
@@ -567,7 +581,25 @@ Result<CategoryDto> CreateCategoryUseCase::execute(
                 }
             }
 
-            auto saved = categories_.save(tx, category);
+            auto existing = categories_.find_identity_for_update(
+                tx, command.user_id, *board, command.parent_id, name,
+                command.template_id);
+            if (existing) {
+                if (!existing->is_deleted()) {
+                    return std::unexpected(domain::RepositoryError::conflict(
+                        "Category already exists under the same parent"));
+                }
+                persisted_category = domain::Category(
+                    existing->id(), existing->owner(), existing->name(),
+                    existing->board(), existing->parent_id(), existing->source(),
+                    existing->template_id(), existing->sort_order(), std::nullopt,
+                    existing->created_at(), now);
+                restored = true;
+            } else if (existing.error().status != domain::RepositoryStatus::NotFound) {
+                return std::unexpected(existing.error());
+            }
+
+            auto saved = categories_.save(tx, persisted_category);
             if (!saved) {
                 return std::unexpected(saved.error());
             }
@@ -576,24 +608,30 @@ Result<CategoryDto> CreateCategoryUseCase::execute(
                     tx,
                     audit_entry(
                         command.user_id,
-                        domain::AuditAction::Create,
+                        restored ? domain::AuditAction::Update
+                                 : domain::AuditAction::Create,
                         "Category",
                         persisted_id.to_string(),
-                        {},
-                        "{\"name\":" + json_quoted(name) + "}",
+                        restored ? "{\"deleted\":true}" : std::string{},
+                        "{\"name\":" + json_quoted(persisted_category.name()) + "}",
                         now));
                 !audited) {
                 return audited;
             }
-            uow_.register_event(std::make_shared<domain::CategoryCreatedEvent>(
-                command.user_id, persisted_id, *board, now));
+            if (restored) {
+                uow_.register_event(std::make_shared<domain::CategoryRestoredEvent>(
+                    command.user_id, persisted_id, *board, now));
+            } else {
+                uow_.register_event(std::make_shared<domain::CategoryCreatedEvent>(
+                    command.user_id, persisted_id, *board, now));
+            }
             return {};
         });
     if (!write) {
         return app_error.has_value() ? err(*app_error)
                                      : err(from_repository(write.error()));
     }
-    return category_dto(category, persisted_id);
+    return category_dto(persisted_category, persisted_id);
 }
 
 VoidResult DeleteCategoryUseCase::execute(
@@ -635,18 +673,111 @@ VoidResult DeleteCategoryUseCase::execute(
     return write ? ok() : err(from_repository(write.error()));
 }
 
-Result<std::vector<TagDto>> ListTagsUseCase::execute(domain::UserId user_id) {
+Result<CategoryDto> UpdateCategoryUseCase::execute(
+    const UpdateCategoryCommand& command) {
+    if (!command.user_id.is_valid() || !command.category_id.is_valid() ||
+        !valid_text(command.name, 128)) {
+        return err(Error::validation("Category update fields are invalid"));
+    }
+    const auto now = std::chrono::system_clock::now();
+    std::optional<domain::Category> updated;
+    auto write = uow_.execute_in_transaction(
+        [&](domain::ITransactionContext& tx) -> domain::RepositoryVoidResult {
+            auto current = categories_.find_by_id_for_user_for_update(
+                tx, command.category_id, command.user_id);
+            if (!current) return std::unexpected(current.error());
+            updated.emplace(
+                current->id(), current->owner(), command.name, current->board(),
+                current->parent_id(), current->source(), current->template_id(),
+                command.sort_order, std::nullopt, current->created_at(), now);
+            auto saved = categories_.save(tx, *updated);
+            if (!saved) return std::unexpected(saved.error());
+            if (auto audited = audit_logs_.append(
+                    tx,
+                    audit_entry(
+                        command.user_id, domain::AuditAction::Update, "Category",
+                        command.category_id.to_string(),
+                        "{\"name\":" + json_quoted(current->name()) +
+                            ",\"sortOrder\":" +
+                            std::to_string(current->sort_order()) + "}",
+                        "{\"name\":" + json_quoted(command.name) +
+                            ",\"sortOrder\":" +
+                            std::to_string(command.sort_order) + "}",
+                        now));
+                !audited) {
+                return audited;
+            }
+            uow_.register_event(std::make_shared<domain::CategoryUpdatedEvent>(
+                command.user_id, command.category_id, current->board(), now));
+            return {};
+        });
+    if (!write) return err(from_repository(write.error()));
+    return category_dto(*updated);
+}
+
+Result<CategoryDto> RestoreCategoryUseCase::execute(
+    const RestoreCategoryCommand& command) {
+    if (!command.user_id.is_valid() || !command.category_id.is_valid()) {
+        return err(Error::validation("Category id is invalid"));
+    }
+    const auto now = std::chrono::system_clock::now();
+    std::optional<domain::Category> restored;
+    auto write = uow_.execute_in_transaction(
+        [&](domain::ITransactionContext& tx) -> domain::RepositoryVoidResult {
+            auto current = categories_.find_by_id_for_user_including_deleted_for_update(
+                tx, command.category_id, command.user_id);
+            if (!current) return std::unexpected(current.error());
+            if (!current->is_deleted()) {
+                return std::unexpected(domain::RepositoryError::conflict(
+                    "Category is already active"));
+            }
+            if (current->parent_id().has_value()) {
+                auto parent = categories_.find_by_id_for_user_for_update(
+                    tx, *current->parent_id(), command.user_id);
+                if (!parent) return std::unexpected(parent.error());
+                if (parent->board() != current->board()) {
+                    return std::unexpected(domain::RepositoryError::validation(
+                        "Category parent board is invalid"));
+                }
+            }
+            restored.emplace(
+                current->id(), current->owner(), current->name(), current->board(),
+                current->parent_id(), current->source(), current->template_id(),
+                current->sort_order(), std::nullopt, current->created_at(), now);
+            auto saved = categories_.save(tx, *restored);
+            if (!saved) return std::unexpected(saved.error());
+            if (auto audited = audit_logs_.append(
+                    tx,
+                    audit_entry(
+                        command.user_id, domain::AuditAction::Update, "Category",
+                        command.category_id.to_string(), "{\"deleted\":true}",
+                        "{\"deleted\":false}", now));
+                !audited) {
+                return audited;
+            }
+            uow_.register_event(std::make_shared<domain::CategoryRestoredEvent>(
+                command.user_id, command.category_id, current->board(), now));
+            return {};
+        });
+    if (!write) return err(from_repository(write.error()));
+    return category_dto(*restored);
+}
+
+Result<std::vector<TagDto>> ListTagsUseCase::execute(
+    domain::UserId user_id,
+    MetadataListStatus status) {
     if (!user_id.is_valid()) {
         return err(Error::validation("User id is invalid"));
     }
-    auto tags = tags_.find_by_user(user_id, false);
+    auto tags = tags_.find_by_user(user_id, status != MetadataListStatus::Active);
     if (!tags) {
         return err(from_repository(tags.error()));
     }
     std::vector<TagDto> result;
     result.reserve(tags->size());
     for (const auto& tag : *tags) {
-        result.push_back(TagDto{tag.id(), tag.name()});
+        if (status == MetadataListStatus::Deleted && !tag.is_deleted()) continue;
+        result.push_back(tag_dto(tag));
     }
     return result;
 }
@@ -656,32 +787,62 @@ Result<TagDto> CreateTagUseCase::execute(const CreateTagCommand& command) {
         return err(Error::validation("Tag name is invalid"));
     }
     const auto now = std::chrono::system_clock::now();
-    const domain::Tag tag(
+    const domain::Tag requested_tag(
         domain::TagId{}, command.user_id, command.name,
         std::nullopt, now, now);
     domain::TagId persisted_id;
+    domain::Tag persisted_tag = requested_tag;
+    bool restored = false;
     auto write = uow_.execute_in_transaction(
         [&](domain::ITransactionContext& tx) -> domain::RepositoryVoidResult {
-            auto saved = tags_.save(tx, tag);
+            auto existing = tags_.find_by_name_for_update(
+                tx, command.user_id, command.name);
+            if (existing) {
+                if (!existing->is_deleted()) {
+                    return std::unexpected(domain::RepositoryError::conflict(
+                        "Tag name already exists for user"));
+                }
+                persisted_tag = domain::Tag(
+                    existing->id(), existing->owner(), existing->name(),
+                    std::nullopt, existing->created_at(), now);
+                restored = true;
+            } else if (existing.error().status != domain::RepositoryStatus::NotFound) {
+                return std::unexpected(existing.error());
+            }
+            auto saved = tags_.save(tx, persisted_tag);
             if (!saved) {
                 return std::unexpected(saved.error());
             }
             persisted_id = *saved;
-            return audit_logs_.append(
+            auto audited = audit_logs_.append(
                 tx,
                 audit_entry(
                     command.user_id,
-                    domain::AuditAction::Create,
+                    restored ? domain::AuditAction::Update
+                             : domain::AuditAction::Create,
                     "Tag",
                     persisted_id.to_string(),
-                    {},
+                    restored ? "{\"deleted\":true}" : std::string{},
                     "{\"name\":" + json_quoted(command.name) + "}",
                     now));
+            if (!audited) return audited;
+            if (restored) {
+                uow_.register_event(std::make_shared<domain::TagRestoredEvent>(
+                    command.user_id, persisted_id, now));
+            } else {
+                uow_.register_event(std::make_shared<domain::TagCreatedEvent>(
+                    command.user_id, persisted_id, now));
+            }
+            return {};
         });
     if (!write) {
         return err(from_repository(write.error()));
     }
-    return TagDto{persisted_id, command.name};
+    return tag_dto(persisted_tag.id().is_valid()
+        ? persisted_tag
+        : domain::Tag(
+              persisted_id, command.user_id, command.name,
+              std::nullopt, now, now));
 }
 
 VoidResult DeleteTagUseCase::execute(const DeleteTagCommand& command) {
@@ -702,7 +863,7 @@ VoidResult DeleteTagUseCase::execute(const DeleteTagCommand& command) {
                 !deleted) {
                 return deleted;
             }
-            return audit_logs_.append(
+            auto audited = audit_logs_.append(
                 tx,
                 audit_entry(
                     command.user_id,
@@ -712,8 +873,84 @@ VoidResult DeleteTagUseCase::execute(const DeleteTagCommand& command) {
                     "{\"name\":" + json_quoted(tag->name()) + "}",
                     "{\"deleted\":true}",
                     deleted_at));
+            if (!audited) return audited;
+            uow_.register_event(std::make_shared<domain::TagDeletedEvent>(
+                command.user_id, command.tag_id, deleted_at));
+            return {};
         });
     return write ? ok() : err(from_repository(write.error()));
+}
+
+Result<TagDto> UpdateTagUseCase::execute(const UpdateTagCommand& command) {
+    if (!command.user_id.is_valid() || !command.tag_id.is_valid() ||
+        !valid_text(command.name, 64)) {
+        return err(Error::validation("Tag update fields are invalid"));
+    }
+    const auto now = std::chrono::system_clock::now();
+    std::optional<domain::Tag> updated;
+    auto write = uow_.execute_in_transaction(
+        [&](domain::ITransactionContext& tx) -> domain::RepositoryVoidResult {
+            auto current = tags_.find_by_id_for_user_for_update(
+                tx, command.tag_id, command.user_id);
+            if (!current) return std::unexpected(current.error());
+            updated.emplace(
+                current->id(), current->owner(), command.name, std::nullopt,
+                current->created_at(), now);
+            auto saved = tags_.save(tx, *updated);
+            if (!saved) return std::unexpected(saved.error());
+            if (auto audited = audit_logs_.append(
+                    tx,
+                    audit_entry(
+                        command.user_id, domain::AuditAction::Update, "Tag",
+                        command.tag_id.to_string(),
+                        "{\"name\":" + json_quoted(current->name()) + "}",
+                        "{\"name\":" + json_quoted(command.name) + "}", now));
+                !audited) {
+                return audited;
+            }
+            uow_.register_event(std::make_shared<domain::TagUpdatedEvent>(
+                command.user_id, command.tag_id, now));
+            return {};
+        });
+    if (!write) return err(from_repository(write.error()));
+    return tag_dto(*updated);
+}
+
+Result<TagDto> RestoreTagUseCase::execute(const RestoreTagCommand& command) {
+    if (!command.user_id.is_valid() || !command.tag_id.is_valid()) {
+        return err(Error::validation("Tag id is invalid"));
+    }
+    const auto now = std::chrono::system_clock::now();
+    std::optional<domain::Tag> restored;
+    auto write = uow_.execute_in_transaction(
+        [&](domain::ITransactionContext& tx) -> domain::RepositoryVoidResult {
+            auto current = tags_.find_by_id_for_user_including_deleted_for_update(
+                tx, command.tag_id, command.user_id);
+            if (!current) return std::unexpected(current.error());
+            if (!current->is_deleted()) {
+                return std::unexpected(domain::RepositoryError::conflict(
+                    "Tag is already active"));
+            }
+            restored.emplace(
+                current->id(), current->owner(), current->name(), std::nullopt,
+                current->created_at(), now);
+            auto saved = tags_.save(tx, *restored);
+            if (!saved) return std::unexpected(saved.error());
+            if (auto audited = audit_logs_.append(
+                    tx,
+                    audit_entry(
+                        command.user_id, domain::AuditAction::Update, "Tag",
+                        command.tag_id.to_string(), "{\"deleted\":true}",
+                        "{\"deleted\":false}", now));
+                !audited) {
+                return audited;
+            }
+            uow_.register_event(std::make_shared<domain::TagRestoredEvent>(
+                command.user_id, command.tag_id, now));
+            return {};
+        });
+    if (!write) return err(from_repository(write.error()));
+    return tag_dto(*restored);
 }
 
 Result<std::vector<TagDto>> ReplaceTransactionTagsUseCase::execute(
@@ -758,7 +995,7 @@ Result<std::vector<TagDto>> ReplaceTransactionTagsUseCase::execute(
     std::vector<TagDto> result;
     result.reserve(persisted_tags.size());
     for (const auto& tag : persisted_tags) {
-        result.push_back(TagDto{tag.id(), tag.name()});
+        result.push_back(tag_dto(tag));
     }
     return result;
 }
@@ -776,7 +1013,10 @@ Result<UserPreferenceDto> GetUserPreferenceUseCase::execute(
 
 Result<UserPreferenceDto> UpdateUserPreferenceUseCase::execute(
     const UpdateUserPreferenceCommand& command) {
+    const bool supported_locale =
+        command.locale == "zh-CN" || command.locale == "en-US";
     if (!command.user_id.is_valid() || !is_locale_tag(command.locale) ||
+        !supported_locale ||
         !valid_text(command.timezone, 64) ||
         !valid_text(command.date_format, 32) ||
         !valid_text(command.number_format, 32) ||

@@ -57,6 +57,39 @@ public:
         return find_by_id_for_user(tag_id, user_id);
     }
 
+    [[nodiscard]] domain::RepositoryResult<domain::Tag>
+    find_by_id_for_user_including_deleted_for_update(
+        domain::ITransactionContext& /*tx*/,
+        domain::TagId tag_id,
+        domain::UserId user_id) override {
+        if (!store_.in_transaction) {
+            return std::unexpected(domain::RepositoryError::database(
+                "Historical tag lock requires an active transaction"));
+        }
+        const auto tags = merged_tags();
+        const auto found = tags.find(tag_id.value());
+        if (found == tags.end() || found->second.owner() != user_id) {
+            return std::unexpected(domain::RepositoryError::not_found(
+                "Tag not found for user"));
+        }
+        return found->second;
+    }
+
+    [[nodiscard]] domain::RepositoryResult<domain::Tag> find_by_name_for_update(
+        domain::ITransactionContext& /*tx*/,
+        domain::UserId user_id,
+        const std::string& name) override {
+        if (!store_.in_transaction) {
+            return std::unexpected(domain::RepositoryError::database(
+                "Tag identity lock requires an active transaction"));
+        }
+        for (const auto& [_, tag] : merged_tags()) {
+            if (tag.owner() == user_id && tag.name() == name) return tag;
+        }
+        return std::unexpected(domain::RepositoryError::not_found(
+            "Tag name not found for user"));
+    }
+
     [[nodiscard]] domain::RepositoryResult<std::vector<domain::Tag>>
     find_by_transaction(
         domain::TransactionId transaction_id,
@@ -72,8 +105,7 @@ public:
         std::vector<domain::Tag> result;
         for (const auto tag_id : relations) {
             const auto found = tags.find(tag_id);
-            if (found != tags.end() && found->second.owner() == user_id &&
-                !found->second.is_deleted()) {
+            if (found != tags.end() && found->second.owner() == user_id) {
                 result.push_back(found->second);
             }
         }
@@ -108,8 +140,15 @@ public:
             }
         }
         if (tag.id().is_valid()) {
-            return std::unexpected(domain::RepositoryError::validation(
-                "Tag updates are not supported"));
+            const auto tags = merged_tags();
+            const auto existing = tags.find(tag.id().value());
+            if (existing == tags.end() ||
+                existing->second.owner() != tag.owner()) {
+                return std::unexpected(domain::RepositoryError::not_found(
+                    "Tag not found for user"));
+            }
+            store_.staged_tags.insert_or_assign(tag.id().value(), tag);
+            return tag.id();
         }
         const auto id = domain::TagId(store_.next_tag_id++);
         store_.staged_tags.emplace(

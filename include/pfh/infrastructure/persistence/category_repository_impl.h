@@ -37,6 +37,20 @@ public:
         domain::CategoryId id,
         domain::UserId user_id) override;
 
+    [[nodiscard]] domain::RepositoryResult<domain::Category>
+    find_by_id_for_user_including_deleted_for_update(
+        domain::ITransactionContext& tx,
+        domain::CategoryId id,
+        domain::UserId user_id) override;
+
+    [[nodiscard]] domain::RepositoryResult<domain::Category> find_identity_for_update(
+        domain::ITransactionContext& tx,
+        domain::UserId user_id,
+        domain::CategoryBoard board,
+        const std::optional<domain::CategoryId>& parent_id,
+        const std::string& name,
+        const std::optional<std::int64_t>& template_id) override;
+
     [[nodiscard]] domain::RepositoryResult<std::vector<domain::Category>> find_by_board(
         domain::UserId user_id,
         domain::CategoryBoard board) override;

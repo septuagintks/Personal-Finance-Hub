@@ -44,6 +44,12 @@ enum class AccountListStatus {
     All
 };
 
+enum class MetadataListStatus {
+    Active,
+    Deleted,
+    All
+};
+
 struct CreateAccountCommand {
     domain::UserId user_id;
     std::string name;
@@ -168,6 +174,10 @@ struct CategoryDto {
     std::optional<domain::CategoryId> parent_id;
     std::optional<std::int64_t> template_id;
     int sort_order = 0;
+    bool is_deleted = false;
+    std::optional<std::chrono::system_clock::time_point> deleted_at;
+    std::chrono::system_clock::time_point created_at{};
+    std::chrono::system_clock::time_point updated_at{};
 };
 
 struct CategoryTreeDto : CategoryDto {
@@ -188,9 +198,25 @@ struct DeleteCategoryCommand {
     std::optional<std::chrono::system_clock::time_point> deleted_at;
 };
 
+struct UpdateCategoryCommand {
+    domain::UserId user_id;
+    domain::CategoryId category_id;
+    std::string name;
+    int sort_order = 0;
+};
+
+struct RestoreCategoryCommand {
+    domain::UserId user_id;
+    domain::CategoryId category_id;
+};
+
 struct TagDto {
     domain::TagId id;
     std::string name;
+    bool is_deleted = false;
+    std::optional<std::chrono::system_clock::time_point> deleted_at;
+    std::chrono::system_clock::time_point created_at{};
+    std::chrono::system_clock::time_point updated_at{};
 };
 
 struct CreateTagCommand {
@@ -202,6 +228,17 @@ struct DeleteTagCommand {
     domain::UserId user_id;
     domain::TagId tag_id;
     std::optional<std::chrono::system_clock::time_point> deleted_at;
+};
+
+struct UpdateTagCommand {
+    domain::UserId user_id;
+    domain::TagId tag_id;
+    std::string name;
+};
+
+struct RestoreTagCommand {
+    domain::UserId user_id;
+    domain::TagId tag_id;
 };
 
 struct ReplaceTransactionTagsCommand {

@@ -40,6 +40,10 @@ public:
 
     [[nodiscard]] HttpResponse list(const HttpRequest& request);
     [[nodiscard]] HttpResponse create(const HttpRequest& request);
+    [[nodiscard]] HttpResponse update(
+        const HttpRequest& request, std::string_view category_id);
+    [[nodiscard]] HttpResponse restore(
+        const HttpRequest& request, std::string_view category_id);
     [[nodiscard]] HttpResponse remove(
         const HttpRequest& request, std::string_view category_id);
 
@@ -54,6 +58,10 @@ public:
 
     [[nodiscard]] HttpResponse list(const HttpRequest& request);
     [[nodiscard]] HttpResponse create(const HttpRequest& request);
+    [[nodiscard]] HttpResponse update(
+        const HttpRequest& request, std::string_view tag_id);
+    [[nodiscard]] HttpResponse restore(
+        const HttpRequest& request, std::string_view tag_id);
     [[nodiscard]] HttpResponse remove(
         const HttpRequest& request, std::string_view tag_id);
     [[nodiscard]] HttpResponse replace_transaction_tags(

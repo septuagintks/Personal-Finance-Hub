@@ -148,11 +148,16 @@ void DrogonHttpAdapter::configure() {
     register_dynamic("/api/v1/accounts/{1}", HttpMethod::Delete, drogon::Delete);
     register_static("/api/v1/categories", HttpMethod::Get, drogon::Get);
     register_static("/api/v1/categories", HttpMethod::Post, drogon::Post);
+    register_dynamic("/api/v1/categories/{1}", HttpMethod::Put, drogon::Put);
     register_dynamic(
         "/api/v1/categories/{1}", HttpMethod::Delete, drogon::Delete);
+    register_dynamic(
+        "/api/v1/categories/{1}/restore", HttpMethod::Post, drogon::Post);
     register_static("/api/v1/tags", HttpMethod::Get, drogon::Get);
     register_static("/api/v1/tags", HttpMethod::Post, drogon::Post);
+    register_dynamic("/api/v1/tags/{1}", HttpMethod::Put, drogon::Put);
     register_dynamic("/api/v1/tags/{1}", HttpMethod::Delete, drogon::Delete);
+    register_dynamic("/api/v1/tags/{1}/restore", HttpMethod::Post, drogon::Post);
     register_dynamic(
         "/api/v1/transactions/{1}/tags", HttpMethod::Put, drogon::Put);
     register_static("/api/v1/transactions", HttpMethod::Post, drogon::Post);

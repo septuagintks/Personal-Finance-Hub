@@ -27,9 +27,11 @@ EXPECTED = {
     "/api/v1/accounts/{accountId}/restore": {"post"},
     "/api/v1/accounts/{accountId}": {"get", "put", "delete"},
     "/api/v1/categories": {"get", "post"},
-    "/api/v1/categories/{categoryId}": {"delete"},
+    "/api/v1/categories/{categoryId}": {"put", "delete"},
+    "/api/v1/categories/{categoryId}/restore": {"post"},
     "/api/v1/tags": {"get", "post"},
-    "/api/v1/tags/{tagId}": {"delete"},
+    "/api/v1/tags/{tagId}": {"put", "delete"},
+    "/api/v1/tags/{tagId}/restore": {"post"},
     "/api/v1/users/me/preferences": {"get", "put"},
     "/api/v1/transactions": {"post"},
     "/api/v1/transactions/{transactionId}": {"delete"},
@@ -202,7 +204,8 @@ def main() -> int:
         },
         "CategoryTree": {
             "id", "name", "board", "source", "parentId", "templateId",
-            "sortOrder", "children",
+            "sortOrder", "isDeleted", "deletedAt", "createdAt", "updatedAt",
+            "children",
         },
     }
     for schema_name, expected_properties in closed_objects.items():

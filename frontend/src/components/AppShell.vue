@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import {
   ChartNoAxesCombined,
@@ -13,19 +13,27 @@ import {
 } from '@lucide/vue';
 import BrandMark from './BrandMark.vue';
 import { useSessionStore } from '../stores/session';
+import { useUserContextStore } from '../stores/user-context';
+import { translate, type MessageKey } from '../i18n/messages';
 
 const route = useRoute();
 const router = useRouter();
 const session = useSessionStore();
+const userContext = useUserContextStore();
 const menuOpen = ref(false);
 
-const navigation = [
-  { label: 'Overview', to: '/dashboard', icon: LayoutDashboard },
-  { label: 'Accounts', to: '/accounts', icon: WalletCards },
-  { label: 'Transactions', to: '/transactions', icon: ReceiptText, disabled: true },
-  { label: 'Reports', to: '/reports', icon: ChartNoAxesCombined, disabled: true },
-  { label: 'Settings', to: '/settings', icon: Settings2, disabled: true },
-];
+const navigation = computed(() =>
+  [
+    { key: 'overview', to: '/dashboard', icon: LayoutDashboard },
+    { key: 'accounts', to: '/accounts', icon: WalletCards },
+    { key: 'transactions', to: '/transactions', icon: ReceiptText, disabled: true },
+    { key: 'reports', to: '/reports', icon: ChartNoAxesCombined, disabled: true },
+    { key: 'settings', to: '/settings', icon: Settings2 },
+  ].map((item) => ({
+    ...item,
+    label: translate(userContext.preference?.locale, item.key as MessageKey),
+  })),
+);
 
 async function logout(): Promise<void> {
   await session.logout();
@@ -37,7 +45,7 @@ async function logout(): Promise<void> {
   <div class="app-frame">
     <aside class="app-sidebar" aria-label="Primary navigation">
       <div class="app-sidebar__brand"><BrandMark /></div>
-      <p class="nav-label">Workspace</p>
+      <p class="nav-label">{{ translate(userContext.preference?.locale, 'workspace') }}</p>
       <nav class="app-nav">
         <RouterLink
           v-for="item in navigation"
@@ -58,10 +66,11 @@ async function logout(): Promise<void> {
       </nav>
       <div class="sidebar-foot">
         <div class="privacy-note">
-          <span class="privacy-dot"></span><span>Private workspace</span>
+          <span class="privacy-dot"></span
+          ><span>{{ translate(userContext.preference?.locale, 'privateWorkspace') }}</span>
         </div>
         <button class="button button--quiet button--full" type="button" @click="logout">
-          <LogOut :size="16" /> Sign out
+          <LogOut :size="16" /> {{ translate(userContext.preference?.locale, 'signOut') }}
         </button>
       </div>
     </aside>
@@ -111,7 +120,7 @@ async function logout(): Promise<void> {
             </RouterLink>
           </nav>
           <button class="button button--quiet button--full" type="button" @click="logout">
-            <LogOut :size="16" /> Sign out
+            <LogOut :size="16" /> {{ translate(userContext.preference?.locale, 'signOut') }}
           </button>
         </aside>
       </div>

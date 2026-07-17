@@ -9,6 +9,17 @@ export async function getUserPreferences(signal?: AbortSignal): Promise<UserPref
   return response.data;
 }
 
+export async function updateUserPreferences(
+  payload: UserPreference,
+  signal?: AbortSignal,
+): Promise<UserPreference> {
+  const response = await http.put<UserPreference>('/api/v1/users/me/preferences', payload, {
+    _pfhReplayAfterRefresh: true,
+    signal,
+  });
+  return response.data;
+}
+
 export async function listCurrencies(signal?: AbortSignal): Promise<CurrencyMetadata[]> {
   const response = await http.get<CurrencyMetadata[]>('/api/v1/currencies', { signal });
   return response.data;

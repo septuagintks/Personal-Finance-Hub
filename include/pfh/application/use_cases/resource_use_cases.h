@@ -89,7 +89,8 @@ public:
 
     [[nodiscard]] Result<std::vector<CategoryTreeDto>> execute(
         domain::UserId user_id,
-        std::optional<domain::CategoryBoard> board);
+        std::optional<domain::CategoryBoard> board,
+        MetadataListStatus status = MetadataListStatus::Active);
 
 private:
     domain::ICategoryRepository& categories_;
@@ -132,10 +133,44 @@ private:
     IUnitOfWork& uow_;
 };
 
+class UpdateCategoryUseCase {
+public:
+    UpdateCategoryUseCase(
+        domain::ICategoryRepository& categories,
+        domain::IAuditLogRepository& audit_logs,
+        IUnitOfWork& uow)
+        : categories_(categories), audit_logs_(audit_logs), uow_(uow) {}
+
+    [[nodiscard]] Result<CategoryDto> execute(const UpdateCategoryCommand& command);
+
+private:
+    domain::ICategoryRepository& categories_;
+    domain::IAuditLogRepository& audit_logs_;
+    IUnitOfWork& uow_;
+};
+
+class RestoreCategoryUseCase {
+public:
+    RestoreCategoryUseCase(
+        domain::ICategoryRepository& categories,
+        domain::IAuditLogRepository& audit_logs,
+        IUnitOfWork& uow)
+        : categories_(categories), audit_logs_(audit_logs), uow_(uow) {}
+
+    [[nodiscard]] Result<CategoryDto> execute(const RestoreCategoryCommand& command);
+
+private:
+    domain::ICategoryRepository& categories_;
+    domain::IAuditLogRepository& audit_logs_;
+    IUnitOfWork& uow_;
+};
+
 class ListTagsUseCase {
 public:
     explicit ListTagsUseCase(domain::ITagRepository& tags) : tags_(tags) {}
-    [[nodiscard]] Result<std::vector<TagDto>> execute(domain::UserId user_id);
+    [[nodiscard]] Result<std::vector<TagDto>> execute(
+        domain::UserId user_id,
+        MetadataListStatus status = MetadataListStatus::Active);
 
 private:
     domain::ITagRepository& tags_;
@@ -166,6 +201,38 @@ public:
         : tags_(tags), audit_logs_(audit_logs), uow_(uow) {}
 
     [[nodiscard]] VoidResult execute(const DeleteTagCommand& command);
+
+private:
+    domain::ITagRepository& tags_;
+    domain::IAuditLogRepository& audit_logs_;
+    IUnitOfWork& uow_;
+};
+
+class UpdateTagUseCase {
+public:
+    UpdateTagUseCase(
+        domain::ITagRepository& tags,
+        domain::IAuditLogRepository& audit_logs,
+        IUnitOfWork& uow)
+        : tags_(tags), audit_logs_(audit_logs), uow_(uow) {}
+
+    [[nodiscard]] Result<TagDto> execute(const UpdateTagCommand& command);
+
+private:
+    domain::ITagRepository& tags_;
+    domain::IAuditLogRepository& audit_logs_;
+    IUnitOfWork& uow_;
+};
+
+class RestoreTagUseCase {
+public:
+    RestoreTagUseCase(
+        domain::ITagRepository& tags,
+        domain::IAuditLogRepository& audit_logs,
+        IUnitOfWork& uow)
+        : tags_(tags), audit_logs_(audit_logs), uow_(uow) {}
+
+    [[nodiscard]] Result<TagDto> execute(const RestoreTagCommand& command);
 
 private:
     domain::ITagRepository& tags_;

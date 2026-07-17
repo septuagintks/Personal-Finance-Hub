@@ -487,7 +487,67 @@ TEST_F(ResourceApiTest, SystemTemplateCannotSpoofNameOrHierarchy) {
         {{"templateId", 900}, {"name", "Travel"}, {"board", "expense"}},
         token);
     ASSERT_EQ(activated.status, 201) << activated.body;
-    EXPECT_EQ(nlohmann::json::parse(activated.body)["source"], "system");
+    const auto activated_body = nlohmann::json::parse(activated.body);
+    EXPECT_EQ(activated_body["source"], "system");
+    const auto id = activated_body["id"].get<std::int64_t>();
+    ASSERT_EQ(request(
+        HttpMethod::Delete,
+        "/api/v1/categories/" + std::to_string(id), {}, token).status, 204);
+    const auto same_name = request(
+        HttpMethod::Post, "/api/v1/categories",
+        {{"board", "expense"}, {"name", "Travel"}}, token);
+    ASSERT_EQ(same_name.status, 201) << same_name.body;
+    EXPECT_EQ(nlohmann::json::parse(same_name.body)["id"], id);
+    EXPECT_EQ(nlohmann::json::parse(same_name.body)["source"], "system");
+}
+
+TEST_F(ResourceApiTest, CategoryUpdateDeleteAndRestorePreserveIdentity) {
+    const auto alice = register_user("category-lifecycle@example.com");
+    const auto bob = register_user("category-lifecycle-bob@example.com");
+    const auto token = alice["accessToken"].get<std::string>();
+    const auto bob_token = bob["accessToken"].get<std::string>();
+    const auto created = request(
+        HttpMethod::Post, "/api/v1/categories",
+        {{"board", "expense"}, {"name", "Travel"}}, token);
+    ASSERT_EQ(created.status, 201) << created.body;
+    const auto id = nlohmann::json::parse(created.body)["id"].get<std::int64_t>();
+    const auto path = "/api/v1/categories/" + std::to_string(id);
+
+    const auto updated = request(
+        HttpMethod::Put, path, {{"name", "Trips"}, {"sortOrder", 42}}, token);
+    ASSERT_EQ(updated.status, 200) << updated.body;
+    const auto updated_body = nlohmann::json::parse(updated.body);
+    EXPECT_EQ(updated_body["board"], "expense");
+    EXPECT_EQ(updated_body["sortOrder"], 42);
+    EXPECT_EQ(request(
+        HttpMethod::Put, path,
+        {{"name", "Trips"}, {"sortOrder", 42}, {"board", "income"}},
+        token).status, 400);
+    EXPECT_EQ(request(
+        HttpMethod::Put, path, {{"name", "Stolen"}, {"sortOrder", 0}},
+        bob_token).status, 404);
+
+    ASSERT_EQ(request(HttpMethod::Delete, path, {}, token).status, 204);
+    const auto deleted = request(
+        HttpMethod::Get, "/api/v1/categories", {}, token,
+        {{"status", "deleted"}});
+    ASSERT_EQ(deleted.status, 200) << deleted.body;
+    ASSERT_EQ(nlohmann::json::parse(deleted.body).size(), 1U);
+    EXPECT_TRUE(nlohmann::json::parse(deleted.body)[0]["isDeleted"]);
+
+    const auto recreated = request(
+        HttpMethod::Post, "/api/v1/categories",
+        {{"board", "expense"}, {"name", "Trips"}}, token);
+    ASSERT_EQ(recreated.status, 201) << recreated.body;
+    EXPECT_EQ(nlohmann::json::parse(recreated.body)["id"], id);
+    EXPECT_FALSE(nlohmann::json::parse(recreated.body)["isDeleted"]);
+
+    ASSERT_EQ(request(HttpMethod::Delete, path, {}, token).status, 204);
+    const auto restored = request(HttpMethod::Post, path + "/restore", {}, token);
+    ASSERT_EQ(restored.status, 200) << restored.body;
+    EXPECT_EQ(nlohmann::json::parse(restored.body)["id"], id);
+    EXPECT_EQ(request(HttpMethod::Post, path + "/restore", {}, token).status, 409);
+    EXPECT_EQ(request(HttpMethod::Post, path + "/restore", {}, bob_token).status, 404);
 }
 
 TEST_F(ResourceApiTest, TagsAreUniqueAndRelationsAreTenantScoped) {
@@ -534,6 +594,36 @@ TEST_F(ResourceApiTest, TagsAreUniqueAndRelationsAreTenantScoped) {
     EXPECT_FALSE(store_.transaction_tag_relations.contains(tx_id.value()));
 }
 
+TEST_F(ResourceApiTest, TagRenameAndSameNameCreateRestoreTheHistoricalTag) {
+    const auto user = register_user("tag-lifecycle@example.com");
+    const auto token = user["accessToken"].get<std::string>();
+    const auto created = request(
+        HttpMethod::Post, "/api/v1/tags", {{"name", "tax"}}, token);
+    ASSERT_EQ(created.status, 201) << created.body;
+    const auto id = nlohmann::json::parse(created.body)["id"].get<std::int64_t>();
+    const auto path = "/api/v1/tags/" + std::to_string(id);
+
+    const auto renamed = request(
+        HttpMethod::Put, path, {{"name", "annual-tax"}}, token);
+    ASSERT_EQ(renamed.status, 200) << renamed.body;
+    EXPECT_EQ(nlohmann::json::parse(renamed.body)["name"], "annual-tax");
+    ASSERT_EQ(request(HttpMethod::Delete, path, {}, token).status, 204);
+
+    const auto deleted = request(
+        HttpMethod::Get, "/api/v1/tags", {}, token, {{"status", "deleted"}});
+    ASSERT_EQ(deleted.status, 200) << deleted.body;
+    EXPECT_EQ(nlohmann::json::parse(deleted.body)[0]["id"], id);
+    const auto recreated = request(
+        HttpMethod::Post, "/api/v1/tags", {{"name", "annual-tax"}}, token);
+    ASSERT_EQ(recreated.status, 201) << recreated.body;
+    EXPECT_EQ(nlohmann::json::parse(recreated.body)["id"], id);
+
+    ASSERT_EQ(request(HttpMethod::Delete, path, {}, token).status, 204);
+    const auto restored = request(HttpMethod::Post, path + "/restore", {}, token);
+    ASSERT_EQ(restored.status, 200) << restored.body;
+    EXPECT_FALSE(nlohmann::json::parse(restored.body)["isDeleted"]);
+}
+
 TEST_F(ResourceApiTest, PreferencesValidateTimezoneAndCurrency) {
     const auto user = register_user("preferences@example.com");
     const auto token = user["accessToken"].get<std::string>();
@@ -559,6 +649,13 @@ TEST_F(ResourceApiTest, PreferencesValidateTimezoneAndCurrency) {
     body["locale"] = "en_US";
     EXPECT_EQ(request(
         HttpMethod::Put, "/api/v1/users/me/preferences", body, token).status, 400);
+    body["locale"] = "fr-FR";
+    EXPECT_EQ(request(
+        HttpMethod::Put, "/api/v1/users/me/preferences", body, token).status, 400);
+    const auto unchanged = request(
+        HttpMethod::Get, "/api/v1/users/me/preferences", {}, token);
+    ASSERT_EQ(unchanged.status, 200) << unchanged.body;
+    EXPECT_EQ(nlohmann::json::parse(unchanged.body)["locale"], "en-US");
 }
 
 TEST_F(ResourceApiTest, CurrencyCatalogIsPublicAndComplete) {

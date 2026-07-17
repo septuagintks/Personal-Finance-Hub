@@ -2,12 +2,13 @@ import { HttpResponse, delay, http as mockHttp } from 'msw';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { server } from '../test/server';
+import type { UserPreference } from '../services/user-context-api';
 import { useUserContextStore } from './user-context';
 
 const preferenceEndpoint = '*/api/v1/users/me/preferences';
 const currenciesEndpoint = '*/api/v1/currencies';
 
-function preference(baseCurrency: string) {
+function preference(baseCurrency: string): UserPreference {
   return {
     baseCurrency,
     locale: 'en-US',
@@ -104,5 +105,48 @@ describe('user context store', () => {
     expect(store.status).toBe('error');
     expect(store.preference).toBeNull();
     expect(store.currencies).toEqual([]);
+  });
+
+  it('applies saved presentation preferences and invalidates financial aggregates', async () => {
+    server.use(
+      mockHttp.put(preferenceEndpoint, async ({ request }) => {
+        const body = (await request.json()) as ReturnType<typeof preference>;
+        return HttpResponse.json({ ...body, locale: 'zh-CN', theme: 'dark' });
+      }),
+    );
+    const store = useUserContextStore();
+    const payload = preference('CNY');
+
+    await store.update(payload);
+
+    expect(store.preference?.locale).toBe('zh-CN');
+    expect(store.aggregationRevision).toBe(1);
+    expect(document.documentElement.lang).toBe('zh-CN');
+    expect(document.documentElement.dataset.theme).toBe('dark');
+    store.clear();
+    expect(document.documentElement.dataset.theme).toBeUndefined();
+  });
+
+  it('keeps only the newest preference update', async () => {
+    let requestNumber = 0;
+    server.use(
+      mockHttp.put(preferenceEndpoint, async ({ request }) => {
+        requestNumber += 1;
+        const current = requestNumber;
+        if (current === 1) await delay(60);
+        const body = (await request.json()) as UserPreference;
+        return HttpResponse.json(body);
+      }),
+    );
+    const store = useUserContextStore();
+    const first = store.update({ ...preference('CNY'), locale: 'zh-CN', theme: 'dark' });
+    await delay(5);
+    const second = store.update({ ...preference('USD'), locale: 'en-US', theme: 'light' });
+
+    await expect(second).resolves.toMatchObject({ baseCurrency: 'USD', theme: 'light' });
+    await expect(first).rejects.toBeDefined();
+    expect(store.preference?.baseCurrency).toBe('USD');
+    expect(store.aggregationRevision).toBe(1);
+    store.clear();
   });
 });

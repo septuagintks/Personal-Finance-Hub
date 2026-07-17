@@ -136,7 +136,9 @@ Result<RegisterResultDto> AuthService::register_user(
         return err(Error::validation(
             "password must contain 12 to 128 characters"));
     }
-    if (!is_locale_tag(command.preferred_locale)) {
+    const bool supported_locale = command.preferred_locale == "zh-CN" ||
+        command.preferred_locale == "en-US";
+    if (!is_locale_tag(command.preferred_locale) || !supported_locale) {
         return err(Error::validation("preferredLocale is invalid"));
     }
     auto currency = domain::Currency::create(command.base_currency_code);

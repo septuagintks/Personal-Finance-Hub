@@ -309,6 +309,124 @@ private:
     CategoryBoard board_;
 };
 
+class CategoryUpdatedEvent final : public UserScopedEvent {
+public:
+    CategoryUpdatedEvent(
+        UserId user_id, CategoryId category_id, CategoryBoard board,
+        std::chrono::system_clock::time_point occurred_at)
+        : UserScopedEvent(user_id, occurred_at),
+          category_id_(category_id), board_(board) {}
+
+    [[nodiscard]] std::string event_name() const override { return "CategoryUpdated"; }
+    [[nodiscard]] std::string aggregate_type() const override { return "Category"; }
+    [[nodiscard]] std::string aggregate_id() const override {
+        return category_id_.to_string();
+    }
+    [[nodiscard]] std::string payload_json() const override {
+        return "{" + base_payload() +
+               ",\"categoryId\":" + std::to_string(category_id_.value()) +
+               ",\"board\":" + event_detail::json_string(
+                   board_ == CategoryBoard::Income ? "income" : "expense") + "}";
+    }
+
+private:
+    CategoryId category_id_;
+    CategoryBoard board_;
+};
+
+class CategoryRestoredEvent final : public UserScopedEvent {
+public:
+    CategoryRestoredEvent(
+        UserId user_id, CategoryId category_id, CategoryBoard board,
+        std::chrono::system_clock::time_point occurred_at)
+        : UserScopedEvent(user_id, occurred_at),
+          category_id_(category_id), board_(board) {}
+
+    [[nodiscard]] std::string event_name() const override { return "CategoryRestored"; }
+    [[nodiscard]] std::string aggregate_type() const override { return "Category"; }
+    [[nodiscard]] std::string aggregate_id() const override {
+        return category_id_.to_string();
+    }
+    [[nodiscard]] std::string payload_json() const override {
+        return "{" + base_payload() +
+               ",\"categoryId\":" + std::to_string(category_id_.value()) +
+               ",\"board\":" + event_detail::json_string(
+                   board_ == CategoryBoard::Income ? "income" : "expense") + "}";
+    }
+
+private:
+    CategoryId category_id_;
+    CategoryBoard board_;
+};
+
+class TagCreatedEvent final : public UserScopedEvent {
+public:
+    TagCreatedEvent(
+        UserId user_id, TagId tag_id,
+        std::chrono::system_clock::time_point occurred_at)
+        : UserScopedEvent(user_id, occurred_at), tag_id_(tag_id) {}
+    [[nodiscard]] std::string event_name() const override { return "TagCreated"; }
+    [[nodiscard]] std::string aggregate_type() const override { return "Tag"; }
+    [[nodiscard]] std::string aggregate_id() const override { return tag_id_.to_string(); }
+    [[nodiscard]] std::string payload_json() const override {
+        return "{" + base_payload() +
+               ",\"tagId\":" + std::to_string(tag_id_.value()) + "}";
+    }
+private:
+    TagId tag_id_;
+};
+
+class TagUpdatedEvent final : public UserScopedEvent {
+public:
+    TagUpdatedEvent(
+        UserId user_id, TagId tag_id,
+        std::chrono::system_clock::time_point occurred_at)
+        : UserScopedEvent(user_id, occurred_at), tag_id_(tag_id) {}
+    [[nodiscard]] std::string event_name() const override { return "TagUpdated"; }
+    [[nodiscard]] std::string aggregate_type() const override { return "Tag"; }
+    [[nodiscard]] std::string aggregate_id() const override { return tag_id_.to_string(); }
+    [[nodiscard]] std::string payload_json() const override {
+        return "{" + base_payload() +
+               ",\"tagId\":" + std::to_string(tag_id_.value()) + "}";
+    }
+private:
+    TagId tag_id_;
+};
+
+class TagDeletedEvent final : public UserScopedEvent {
+public:
+    TagDeletedEvent(
+        UserId user_id, TagId tag_id,
+        std::chrono::system_clock::time_point occurred_at)
+        : UserScopedEvent(user_id, occurred_at), tag_id_(tag_id) {}
+    [[nodiscard]] std::string event_name() const override { return "TagDeleted"; }
+    [[nodiscard]] std::string aggregate_type() const override { return "Tag"; }
+    [[nodiscard]] std::string aggregate_id() const override { return tag_id_.to_string(); }
+    [[nodiscard]] std::string payload_json() const override {
+        return "{" + base_payload() +
+               ",\"tagId\":" + std::to_string(tag_id_.value()) + "}";
+    }
+private:
+    TagId tag_id_;
+};
+
+class TagRestoredEvent final : public UserScopedEvent {
+public:
+    TagRestoredEvent(
+        UserId user_id, TagId tag_id,
+        std::chrono::system_clock::time_point occurred_at)
+        : UserScopedEvent(user_id, occurred_at), tag_id_(tag_id) {}
+    [[nodiscard]] std::string event_name() const override { return "TagRestored"; }
+    [[nodiscard]] std::string aggregate_type() const override { return "Tag"; }
+    [[nodiscard]] std::string aggregate_id() const override { return tag_id_.to_string(); }
+    [[nodiscard]] std::string payload_json() const override {
+        return "{" + base_payload() +
+               ",\"tagId\":" + std::to_string(tag_id_.value()) + "}";
+    }
+private:
+    TagId tag_id_;
+};
+
 class UserPreferenceUpdatedEvent final : public UserScopedEvent {
 public:
     UserPreferenceUpdatedEvent(

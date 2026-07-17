@@ -145,6 +145,83 @@ CategoryRepositoryImpl::find_by_id_for_user_for_update(
     }
 }
 
+domain::RepositoryResult<domain::Category>
+CategoryRepositoryImpl::find_by_id_for_user_including_deleted_for_update(
+    domain::ITransactionContext& tx_iface,
+    domain::CategoryId id,
+    domain::UserId user_id) {
+    if (user_id != tenant_user_id_) {
+        return std::unexpected(category_not_found());
+    }
+    auto context = postgres::require_transaction(tx_iface, tenant_user_id_);
+    if (!context) return std::unexpected(context.error());
+    const std::string sql = std::string("SELECT ") + kCategoryColumns +
+        " FROM categories WHERE id = $1 AND user_id = $2 FOR UPDATE NOWAIT";
+    try {
+        const auto result = (*context)->transaction().execSqlSync(
+            sql, id.value(), user_id.value());
+        return result.empty()
+            ? domain::RepositoryResult<domain::Category>(
+                  std::unexpected(category_not_found()))
+            : map_category_row(result[0]);
+    } catch (const drogon::orm::DrogonDbException& error) {
+        return std::unexpected(postgres::database_error(
+            "lock historical category", error));
+    } catch (const std::exception& error) {
+        return std::unexpected(postgres::unexpected_error(
+            "lock historical category", error));
+    }
+}
+
+domain::RepositoryResult<domain::Category>
+CategoryRepositoryImpl::find_identity_for_update(
+    domain::ITransactionContext& tx_iface,
+    domain::UserId user_id,
+    domain::CategoryBoard board,
+    const std::optional<domain::CategoryId>& parent_id,
+    const std::string& name,
+    const std::optional<std::int64_t>& template_id) {
+    if (user_id != tenant_user_id_) {
+        return std::unexpected(category_not_found());
+    }
+    auto context = postgres::require_transaction(tx_iface, tenant_user_id_);
+    if (!context) return std::unexpected(context.error());
+    const std::optional<std::int64_t> parent_value = parent_id.has_value()
+        ? std::optional<std::int64_t>(parent_id->value()) : std::nullopt;
+    try {
+        drogon::orm::Result result;
+        if (template_id.has_value()) {
+            const std::string sql = std::string("SELECT ") + kCategoryColumns +
+                " FROM categories WHERE user_id = $1 "
+                "AND board = $2::category_board "
+                "AND parent_id IS NOT DISTINCT FROM $3 "
+                "AND template_id = $4 FOR UPDATE NOWAIT";
+            result = (*context)->transaction().execSqlSync(
+                sql, user_id.value(), pg::toSqlText(board), parent_value,
+                *template_id);
+        } else {
+            const std::string sql = std::string("SELECT ") + kCategoryColumns +
+                " FROM categories WHERE user_id = $1 "
+                "AND board = $2::category_board "
+                "AND parent_id IS NOT DISTINCT FROM $3 "
+                "AND name = $4 FOR UPDATE NOWAIT";
+            result = (*context)->transaction().execSqlSync(
+                sql, user_id.value(), pg::toSqlText(board), parent_value, name);
+        }
+        return result.empty()
+            ? domain::RepositoryResult<domain::Category>(
+                  std::unexpected(domain::RepositoryError::not_found(
+                      "Category identity not found for user")))
+            : map_category_row(result[0]);
+    } catch (const drogon::orm::DrogonDbException& error) {
+        return std::unexpected(postgres::database_error(
+            "lock category identity", error));
+    } catch (const std::exception& error) {
+        return std::unexpected(postgres::unexpected_error(
+            "lock category identity", error));
+    }
+}
+
 domain::RepositoryResult<std::vector<domain::Category>>
 CategoryRepositoryImpl::find_by_board(
     domain::UserId user_id,

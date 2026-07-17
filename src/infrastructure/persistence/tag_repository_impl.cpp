@@ -127,6 +127,60 @@ TagRepositoryImpl::find_by_id_for_user_for_update(
     }
 }
 
+domain::RepositoryResult<domain::Tag>
+TagRepositoryImpl::find_by_id_for_user_including_deleted_for_update(
+    domain::ITransactionContext& tx_iface,
+    domain::TagId tag_id,
+    domain::UserId user_id) {
+    if (user_id != tenant_user_id_) return std::unexpected(tag_not_found());
+    auto context = postgres::require_transaction(tx_iface, tenant_user_id_);
+    if (!context) return std::unexpected(context.error());
+    try {
+        const std::string sql = std::string("SELECT ") + kTagColumns +
+            " FROM transaction_tags WHERE id = $1 AND user_id = $2 "
+            "FOR UPDATE NOWAIT";
+        const auto rows = (*context)->transaction().execSqlSync(
+            sql, tag_id.value(), user_id.value());
+        return rows.empty()
+            ? domain::RepositoryResult<domain::Tag>(
+                  std::unexpected(tag_not_found()))
+            : map_tag(rows[0]);
+    } catch (const drogon::orm::DrogonDbException& error) {
+        return std::unexpected(postgres::database_error(
+            "lock historical tag", error));
+    } catch (const std::exception& error) {
+        return std::unexpected(postgres::unexpected_error(
+            "lock historical tag", error));
+    }
+}
+
+domain::RepositoryResult<domain::Tag> TagRepositoryImpl::find_by_name_for_update(
+    domain::ITransactionContext& tx_iface,
+    domain::UserId user_id,
+    const std::string& name) {
+    if (user_id != tenant_user_id_) return std::unexpected(tag_not_found());
+    auto context = postgres::require_transaction(tx_iface, tenant_user_id_);
+    if (!context) return std::unexpected(context.error());
+    try {
+        const std::string sql = std::string("SELECT ") + kTagColumns +
+            " FROM transaction_tags WHERE user_id = $1 AND name = $2 "
+            "FOR UPDATE NOWAIT";
+        const auto rows = (*context)->transaction().execSqlSync(
+            sql, user_id.value(), name);
+        return rows.empty()
+            ? domain::RepositoryResult<domain::Tag>(
+                  std::unexpected(domain::RepositoryError::not_found(
+                      "Tag name not found for user")))
+            : map_tag(rows[0]);
+    } catch (const drogon::orm::DrogonDbException& error) {
+        return std::unexpected(postgres::database_error(
+            "lock tag identity", error));
+    } catch (const std::exception& error) {
+        return std::unexpected(postgres::unexpected_error(
+            "lock tag identity", error));
+    }
+}
+
 domain::RepositoryResult<std::vector<domain::Tag>>
 TagRepositoryImpl::find_by_transaction(
     domain::TransactionId transaction_id,
@@ -151,7 +205,7 @@ TagRepositoryImpl::find_by_transaction(
                 "FROM transaction_tag_relations r "
                 "JOIN transaction_tags t ON t.id = r.tag_id AND t.user_id = r.user_id "
                 "WHERE r.transaction_id = $1 AND r.user_id = $2 "
-                "AND t.deleted_at IS NULL ORDER BY t.name, t.id";
+                "ORDER BY t.name, t.id";
             const auto rows = transaction->execSqlSync(
                 sql, transaction_id.value(), user_id.value());
             std::vector<domain::Tag> result;
@@ -172,16 +226,28 @@ TagRepositoryImpl::find_by_transaction(
 domain::RepositoryResult<domain::TagId> TagRepositoryImpl::save(
     domain::ITransactionContext& tx_iface,
     const domain::Tag& tag) {
-    if (tag.owner() != tenant_user_id_ || tag.id().is_valid() ||
+    if (tag.owner() != tenant_user_id_ ||
         tag.name().empty() || tag.name().size() > 64) {
         return std::unexpected(domain::RepositoryError::validation(
-            "Tag create data is invalid"));
+            "Tag data is invalid"));
     }
     auto context = postgres::require_transaction(tx_iface, tenant_user_id_);
     if (!context) {
         return std::unexpected(context.error());
     }
     try {
+        if (tag.id().is_valid()) {
+            const auto result = (*context)->transaction().execSqlSync(
+                "UPDATE transaction_tags SET name = $1, deleted_at = $2, "
+                "updated_at = $3 WHERE id = $4 AND user_id = $5",
+                tag.name(), pg::toDbTimestamp(tag.deleted_at()),
+                pg::toDbTimestamp(tag.updated_at()), tag.id().value(),
+                tag.owner().value());
+            if (result.affectedRows() == 0) {
+                return std::unexpected(tag_not_found());
+            }
+            return tag.id();
+        }
         const auto rows = (*context)->transaction().execSqlSync(
             "INSERT INTO transaction_tags "
             "(user_id, name, deleted_at, created_at, updated_at) "

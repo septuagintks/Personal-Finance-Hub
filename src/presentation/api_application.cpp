@@ -147,9 +147,19 @@ HttpResponse ApiApplication::handle(HttpRequest request) noexcept {
             }
         }
         if (categories_ != nullptr) {
+            if (const auto id = route_id(
+                    request.path, "/api/v1/categories/", "/restore");
+                id.has_value() && request.method == HttpMethod::Post) {
+                return finalize(categories_->restore(request, *id));
+            }
             if (const auto id = route_id(request.path, "/api/v1/categories/");
-                id.has_value() && request.method == HttpMethod::Delete) {
-                return finalize(categories_->remove(request, *id));
+                id.has_value()) {
+                if (request.method == HttpMethod::Put) {
+                    return finalize(categories_->update(request, *id));
+                }
+                if (request.method == HttpMethod::Delete) {
+                    return finalize(categories_->remove(request, *id));
+                }
             }
         }
         if (request.path == "/api/v1/tags" && tags_ != nullptr) {
@@ -161,9 +171,19 @@ HttpResponse ApiApplication::handle(HttpRequest request) noexcept {
             }
         }
         if (tags_ != nullptr) {
+            if (const auto id = route_id(
+                    request.path, "/api/v1/tags/", "/restore");
+                id.has_value() && request.method == HttpMethod::Post) {
+                return finalize(tags_->restore(request, *id));
+            }
             if (const auto id = route_id(request.path, "/api/v1/tags/");
-                id.has_value() && request.method == HttpMethod::Delete) {
-                return finalize(tags_->remove(request, *id));
+                id.has_value()) {
+                if (request.method == HttpMethod::Put) {
+                    return finalize(tags_->update(request, *id));
+                }
+                if (request.method == HttpMethod::Delete) {
+                    return finalize(tags_->remove(request, *id));
+                }
             }
             if (const auto id = route_id(
                     request.path, "/api/v1/transactions/", "/tags");

@@ -516,6 +516,13 @@
             "schema": {
               "$ref": "#/components/schemas/CategoryBoard"
             }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/MetadataStatus"
+            }
           }
         ],
         "responses": {
@@ -583,6 +590,51 @@
       }
     },
     "/api/v1/categories/{categoryId}": {
+      "put": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CategoryId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCategoryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Category updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Category"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "operationId": "updateCategory"
+      },
       "delete": {
         "parameters": [
           {
@@ -609,8 +661,51 @@
         "operationId": "deleteCategory"
       }
     },
+    "/api/v1/categories/{categoryId}/restore": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CategoryId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Category restored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Category"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "operationId": "restoreCategory"
+      }
+    },
     "/api/v1/tags": {
       "get": {
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/MetadataStatus"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Active tags",
@@ -673,6 +768,51 @@
       }
     },
     "/api/v1/tags/{tagId}": {
+      "put": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TagId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateTagRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Tag updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Tag"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "operationId": "updateTag"
+      },
       "delete": {
         "parameters": [
           {
@@ -694,6 +834,40 @@
           }
         },
         "operationId": "deleteTag"
+      }
+    },
+    "/api/v1/tags/{tagId}/restore": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TagId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tag restored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Tag"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "operationId": "restoreTag"
       }
     },
     "/api/v1/users/me/preferences": {
@@ -1516,7 +1690,11 @@
       "LocaleTag": {
         "type": "string",
         "maxLength": 16,
-        "pattern": "^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$"
+        "pattern": "^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$",
+        "enum": [
+          "zh-CN",
+          "en-US"
+        ]
       },
       "CategoryBoard": {
         "type": "string",
@@ -1524,6 +1702,15 @@
           "income",
           "expense"
         ]
+      },
+      "MetadataStatus": {
+        "type": "string",
+        "enum": [
+          "active",
+          "deleted",
+          "all"
+        ],
+        "default": "active"
       },
       "ErrorResponse": {
         "type": "object",
@@ -1929,7 +2116,11 @@
           "source",
           "parentId",
           "templateId",
-          "sortOrder"
+          "sortOrder",
+          "isDeleted",
+          "deletedAt",
+          "createdAt",
+          "updatedAt"
         ],
         "properties": {
           "id": {
@@ -1970,6 +2161,24 @@
           },
           "sortOrder": {
             "type": "integer"
+          },
+          "isDeleted": {
+            "type": "boolean"
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -1984,6 +2193,10 @@
           "parentId",
           "templateId",
           "sortOrder",
+          "isDeleted",
+          "deletedAt",
+          "createdAt",
+          "updatedAt",
           "children"
         ],
         "properties": {
@@ -2025,6 +2238,24 @@
           },
           "sortOrder": {
             "type": "integer"
+          },
+          "isDeleted": {
+            "type": "boolean"
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
           },
           "children": {
             "type": "array",
@@ -2077,12 +2308,34 @@
           }
         }
       },
+      "UpdateCategoryRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "sortOrder"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "sortOrder": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
       "Tag": {
         "type": "object",
         "additionalProperties": false,
         "required": [
           "id",
-          "name"
+          "name",
+          "isDeleted",
+          "deletedAt",
+          "createdAt",
+          "updatedAt"
         ],
         "properties": {
           "id": {
@@ -2090,10 +2343,41 @@
           },
           "name": {
             "type": "string"
+          },
+          "isDeleted": {
+            "type": "boolean"
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
       "CreateTagRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64
+          }
+        }
+      },
+      "UpdateTagRequest": {
         "type": "object",
         "additionalProperties": false,
         "required": [

@@ -138,10 +138,11 @@ VoidResult FinanceApplicationService::delete_account(
 
 Result<std::vector<CategoryTreeDto>> FinanceApplicationService::list_categories(
     domain::UserId user_id,
-    std::optional<domain::CategoryBoard> board) {
+    std::optional<domain::CategoryBoard> board,
+    MetadataListStatus status) {
     auto scope = open_scope(user_id);
     if (!scope) return err(scope.error());
-    return ListCategoriesUseCase((*scope)->categories()).execute(user_id, board);
+    return ListCategoriesUseCase((*scope)->categories()).execute(user_id, board, status);
 }
 
 Result<CategoryDto> FinanceApplicationService::create_category(
@@ -165,11 +166,30 @@ VoidResult FinanceApplicationService::delete_category(
         .execute(command);
 }
 
+Result<CategoryDto> FinanceApplicationService::update_category(
+    const UpdateCategoryCommand& command) {
+    auto scope = open_scope(command.user_id);
+    if (!scope) return err(scope.error());
+    return UpdateCategoryUseCase(
+        (*scope)->categories(), (*scope)->audit_logs(), (*scope)->unit_of_work())
+        .execute(command);
+}
+
+Result<CategoryDto> FinanceApplicationService::restore_category(
+    const RestoreCategoryCommand& command) {
+    auto scope = open_scope(command.user_id);
+    if (!scope) return err(scope.error());
+    return RestoreCategoryUseCase(
+        (*scope)->categories(), (*scope)->audit_logs(), (*scope)->unit_of_work())
+        .execute(command);
+}
+
 Result<std::vector<TagDto>> FinanceApplicationService::list_tags(
-    domain::UserId user_id) {
+    domain::UserId user_id,
+    MetadataListStatus status) {
     auto scope = open_scope(user_id);
     if (!scope) return err(scope.error());
-    return ListTagsUseCase((*scope)->tags()).execute(user_id);
+    return ListTagsUseCase((*scope)->tags()).execute(user_id, status);
 }
 
 Result<TagDto> FinanceApplicationService::create_tag(
@@ -229,6 +249,24 @@ Result<TransactionDto> FinanceApplicationService::create_transaction(
         (*scope)->categories(),
         (*scope)->transactions(),
         (*scope)->unit_of_work())
+        .execute(command);
+}
+
+Result<TagDto> FinanceApplicationService::update_tag(
+    const UpdateTagCommand& command) {
+    auto scope = open_scope(command.user_id);
+    if (!scope) return err(scope.error());
+    return UpdateTagUseCase(
+        (*scope)->tags(), (*scope)->audit_logs(), (*scope)->unit_of_work())
+        .execute(command);
+}
+
+Result<TagDto> FinanceApplicationService::restore_tag(
+    const RestoreTagCommand& command) {
+    auto scope = open_scope(command.user_id);
+    if (!scope) return err(scope.error());
+    return RestoreTagUseCase(
+        (*scope)->tags(), (*scope)->audit_logs(), (*scope)->unit_of_work())
         .execute(command);
 }
 

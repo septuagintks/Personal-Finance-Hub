@@ -188,9 +188,25 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        put?: never;
+        put: operations["updateCategory"];
         post?: never;
         delete: operations["deleteCategory"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/categories/{categoryId}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["restoreCategory"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -220,9 +236,25 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        put?: never;
+        put: operations["updateTag"];
         post?: never;
         delete: operations["deleteTag"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tags/{tagId}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["restoreTag"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -445,9 +477,15 @@ export interface components {
         DecimalString: string;
         PositiveDecimalString: string;
         CurrencyCode: string;
-        LocaleTag: string;
+        /** @enum {string} */
+        LocaleTag: "zh-CN" | "en-US";
         /** @enum {string} */
         CategoryBoard: "income" | "expense";
+        /**
+         * @default active
+         * @enum {string}
+         */
+        MetadataStatus: "active" | "deleted" | "all";
         ErrorResponse: {
             error_code: string;
             message: string;
@@ -546,6 +584,13 @@ export interface components {
             parentId: components["schemas"]["Id"] | null;
             templateId: components["schemas"]["Id"] | null;
             sortOrder: number;
+            isDeleted: boolean;
+            /** Format: date-time */
+            deletedAt: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
         };
         CategoryTree: {
             id: components["schemas"]["Id"];
@@ -556,6 +601,13 @@ export interface components {
             parentId: components["schemas"]["Id"] | null;
             templateId: components["schemas"]["Id"] | null;
             sortOrder: number;
+            isDeleted: boolean;
+            /** Format: date-time */
+            deletedAt: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
             children: components["schemas"]["CategoryTree"][];
         };
         CreateCategoryRequest: {
@@ -564,11 +616,26 @@ export interface components {
             parentId?: components["schemas"]["Id"] | null;
             templateId?: components["schemas"]["Id"] | null;
         };
+        UpdateCategoryRequest: {
+            name: string;
+            /** Format: int32 */
+            sortOrder: number;
+        };
         Tag: {
             id: components["schemas"]["Id"];
             name: string;
+            isDeleted: boolean;
+            /** Format: date-time */
+            deletedAt: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
         };
         CreateTagRequest: {
+            name: string;
+        };
+        UpdateTagRequest: {
             name: string;
         };
         ReplaceTagsRequest: {
@@ -1146,6 +1213,7 @@ export interface operations {
         parameters: {
             query?: {
                 board?: components["schemas"]["CategoryBoard"];
+                status?: components["schemas"]["MetadataStatus"];
             };
             header?: never;
             path?: never;
@@ -1195,6 +1263,37 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    updateCategory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                categoryId: components["parameters"]["CategoryId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateCategoryRequest"];
+            };
+        };
+        responses: {
+            /** @description Category updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Category"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     deleteCategory: {
         parameters: {
             query?: never;
@@ -1219,9 +1318,37 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
-    listTags: {
+    restoreCategory: {
         parameters: {
             query?: never;
+            header?: never;
+            path: {
+                categoryId: components["parameters"]["CategoryId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Category restored */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Category"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listTags: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["MetadataStatus"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1269,6 +1396,37 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    updateTag: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tagId: components["parameters"]["TagId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateTagRequest"];
+            };
+        };
+        responses: {
+            /** @description Tag updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Tag"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     deleteTag: {
         parameters: {
             query?: never;
@@ -1289,6 +1447,32 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    restoreTag: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tagId: components["parameters"]["TagId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Tag restored */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Tag"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
