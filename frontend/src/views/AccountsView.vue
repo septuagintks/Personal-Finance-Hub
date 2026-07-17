@@ -221,6 +221,7 @@ onMounted(() => load());
       :open="createOpen"
       mode="create"
       :currencies="userContext.currencies"
+      :default-currency="userContext.preference?.baseCurrency"
       :pending="createPending"
       :error="createError"
       :field-errors="createFieldErrors"

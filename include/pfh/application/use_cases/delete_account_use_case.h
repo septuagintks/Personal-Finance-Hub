@@ -11,6 +11,7 @@
 #include "pfh/application/dto.h"
 #include "pfh/application/error.h"
 #include "pfh/application/error_mapping.h"
+#include "pfh/application/persistence_time.h"
 #include "pfh/application/persistence/i_unit_of_work.h"
 #include "pfh/domain/events/domain_events.h"
 #include "pfh/domain/repositories/i_account_repository.h"
@@ -64,7 +65,8 @@ public:
                     return std::unexpected(account.error());
                 }
 
-                const auto occurred_at = std::chrono::system_clock::now();
+                const auto occurred_at = normalize_persisted_time(
+                    std::chrono::system_clock::now());
                 domain::AuditLogEntry audit;
                 audit.operator_user_id = cmd.user_id;
                 audit.action = domain::AuditAction::DangerousDelete;

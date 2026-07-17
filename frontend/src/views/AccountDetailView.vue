@@ -17,7 +17,7 @@ import AccountFormDialog, { type AccountFormValue } from '../components/AccountF
 import ConfirmDialog from '../components/ConfirmDialog.vue';
 import DeleteAccountDialog from '../components/DeleteAccountDialog.vue';
 import { ApiError, type ApiErrorShape } from '../services/api-error';
-import { formatDecimalString } from '../services/presentation';
+import { formatDecimalString, formatInstant } from '../services/presentation';
 import { useAccountStore } from '../stores/accounts';
 import { useUserContextStore } from '../stores/user-context';
 
@@ -34,7 +34,11 @@ const editFieldErrors = ref<Record<string, string>>({});
 const confirmation = ref<'archive' | 'restore' | null>(null);
 const deleteOpen = ref(false);
 
-const accountId = computed(() => Number(route.params.accountId));
+const accountId = computed(() => {
+  const value = String(route.params.accountId ?? '');
+  if (!/^[1-9][0-9]*$/.test(value)) return Number.NaN;
+  return Number(value);
+});
 const account = computed(() => accounts.selected);
 const balance = computed(() => accounts.selectedBalance);
 
@@ -62,13 +66,15 @@ function mapError(error: unknown, fallback: string): ApiErrorShape {
 
 function formatDate(value: string | null | undefined): string {
   if (!value) return '—';
-  return new Intl.DateTimeFormat(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(value));
+  return formatInstant(value, {
+    locale: userContext.preference?.locale ?? 'en-US',
+    timeZone: userContext.preference?.timezone ?? 'UTC',
+    dateFormat: userContext.preference?.dateFormat,
+  });
+}
+
+function formatAmount(value: string): string {
+  return formatDecimalString(value, userContext.preference?.locale ?? 'en-US');
 }
 
 async function load(): Promise<void> {
@@ -96,7 +102,8 @@ async function submitEdit(value: AccountFormValue): Promise<void> {
   editError.value = '';
   editFieldErrors.value = {};
   try {
-    await accounts.updateSelected(value);
+    if (!value.category) throw new Error('Account classification is required.');
+    await accounts.updateSelected({ ...value, category: value.category });
     editOpen.value = false;
   } catch (error) {
     const mapped = mapError(error, 'The account could not be updated.');
@@ -242,7 +249,7 @@ onMounted(load);
       <section class="account-balance-band" aria-label="Account balance">
         <div>
           <p>Current balance</p>
-          <strong>{{ balance ? formatDecimalString(balance.balance) : '—' }}</strong>
+          <strong>{{ balance ? formatAmount(balance.balance) : '—' }}</strong>
           <span>{{ balance?.currencyCode ?? account.currencyCode }}</span>
         </div>
         <dl>
@@ -310,6 +317,7 @@ onMounted(load);
         mode="edit"
         :account="account"
         :currencies="userContext.currencies"
+        :default-currency="userContext.preference?.baseCurrency"
         :pending="actionPending"
         :error="editError"
         :field-errors="editFieldErrors"

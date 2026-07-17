@@ -53,6 +53,11 @@ export const useAccountStore = defineStore('accounts', () => {
     return { lifecycle: lifecycleGeneration, controller };
   }
 
+  function cancelAction(): void {
+    actionController?.abort();
+    actionController = null;
+  }
+
   function actionIsCurrent(action: { lifecycle: number; controller: AbortController }): boolean {
     return (
       lifecycleGeneration === action.lifecycle &&
@@ -81,6 +86,10 @@ export const useAccountStore = defineStore('accounts', () => {
   }
 
   async function loadList(status: AccountListStatus = listStatus.value): Promise<boolean> {
+    cancelAction();
+    detailGeneration += 1;
+    detailController?.abort();
+    detailController = null;
     const lifecycle = lifecycleGeneration;
     const requestGeneration = ++listGeneration;
     listController?.abort();
@@ -105,6 +114,10 @@ export const useAccountStore = defineStore('accounts', () => {
   }
 
   async function loadDetail(accountId: number): Promise<boolean> {
+    cancelAction();
+    listGeneration += 1;
+    listController?.abort();
+    listController = null;
     const lifecycle = lifecycleGeneration;
     const requestGeneration = ++detailGeneration;
     detailController?.abort();
@@ -120,6 +133,12 @@ export const useAccountStore = defineStore('accounts', () => {
         getAccountBalance(accountId, controller.signal),
       ]);
       if (!isCurrent(lifecycle, requestGeneration, detailGeneration, controller)) return false;
+      if (
+        resource.account.id !== balance.accountId ||
+        resource.account.currencyCode !== balance.currencyCode
+      ) {
+        throw new Error('Account detail and balance snapshot are inconsistent.');
+      }
       selected.value = resource.account;
       selectedBalance.value = balance;
       selectedEtag.value = resource.etag;
@@ -210,10 +229,9 @@ export const useAccountStore = defineStore('accounts', () => {
     detailGeneration += 1;
     listController?.abort();
     detailController?.abort();
-    actionController?.abort();
+    cancelAction();
     listController = null;
     detailController = null;
-    actionController = null;
     items.value = [];
     listStatus.value = 'active';
     listState.value = 'idle';

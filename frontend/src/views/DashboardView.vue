@@ -5,7 +5,9 @@ import AppShell from '../components/AppShell.vue';
 import { getDashboardSummary, type DashboardSummary } from '../services/dashboard-api';
 import { ApiError, type ApiErrorShape } from '../services/api-error';
 import { formatDecimalString, toChartRatios } from '../services/presentation';
+import { useUserContextStore } from '../stores/user-context';
 
+const userContext = useUserContextStore();
 const summary = ref<DashboardSummary | null>(null);
 const loading = ref(true);
 const error = ref<ApiErrorShape | null>(null);
@@ -32,7 +34,7 @@ const movementBars = computed(() => {
 
 function formatNumber(value: string | undefined): string {
   if (!value) return '—';
-  return formatDecimalString(value);
+  return formatDecimalString(value, userContext.preference?.locale ?? 'en-US');
 }
 
 async function load(): Promise<void> {
@@ -41,6 +43,7 @@ async function load(): Promise<void> {
   requestController = controller;
   loading.value = true;
   error.value = null;
+  summary.value = null;
   try {
     summary.value = await getDashboardSummary(controller.signal);
   } catch (reason) {

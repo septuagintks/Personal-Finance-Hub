@@ -5,7 +5,9 @@ import type { Account, CreateAccountRequest, UpdateAccountRequest } from '../ser
 import type { CurrencyMetadata } from '../services/user-context-api';
 import ModalDialog from './ModalDialog.vue';
 
-export type AccountFormValue = UpdateAccountRequest;
+export type AccountFormValue = Omit<UpdateAccountRequest, 'category'> & {
+  category: UpdateAccountRequest['category'] | null;
+};
 
 const props = withDefaults(
   defineProps<{
@@ -13,12 +15,14 @@ const props = withDefaults(
     mode: 'create' | 'edit';
     account?: Account | null;
     currencies: CurrencyMetadata[];
+    defaultCurrency?: string;
     pending?: boolean;
     error?: string;
     fieldErrors?: Record<string, string>;
   }>(),
   {
     account: null,
+    defaultCurrency: '',
     pending: false,
     error: '',
     fieldErrors: () => ({}),
@@ -49,15 +53,18 @@ const accountTypes: Array<{ value: CreateAccountRequest['type']; label: string }
 const title = computed(() => (props.mode === 'create' ? 'Create account' : 'Edit account'));
 
 watch(
-  () => [props.open, props.account, props.currencies] as const,
+  () => [props.open, props.mode, props.account, props.currencies, props.defaultCurrency] as const,
   ([open]) => {
     if (!open) return;
     localError.value = '';
     form.name = props.account?.name ?? '';
     form.type = (props.account?.type as CreateAccountRequest['type'] | undefined) ?? 'cash';
     form.subtype = props.account?.subtype ?? '';
-    form.category = props.account?.category ?? 'asset';
-    form.currencyCode = props.account?.currencyCode ?? props.currencies[0]?.code ?? 'CNY';
+    form.category = props.account?.category ?? null;
+    const preferredCurrency = props.currencies.some(({ code }) => code === props.defaultCurrency)
+      ? props.defaultCurrency
+      : props.currencies[0]?.code;
+    form.currencyCode = props.account?.currencyCode ?? preferredCurrency ?? 'CNY';
     form.description = props.account?.description ?? '';
   },
   { immediate: true },
@@ -127,6 +134,7 @@ function submit(): void {
         <label class="field">
           <span>Classification</span>
           <select v-model="form.category" name="account-category" :disabled="pending">
+            <option v-if="mode === 'create'" :value="null">Automatic</option>
             <option value="asset">Asset</option>
             <option value="liability">Liability</option>
           </select>

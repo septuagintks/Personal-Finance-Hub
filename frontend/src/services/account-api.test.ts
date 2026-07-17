@@ -61,6 +61,13 @@ describe('account API contract', () => {
 
     server.use(mockHttp.get('*/api/v1/accounts/7', () => HttpResponse.json(account)));
     await expect(getAccount(7)).rejects.toThrow('strong version ETag');
+
+    server.use(
+      mockHttp.get('*/api/v1/accounts/7', () =>
+        HttpResponse.json(account, { headers: { ETag: '"4"' } }),
+      ),
+    );
+    await expect(getAccount(7)).rejects.toThrow('strong version ETag');
   });
 
   it('sends the exact validator on update, archive, and restore', async () => {

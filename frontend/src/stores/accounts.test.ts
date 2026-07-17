@@ -56,6 +56,23 @@ describe('account store', () => {
     expect(store.selectedEtag).toBe('"1"');
   });
 
+  it('rejects a detail and balance pair from different account versions', async () => {
+    server.use(
+      mockHttp.get('*/api/v1/accounts/1', () =>
+        HttpResponse.json(account(1), { headers: { ETag: '"1"' } }),
+      ),
+      mockHttp.get('*/api/v1/accounts/1/balance', () =>
+        HttpResponse.json({ ...balance, currencyCode: 'USD' }),
+      ),
+    );
+    const store = useAccountStore();
+
+    await expect(store.loadDetail(1)).rejects.toThrow('inconsistent');
+    expect(store.selected).toBeNull();
+    expect(store.selectedBalance).toBeNull();
+    expect(store.detailState).toBe('error');
+  });
+
   it('keeps only the newest list response', async () => {
     let requestNumber = 0;
     server.use(
@@ -75,6 +92,35 @@ describe('account store', () => {
     await expect(first).resolves.toBe(false);
     expect(store.listStatus).toBe('archived');
     expect(store.items.map(({ id }) => id)).toEqual([2]);
+  });
+
+  it('does not let a late detail response overwrite a newer list', async () => {
+    server.use(
+      mockHttp.get('*/api/v1/accounts/1', async () => {
+        await delay(70);
+        return HttpResponse.json(account(1, { name: 'Stale detail' }), {
+          headers: { ETag: '"1"' },
+        });
+      }),
+      mockHttp.get('*/api/v1/accounts/1/balance', async () => {
+        await delay(70);
+        return HttpResponse.json(balance);
+      }),
+      mockHttp.get('*/api/v1/accounts', () =>
+        HttpResponse.json([account(1, { name: 'Current list', version: 2 })]),
+      ),
+    );
+    const store = useAccountStore();
+    const detail = store.loadDetail(1);
+    await delay(10);
+
+    await expect(store.loadList('active')).resolves.toBe(true);
+    await expect(detail).resolves.toBe(false);
+    await delay(80);
+    expect(store.items).toHaveLength(1);
+    expect(store.items[0]?.name).toBe('Current list');
+    expect(store.items[0]?.version).toBe(2);
+    expect(store.selected).toBeNull();
   });
 
   it('rejects a late mutation after the current user is cleared', async () => {
@@ -131,5 +177,41 @@ describe('account store', () => {
     expect(store.selected?.version).toBe(2);
     expect(store.selectedEtag).toBe('"2"');
     expect(store.items).toEqual([]);
+  });
+
+  it('does not publish a late write after navigating to another account', async () => {
+    server.use(
+      mockHttp.get('*/api/v1/accounts/:accountId', ({ params }) => {
+        const id = Number(params.accountId);
+        return HttpResponse.json(account(id), { headers: { ETag: '"1"' } });
+      }),
+      mockHttp.get('*/api/v1/accounts/:accountId/balance', ({ params }) => {
+        const id = Number(params.accountId);
+        return HttpResponse.json({ ...balance, accountId: id });
+      }),
+      mockHttp.put('*/api/v1/accounts/1', async () => {
+        await delay(70);
+        return HttpResponse.json(account(1, { name: 'Late update', version: 2 }), {
+          headers: { ETag: '"2"' },
+        });
+      }),
+    );
+    const store = useAccountStore();
+    await store.loadDetail(1);
+    const pending = store.updateSelected({
+      name: 'Late update',
+      type: 'cash',
+      subtype: 'wallet',
+      category: 'asset',
+      currencyCode: 'CNY',
+      description: '',
+    });
+    await delay(10);
+    await expect(store.loadDetail(2)).resolves.toBe(true);
+
+    await expect(pending).rejects.toBeDefined();
+    await delay(80);
+    expect(store.selected?.id).toBe(2);
+    expect(store.selected?.name).toBe('Account 2');
   });
 });

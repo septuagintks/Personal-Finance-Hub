@@ -4,6 +4,7 @@
 
 #include "pfh/application/error_mapping.h"
 #include "pfh/application/input_constraints.h"
+#include "pfh/application/persistence_time.h"
 #include "pfh/domain/events/domain_events.h"
 
 #include <algorithm>
@@ -70,6 +71,37 @@ using TimePoint = std::chrono::system_clock::time_point;
 
 [[nodiscard]] std::string json_quoted(std::string_view value) {
     return domain::event_detail::json_string(value);
+}
+
+[[nodiscard]] std::string_view account_type_text(
+    domain::AccountType value) noexcept {
+    switch (value) {
+    case domain::AccountType::Cash: return "cash";
+    case domain::AccountType::Savings: return "savings";
+    case domain::AccountType::Credit: return "credit";
+    case domain::AccountType::DigitalWallet: return "digital_wallet";
+    case domain::AccountType::Investment: return "investment";
+    case domain::AccountType::Crypto: return "crypto";
+    case domain::AccountType::Other: return "other";
+    }
+    return "other";
+}
+
+[[nodiscard]] std::string_view account_category_text(
+    domain::AccountCategory value) noexcept {
+    return value == domain::AccountCategory::Asset ? "asset" : "liability";
+}
+
+[[nodiscard]] std::string account_audit_snapshot(
+    const domain::Account& account) {
+    return "{\"name\":" + json_quoted(account.name()) +
+        ",\"type\":" + json_quoted(account_type_text(account.type())) +
+        ",\"subtype\":" + json_quoted(account.subtype()) +
+        ",\"category\":" + json_quoted(account_category_text(account.category())) +
+        ",\"currencyCode\":" + json_quoted(account.currency().code()) +
+        ",\"description\":" + json_quoted(account.description()) +
+        ",\"isArchived\":" + (account.is_archived() ? "true" : "false") +
+        "}";
 }
 
 [[nodiscard]] domain::AuditLogEntry audit_entry(
@@ -151,7 +183,8 @@ Result<AccountDto> CreateAccountUseCase::execute(
         return err(from_domain(currency.error()));
     }
 
-    const auto now = std::chrono::system_clock::now();
+    const auto now = normalize_persisted_time(
+        std::chrono::system_clock::now());
     const domain::Account account(
         domain::AccountId{}, command.user_id, command.name, command.type,
         command.subtype, *currency, command.description, false, std::nullopt,
@@ -172,7 +205,7 @@ Result<AccountDto> CreateAccountUseCase::execute(
                     "Account",
                     persisted_id.to_string(),
                     {},
-                    "{\"name\":" + json_quoted(command.name) + "}",
+                    account_audit_snapshot(account),
                     now));
         });
     if (!write) {
@@ -187,8 +220,8 @@ VoidResult ArchiveAccountUseCase::execute(
         command.expected_version <= 0) {
         return err(Error::validation("Account id is invalid"));
     }
-    const auto archived_at = command.archived_at.value_or(
-        std::chrono::system_clock::now());
+    const auto archived_at = normalize_persisted_time(
+        command.archived_at.value_or(std::chrono::system_clock::now()));
     std::optional<Error> app_error;
     auto write = uow_.execute_in_transaction(
         [&](domain::ITransactionContext& tx) -> domain::RepositoryVoidResult {
@@ -249,7 +282,8 @@ Result<AccountDto> UpdateAccountUseCase::execute(
     auto currency = domain::Currency::create(command.currency_code);
     if (!currency) return err(from_domain(currency.error()));
 
-    const auto now = std::chrono::system_clock::now();
+    const auto now = normalize_persisted_time(
+        std::chrono::system_clock::now());
     std::optional<Error> app_error;
     std::optional<domain::Account> updated;
     auto write = uow_.execute_in_transaction(
@@ -286,12 +320,8 @@ Result<AccountDto> UpdateAccountUseCase::execute(
                     audit_entry(
                         command.user_id, domain::AuditAction::Update, "Account",
                         command.account_id.to_string(),
-                        "{\"name\":" + json_quoted(current->name()) +
-                            ",\"currencyCode\":" +
-                            json_quoted(current->currency().code()) + "}",
-                        "{\"name\":" + json_quoted(command.name) +
-                            ",\"currencyCode\":" +
-                            json_quoted(currency->code()) + "}",
+                        account_audit_snapshot(*current),
+                        account_audit_snapshot(next),
                         now));
                 !audited) {
                 return audited;
@@ -318,8 +348,8 @@ VoidResult RestoreAccountUseCase::execute(
         command.expected_version <= 0) {
         return err(Error::validation("Account id or version is invalid"));
     }
-    const auto restored_at = command.restored_at.value_or(
-        std::chrono::system_clock::now());
+    const auto restored_at = normalize_persisted_time(
+        command.restored_at.value_or(std::chrono::system_clock::now()));
     std::optional<Error> app_error;
     auto write = uow_.execute_in_transaction(
         [&](domain::ITransactionContext& tx) -> domain::RepositoryVoidResult {

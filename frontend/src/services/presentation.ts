@@ -3,6 +3,7 @@ import Decimal from 'decimal.js';
 export interface PresentationLocale {
   locale: string;
   timeZone: string;
+  dateFormat?: string;
 }
 
 export interface EnumOption<T extends string> {
@@ -34,14 +35,56 @@ export function formatDecimalString(
   }
 }
 
-export function formatInstant(value: string, { locale, timeZone }: PresentationLocale): string {
+function formatPreferredDate(
+  instant: Date,
+  locale: string,
+  timeZone: string,
+  dateFormat: string | undefined,
+): string | null {
+  const pattern = dateFormat
+    ?.toUpperCase()
+    .match(/^(YYYY|MM|DD)([-/.])(YYYY|MM|DD)\2(YYYY|MM|DD)$/);
+  if (!pattern || new Set([pattern[1], pattern[3], pattern[4]]).size !== 3) return null;
+
+  const parts = new Intl.DateTimeFormat(locale, {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(instant);
+  const values = new Map(parts.map((part) => [part.type, part.value]));
+  const tokens: Record<string, string | undefined> = {
+    YYYY: values.get('year'),
+    MM: values.get('month'),
+    DD: values.get('day'),
+  };
+  if (!tokens.YYYY || !tokens.MM || !tokens.DD) return null;
+  return [pattern[1], pattern[3], pattern[4]].map((token) => tokens[token]).join(pattern[2]);
+}
+
+export function formatInstant(
+  value: string,
+  { locale, timeZone, dateFormat }: PresentationLocale,
+): string {
   const instant = new Date(value);
   if (Number.isNaN(instant.getTime())) return value;
-  return new Intl.DateTimeFormat(locale, {
-    timeZone,
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(instant);
+  try {
+    const preferredDate = formatPreferredDate(instant, locale, timeZone, dateFormat);
+    if (preferredDate) {
+      const time = new Intl.DateTimeFormat(locale, {
+        timeZone,
+        timeStyle: 'short',
+      }).format(instant);
+      return `${preferredDate} ${time}`;
+    }
+    return new Intl.DateTimeFormat(locale, {
+      timeZone,
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    }).format(instant);
+  } catch {
+    return value;
+  }
 }
 
 export function toChartRatios(values: readonly string[]): number[] {

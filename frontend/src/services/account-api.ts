@@ -12,8 +12,14 @@ export interface AccountResource {
   etag: string;
 }
 
-function requireStrongEtag(value: unknown): string {
-  if (typeof value !== 'string' || !/^"[1-9][0-9]*"$/.test(value)) {
+function requireStrongEtag(value: unknown, version: number): string {
+  if (
+    typeof value !== 'string' ||
+    !/^"[1-9][0-9]*"$/.test(value) ||
+    !Number.isSafeInteger(version) ||
+    version <= 0 ||
+    value !== `"${version}"`
+  ) {
     throw new Error('Account response did not include a strong version ETag.');
   }
   return value;
@@ -47,7 +53,7 @@ export async function getAccount(
   const response = await http.get<Account>(`/api/v1/accounts/${accountId}`, { signal });
   return {
     account: response.data,
-    etag: requireStrongEtag(response.headers.etag),
+    etag: requireStrongEtag(response.headers.etag, response.data.version),
   };
 }
 
@@ -74,7 +80,7 @@ export async function updateAccount(
   });
   return {
     account: response.data,
-    etag: requireStrongEtag(response.headers.etag),
+    etag: requireStrongEtag(response.headers.etag, response.data.version),
   };
 }
 

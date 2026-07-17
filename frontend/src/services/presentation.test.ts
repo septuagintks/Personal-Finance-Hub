@@ -18,6 +18,24 @@ describe('presentation adapters', () => {
     );
   });
 
+  it('applies the persisted date format without losing locale-aware time', () => {
+    const instant = '2026-07-01T00:30:00Z';
+    const yearFirst = formatInstant(instant, {
+      locale: 'en-US',
+      timeZone: 'Asia/Shanghai',
+      dateFormat: 'YYYY-MM-DD',
+    });
+    const dayFirst = formatInstant(instant, {
+      locale: 'en-US',
+      timeZone: 'Asia/Shanghai',
+      dateFormat: 'dd/MM/yyyy',
+    });
+    expect(yearFirst).toMatch(/^2026-07-01 /);
+    expect(dayFirst).toMatch(/^01\/07\/2026 /);
+    expect(yearFirst).toContain('8:30');
+    expect(dayFirst).toContain('8:30');
+  });
+
   it('converts only dimensionless chart ratios to finite numbers', () => {
     expect(toChartRatios(['100000000000000000000', '25000000000000000000'])).toEqual([1, 0.25]);
     expect(toChartRatios(['not-a-decimal', '0'])).toEqual([0, 0]);

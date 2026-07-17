@@ -3,6 +3,7 @@
 #pragma once
 
 #include "pfh/application/error.h"
+#include "pfh/application/persistence_time.h"
 
 #include <charconv>
 #include <chrono>
@@ -25,17 +26,6 @@ struct IdempotencyRequest {
 };
 
 using IdempotencyValues = std::map<std::string, std::string>;
-
-/// @brief Match the precision retained by PostgreSQL TIMESTAMPTZ and the
-/// idempotency response codec before a business timestamp is persisted.
-[[nodiscard]] inline std::chrono::system_clock::time_point
-normalize_persisted_time(
-    std::chrono::system_clock::time_point value) noexcept {
-    const auto micros = std::chrono::duration_cast<std::chrono::microseconds>(
-        value.time_since_epoch());
-    return std::chrono::system_clock::time_point(
-        std::chrono::duration_cast<std::chrono::system_clock::duration>(micros));
-}
 
 [[nodiscard]] inline VoidResult validate_idempotency_input(
     std::string_view key,

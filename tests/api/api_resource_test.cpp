@@ -219,9 +219,15 @@ TEST_F(ResourceApiTest, AccountLifecycleFiltersAndOptimisticConcurrencyAreEnforc
     const auto account = create_account(alice_token);
     const auto id = account["id"].get<std::int64_t>();
     const auto path = "/api/v1/accounts/" + std::to_string(id);
+    EXPECT_EQ(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            store_.accounts.at(id).created_at().time_since_epoch()).count() %
+            1000,
+        0);
 
     const auto detail = request(HttpMethod::Get, path, {}, alice_token);
     ASSERT_EQ(detail.status, 200) << detail.body;
+    EXPECT_EQ(detail.headers.at("Cache-Control"), "no-store");
     EXPECT_EQ(detail.headers.at("ETag"), R"("1")");
     const auto detail_body = nlohmann::json::parse(detail.body);
     EXPECT_EQ(detail_body["version"], 1);
@@ -261,6 +267,21 @@ TEST_F(ResourceApiTest, AccountLifecycleFiltersAndOptimisticConcurrencyAreEnforc
     EXPECT_EQ(updated_body["version"], 2);
     EXPECT_EQ(store_.outbox.back().event_name, "AccountUpdated");
     EXPECT_EQ(store_.audit_logs.back().action, AuditAction::Update);
+    const auto before_audit = nlohmann::json::parse(
+        store_.audit_logs.back().before_value_json);
+    const auto after_audit = nlohmann::json::parse(
+        store_.audit_logs.back().after_value_json);
+    EXPECT_EQ(before_audit["name"], "Daily Wallet");
+    EXPECT_EQ(before_audit["type"], "digital_wallet");
+    EXPECT_EQ(before_audit["subtype"], "wallet");
+    EXPECT_EQ(before_audit["category"], "asset");
+    EXPECT_EQ(before_audit["currencyCode"], "CNY");
+    EXPECT_EQ(before_audit["description"], "");
+    EXPECT_FALSE(before_audit["isArchived"]);
+    EXPECT_EQ(after_audit["name"], "Primary Wallet");
+    EXPECT_EQ(after_audit["subtype"], "mobile wallet");
+    EXPECT_EQ(after_audit["currencyCode"], "USD");
+    EXPECT_EQ(after_audit["description"], "Daily spending");
 
     EXPECT_EQ(request(
         HttpMethod::Put, path, update_body, alice_token, {},
