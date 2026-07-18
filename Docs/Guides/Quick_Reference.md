@@ -123,5 +123,6 @@ Presentation -> Application -> Domain <- Infrastructure
 - [Phase 1 开发计划](../Development_Plans/Phase_1/Phase_1_Development_Plan.md)
 - [Phase 1 开发记录](../Archive/Phase_1_Development_Record.md)
 - [Phase 2 开发记录](../Archive/Phase_2_Development_Record.md)
+- [Ubuntu 服务器部署](Ubuntu_Server_Deployment_Guide.md)
 - [技术架构](../Architecture/01_Technical_Architecture.md)
 - [REST API OpenAPI](../Architecture/10_REST_API_OpenAPI.json)

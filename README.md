@@ -161,3 +161,4 @@ Docs/                 Architecture, plans, guides, standards and archive
 - [OpenAPI 3.1](Docs/Architecture/10_REST_API_OpenAPI.json)
 - [开发者快速参考](Docs/Guides/Quick_Reference.md)
 - [Linux 工作流](Docs/Guides/Linux_Development_Workflow.md)
+- [Ubuntu 服务器部署](Docs/Guides/Ubuntu_Server_Deployment_Guide.md)

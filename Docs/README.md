@@ -37,6 +37,7 @@ Docs/
 │   ├── Dependency_Installation_Guide.md
 │   ├── Directory_Guidance.md
 │   ├── Linux_Development_Workflow.md
+│   ├── Ubuntu_Server_Deployment_Guide.md
 │   └── Quick_Reference.md
 ├── Standards/
 │   └── Documents_Format_Standard.md
@@ -83,6 +84,7 @@ Docs/
 - 配置变量：[`config/README.md`](../config/README.md)
 - 依赖安装：[Dependency Installation](Guides/Dependency_Installation_Guide.md)
 - Linux 构建与测试：[Linux Development Workflow](Guides/Linux_Development_Workflow.md)
+- Ubuntu 服务器部署：[Ubuntu Server Deployment Guide](Guides/Ubuntu_Server_Deployment_Guide.md)
 - 数据库迁移：[Database Migration Guide](Guides/Database_Migration_Guide.md)
 
 ---

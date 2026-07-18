@@ -250,6 +250,7 @@ docker compose ps
 ## 10. 相关文档
 
 - [Dependency Installation Guide](Dependency_Installation_Guide.md)
+- [Ubuntu Server Deployment Guide](Ubuntu_Server_Deployment_Guide.md)
 - [Database Migration Guide](Database_Migration_Guide.md)
 - [Quick Reference](Quick_Reference.md)
 - [Testing Strategy](../Architecture/16_Testing_Strategy.md)
