@@ -79,12 +79,6 @@ domain::RepositoryError account_not_found() {
     return domain::RepositoryError::not_found("Account not found for user");
 }
 
-bool is_lock_conflict(const drogon::orm::DrogonDbException& error) {
-    const std::string detail = error.base().what();
-    return detail.find("55P03") != std::string::npos ||
-           detail.find("could not obtain lock on row") != std::string::npos;
-}
-
 }  // namespace
 
 domain::RepositoryResult<domain::Account> AccountRepositoryImpl::find_by_id(
@@ -137,7 +131,7 @@ AccountRepositoryImpl::find_by_id_for_update(
         }
         return map_account_row(result[0]);
     } catch (const drogon::orm::DrogonDbException& error) {
-        if (is_lock_conflict(error)) {
+        if (postgres::is_lock_conflict(error)) {
             return std::unexpected(domain::RepositoryError::conflict(
                 "Account is being changed by another request"));
         }

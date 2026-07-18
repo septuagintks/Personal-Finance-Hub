@@ -156,6 +156,7 @@ def create_account(
                 "currencyCode": currency,
             },
             token,
+            {"Idempotency-Key": f"runtime-account-{secrets.token_hex(8)}"},
         ),
         201,
         "create account",
@@ -254,13 +255,18 @@ def run_smoke(client: Client) -> None:
             "/api/v1/categories",
             {"board": "expense", "name": "Runtime Expense"},
             alice_token,
+            {"Idempotency-Key": f"runtime-category-{suffix}"},
         ),
         201,
         "create category",
     )
     tag = expect_status(
         client.request(
-            "POST", "/api/v1/tags", {"name": "runtime"}, alice_token
+            "POST",
+            "/api/v1/tags",
+            {"name": "runtime"},
+            alice_token,
+            {"Idempotency-Key": f"runtime-tag-{suffix}"},
         ),
         201,
         "create tag",

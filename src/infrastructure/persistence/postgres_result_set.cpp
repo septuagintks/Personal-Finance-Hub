@@ -7,6 +7,8 @@
 #ifdef PFH_HAS_POSTGRESQL
 
 #include <charconv>
+#include <iomanip>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -182,13 +184,25 @@ std::optional<std::chrono::system_clock::time_point> getOptionalTimestamp(
     return getTimestamp(row, col);
 }
 
-trantor::Date toDbTimestamp(std::chrono::system_clock::time_point value) {
-    const auto micros = std::chrono::duration_cast<std::chrono::microseconds>(
-        value.time_since_epoch());
-    return trantor::Date(micros.count());
+std::string toDbTimestamp(std::chrono::system_clock::time_point value) {
+    const auto micros = std::chrono::floor<std::chrono::microseconds>(value);
+    const auto day = std::chrono::floor<std::chrono::days>(micros);
+    const std::chrono::year_month_day date(day);
+    const std::chrono::hh_mm_ss time(micros - day);
+
+    std::ostringstream timestamp;
+    timestamp << std::setfill('0')
+              << std::setw(4) << static_cast<int>(date.year()) << '-'
+              << std::setw(2) << static_cast<unsigned>(date.month()) << '-'
+              << std::setw(2) << static_cast<unsigned>(date.day()) << ' '
+              << std::setw(2) << time.hours().count() << ':'
+              << std::setw(2) << time.minutes().count() << ':'
+              << std::setw(2) << time.seconds().count() << '.'
+              << std::setw(6) << time.subseconds().count() << "+00:00";
+    return timestamp.str();
 }
 
-std::optional<trantor::Date> toDbTimestamp(
+std::optional<std::string> toDbTimestamp(
     std::optional<std::chrono::system_clock::time_point> value) {
     if (!value.has_value()) {
         return std::nullopt;

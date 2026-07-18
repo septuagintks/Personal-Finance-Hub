@@ -29,6 +29,9 @@ namespace pfh::infrastructure::postgres {
     std::string_view operation,
     const std::exception& error);
 
+[[nodiscard]] bool is_lock_conflict(
+    const drogon::orm::DrogonDbException& error);
+
 void rollback_noexcept(
     const std::shared_ptr<drogon::orm::Transaction>& transaction,
     std::string_view operation) noexcept;

@@ -23,6 +23,9 @@ def main() -> int:
     support = read(
         "include/pfh/infrastructure/persistence/postgres_repository_support.h"
     )
+    support_source = read(
+        "src/infrastructure/persistence/postgres_repository_support.cpp"
+    )
     rls_header = read("include/pfh/infrastructure/persistence/rls_session.h")
     rls_source = read("src/infrastructure/persistence/rls_session.cpp")
     account = read("src/infrastructure/persistence/account_repository_impl.cpp")
@@ -229,11 +232,14 @@ def main() -> int:
         failures,
     )
     require(
-        "55P03" in account
-        and "could not obtain lock on row" in account
+        "55P03" in support_source
+        and "could not obtain lock on row" in support_source
+        and "postgres::is_lock_conflict(error)" in account
+        and "postgres::is_lock_conflict(error)" in transaction
         and "RepositoryError::conflict" in account
+        and "RepositoryError::conflict" in transaction
         and "WHERE account_id = $1 AND user_id = $2 LIMIT 1" in account,
-        "Account writes must map row-lock contention to conflict and check all transaction history",
+        "Account and transfer writes must map row-lock contention to conflict and check all transaction history",
         failures,
     )
     require(
@@ -382,7 +388,9 @@ def main() -> int:
         and "request_password=${" not in read("docker-compose.yml")
         and ":'request_user' <> :'background_user'" in role_init
         and "pg_auth_members" in role_init
-        and "rolcreatedb OR rolcreaterole OR rolreplication" in role_init,
+        and "rolcreatedb OR rolcreaterole OR rolreplication" in role_init
+        and "$pfh_role_preflight$" in role_init
+        and "\\quit 1" not in role_init,
         "Role initialization must keep passwords out of argv and reject unsafe roles before mutation",
         failures,
     )

@@ -28,6 +28,13 @@ domain::RepositoryError unexpected_error(
         std::string(operation) + " failed");
 }
 
+bool is_lock_conflict(const drogon::orm::DrogonDbException& error) {
+    const std::string_view detail(error.base().what());
+    return detail.find("55P03") != std::string_view::npos ||
+           detail.find("could not obtain lock on row") !=
+               std::string_view::npos;
+}
+
 void rollback_noexcept(
     const std::shared_ptr<drogon::orm::Transaction>& transaction,
     std::string_view operation) noexcept {

@@ -23,8 +23,12 @@ SELECT (
 
 \if :pfh_role_preflight_ok
 \else
-\echo 'request/background roles must be distinct, dedicated, and non-administrative'
-\quit 1
+DO $pfh_role_preflight$
+BEGIN
+    RAISE EXCEPTION
+        'request/background roles must be distinct, dedicated, and non-administrative';
+END
+$pfh_role_preflight$;
 \endif
 
 SELECT format(

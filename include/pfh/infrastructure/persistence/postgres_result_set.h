@@ -22,7 +22,6 @@
 #include <drogon/orm/Field.h>
 #include <drogon/orm/Result.h>
 #include <drogon/orm/Row.h>
-#include <trantor/utils/Date.h>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -63,11 +62,11 @@ namespace pg {
 [[nodiscard]] std::optional<std::chrono::system_clock::time_point> getOptionalTimestamp(
     const drogon::orm::Row& row, size_t col);
 
-/// @brief Convert a domain timestamp to the type supported by Drogon SqlBinder.
-[[nodiscard]] trantor::Date toDbTimestamp(
+/// @brief Convert a domain timestamp to an explicit UTC PostgreSQL value.
+[[nodiscard]] std::string toDbTimestamp(
     std::chrono::system_clock::time_point value);
 
-[[nodiscard]] std::optional<trantor::Date> toDbTimestamp(
+[[nodiscard]] std::optional<std::string> toDbTimestamp(
     std::optional<std::chrono::system_clock::time_point> value);
 
 /// @brief Map a PostgreSQL account_type enum text to domain::AccountType.

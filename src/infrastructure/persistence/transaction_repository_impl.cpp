@@ -501,7 +501,7 @@ TransactionRepositoryImpl::find_page(
             if (query.tag_id.has_value()) tag = query.tag_id->value();
             const auto from = pg::toDbTimestamp(query.occurred_from);
             const auto to = pg::toDbTimestamp(query.occurred_to);
-            std::optional<trantor::Date> cursor_time;
+            std::optional<std::string> cursor_time;
             std::optional<std::int64_t> cursor_id;
             if (query.before.has_value()) {
                 cursor_time = pg::toDbTimestamp(query.before->occurred_at);
@@ -723,7 +723,7 @@ TransactionRepositoryImpl::save_transfer(
         )SQL";
         std::optional<std::string> rate_value;
         std::optional<std::string> rate_source;
-        std::optional<trantor::Date> rate_time;
+        std::optional<std::string> rate_time;
         if (transfer.rate().has_value()) {
             rate_value = transfer.rate()->rate().to_string();
             rate_source = transfer.rate()->source();
@@ -783,6 +783,10 @@ TransactionRepositoryImpl::save_transfer(
             persisted_incoming->id(),
             std::move(adjustment_ids)};
     } catch (const drogon::orm::DrogonDbException& error) {
+        if (postgres::is_lock_conflict(error)) {
+            return std::unexpected(domain::RepositoryError::conflict(
+                "Transfer account is being changed by another request"));
+        }
         return std::unexpected(postgres::database_error("save transfer", error));
     } catch (const std::exception& error) {
         return std::unexpected(postgres::unexpected_error("save transfer", error));
@@ -981,7 +985,7 @@ TransactionRepositoryImpl::find_transfer_page(
             if (query.account_id.has_value()) {
                 account_id = query.account_id->value();
             }
-            std::optional<trantor::Date> cursor_time;
+            std::optional<std::string> cursor_time;
             std::optional<std::int64_t> cursor_id;
             if (query.before.has_value()) {
                 cursor_time = pg::toDbTimestamp(query.before->occurred_at);
