@@ -363,7 +363,33 @@ TEST_F(AuthApiTest, WebSessionRejectsMissingOrCrossSiteOrigin) {
     cross_site["Sec-Fetch-Site"] = "cross-site";
     EXPECT_EQ(post(
         "/api/v1/web/auth/register", body, {}, cross_site).status, 403);
+
+    auto scheme_mismatch = web_headers();
+    scheme_mismatch["X-Forwarded-Proto"] = "http";
+    EXPECT_EQ(post(
+        "/api/v1/web/auth/register", body, {}, scheme_mismatch).status, 403);
+
+    auto invalid_scheme = web_headers();
+    invalid_scheme["Origin"] = "ftp://ledger.test";
+    invalid_scheme["X-Forwarded-Proto"] = "ftp";
+    EXPECT_EQ(post(
+        "/api/v1/web/auth/register", body, {}, invalid_scheme).status, 403);
     EXPECT_TRUE(store_.users.empty());
+}
+
+TEST_F(AuthApiTest, WebSessionAcceptsMatchingForwardedHttpOrigin) {
+    auto headers = web_headers();
+    headers["Origin"] = "http://ledger.test";
+    headers["X-Forwarded-Proto"] = "http";
+    const auto response = post(
+        "/api/v1/web/auth/register",
+        {{"username", "forwarded-http@example.com"},
+         {"password", "correct horse battery staple"}},
+        {},
+        headers);
+
+    ASSERT_EQ(response.status, 201) << response.body;
+    EXPECT_TRUE(response.headers.at("Set-Cookie").starts_with("pfh_refresh="));
 }
 
 TEST_F(AuthApiTest, WebLogoutClearsCookieAndRevokesAccessToken) {

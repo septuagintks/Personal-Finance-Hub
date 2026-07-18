@@ -52,13 +52,22 @@ namespace {
     for (const auto* header : {
              "Host",
              "Origin",
+             "X-Forwarded-Proto",
              "Sec-Fetch-Site",
-             "Cookie",
              "Idempotency-Key",
              "If-Match"}) {
         const auto value = request->getHeader(header);
         if (!value.empty()) {
             core.headers.emplace(header, value);
+        }
+    }
+    const auto cookie = request->getHeader("Cookie");
+    if (!cookie.empty()) {
+        core.headers.emplace("Cookie", cookie);
+    } else {
+        const auto refresh_cookie = request->getCookie("pfh_refresh");
+        if (!refresh_cookie.empty()) {
+            core.headers.emplace("Cookie", "pfh_refresh=" + refresh_cookie);
         }
     }
     for (const auto& [name, value] : request->getParameters()) {

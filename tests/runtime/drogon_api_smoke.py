@@ -163,6 +163,67 @@ def create_account(
     )
 
 
+def run_web_session_smoke(client: Client, suffix: str, password: str) -> None:
+    origin_headers = {
+        "Origin": client.base_url,
+        "Sec-Fetch-Site": "same-origin",
+        "X-Forwarded-Proto": "http",
+    }
+    registered_response = client.request(
+        "POST",
+        "/api/v1/web/auth/register",
+        {
+            "username": f"web-{suffix}@example.test",
+            "password": password,
+            "baseCurrency": "USD",
+            "preferredLocale": "en-US",
+        },
+        headers=origin_headers,
+    )
+    registered = expect_status(registered_response, 201, "web register")
+    expect_trace(registered_response, "web register")
+    if "refreshToken" in registered:
+        raise SmokeFailure("web register: refresh token leaked in JSON")
+    cookie = registered_response[1].get("set-cookie", "")
+    lowered_cookie = cookie.lower()
+    for attribute in (
+        "pfh_refresh=",
+        "httponly",
+        "secure",
+        "samesite=strict",
+        "path=/api/v1/web/auth",
+    ):
+        if attribute not in lowered_cookie:
+            raise SmokeFailure(f"web register: cookie attribute missing: {attribute}")
+    cookie_pair = cookie.split(";", 1)[0]
+
+    refresh_headers = dict(origin_headers)
+    refresh_headers["Cookie"] = cookie_pair
+    refreshed_response = client.request(
+        "POST", "/api/v1/web/auth/refresh", headers=refresh_headers
+    )
+    refreshed = expect_status(refreshed_response, 200, "web refresh")
+    expect_trace(refreshed_response, "web refresh")
+    if "refreshToken" in refreshed:
+        raise SmokeFailure("web refresh: refresh token leaked in JSON")
+    rotated_cookie = refreshed_response[1].get("set-cookie", "")
+    if not rotated_cookie or rotated_cookie.split(";", 1)[0] == cookie_pair:
+        raise SmokeFailure("web refresh: cookie did not rotate")
+
+    logout_headers = dict(origin_headers)
+    logout_headers["Cookie"] = rotated_cookie.split(";", 1)[0]
+    logout_response = client.request(
+        "POST",
+        "/api/v1/web/auth/logout",
+        token=refreshed["accessToken"],
+        headers=logout_headers,
+    )
+    expect_status(logout_response, 204, "web logout")
+    expect_trace(logout_response, "web logout")
+    if "max-age=0" not in logout_response[1].get("set-cookie", "").lower():
+        raise SmokeFailure("web logout: cookie was not cleared")
+
+
 def run_smoke(client: Client) -> None:
     currencies_response = client.request("GET", "/api/v1/currencies")
     currencies = expect_status(currencies_response, 200, "currencies")
@@ -424,6 +485,7 @@ def run_smoke(client: Client) -> None:
     )
     if income.get("amount") != "250.125":
         raise SmokeFailure("transaction: amount did not round-trip as a string")
+    run_web_session_smoke(client, suffix, password)
 
 
 def runtime_config(port: int) -> dict[str, Any]:

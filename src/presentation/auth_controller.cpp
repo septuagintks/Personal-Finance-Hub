@@ -45,9 +45,18 @@ constexpr std::string_view kRefreshCookiePath = "/api/v1/web/auth";
     const HttpRequest& request) {
     const auto origin = request.header("Origin");
     const auto host = request.header("Host");
+    const auto forwarded_proto = request.header("X-Forwarded-Proto");
+    std::string_view scheme = "https";
+    if (forwarded_proto.has_value()) {
+        if (*forwarded_proto != "http" && *forwarded_proto != "https") {
+            return application::err(application::Error::forbidden(
+                "Cross-site web session request rejected"));
+        }
+        scheme = *forwarded_proto;
+    }
     if (!origin.has_value() || !host.has_value() || host->empty() ||
         host->find_first_of("/\\ \t\r\n") != std::string::npos ||
-        *origin != "https://" + *host) {
+        *origin != std::string(scheme) + "://" + *host) {
         return application::err(application::Error::forbidden(
             "Cross-site web session request rejected"));
     }

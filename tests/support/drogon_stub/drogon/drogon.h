@@ -25,6 +25,7 @@ public:
     void setPath(std::string) {}
     [[nodiscard]] std::string_view body() const noexcept { return {}; }
     [[nodiscard]] std::string getHeader(const std::string&) const { return {}; }
+    [[nodiscard]] std::string getCookie(const std::string&) const { return {}; }
     [[nodiscard]] std::string getParameter(const std::string&) const { return {}; }
     [[nodiscard]] const std::map<std::string, std::string>& getParameters() const {
         static const std::map<std::string, std::string> parameters;
