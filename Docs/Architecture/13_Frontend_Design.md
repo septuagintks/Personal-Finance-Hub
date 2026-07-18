@@ -1,6 +1,6 @@
 # Personal Finance Hub 前端设计
 
-Version: 2.0
+Version: 2.1
 Product Name: `Candy's Ledger` (Tentative)
 Frontend: Vue 3 + TypeScript Strict + Vite
 Status: Approved
@@ -28,7 +28,7 @@ Status: Approved
 | Build | Vite |
 | Language | TypeScript Strict |
 | Router / State | Vue Router 4 / Pinia |
-| UI / Icons | Element Plus / `@lucide/vue` |
+| UI / Icons | Project UI primitives / `@lucide/vue` |
 | Charts | ECharts，按需加载 |
 | Decimal | `decimal.js` |
 | HTTP | Axios |
@@ -51,6 +51,7 @@ Browser
 
 - 开发环境由 Vite 代理 `/api`；生产环境由 non-root Nginx 提供静态资源并反向代理 API。
 - Web 与 API 默认同源并使用 HTTPS，不开放宽泛 CORS。
+- Web Edge 对 HTML 使用 `no-store`、对 hashed assets 使用 immutable cache，并统一设置 CSP、frame denial、MIME、Referrer、Permissions 与 COOP 响应头。
 - 浏览器不直接访问 PostgreSQL、汇率 Provider、Outbox 或 Scheduler。
 - 前端不复制金融、汇率、报表、权限或事务规则，后端响应是最终事实。
 
@@ -210,6 +211,7 @@ interface ApiError {
 
 - Playwright 随锁文件固定的 Chromium、Firefox 和 WebKit。
 - Desktop 视口至少覆盖 1440x900 与 1280x720。
+- Tablet 至少覆盖 1024x768。
 - Mobile 至少覆盖 390x844 与 360x800。
 - 目标是当前两个稳定大版本；不支持 Internet Explorer 或旧版 EdgeHTML。
 
@@ -233,13 +235,15 @@ interface ApiError {
 
 预算在 P2-S01 固定，在 P2-S11 以目标 Linux/Docker 环境复核。调整预算必须保留测量条件、用户影响和明确理由。
 
+构建预算由 `frontend/bundle-budgets.json` 定义，`frontend/tools/validate-bundle.mjs` 读取 Vite manifest 和实际 gzip 结果执行门禁。ECharts 必须保留在 Reports 按需 chunk，不得回到初始入口；未使用的 UI framework 不进入生产依赖图。
+
 ---
 
 ## 11. 持续验收
 
 - `pnpm install --frozen-lockfile`、typecheck、lint、unit、component 和 production build。
 - OpenAPI 生成文件无漂移。
-- Playwright 当前切片 E2E；Release Candidate 执行三浏览器全量。
+- Playwright 当前切片 E2E；本机默认执行 Chromium/Edge，Release Candidate 使用 `PLAYWRIGHT_FULL_BROWSERS=1` 执行 Chromium、Firefox、WebKit 全量。
 - axe 自动检查加键盘、焦点、名称与对比度人工检查。
 - 金额字符串、时区、用户切换、401、409、422、500、离线和取消状态。
 - 构建产物、浏览器存储、日志和 source map 无 Token、Cookie、密码或私有配置。

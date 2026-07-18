@@ -16,12 +16,14 @@ export default defineConfig({
     },
   },
   build: {
+    manifest: true,
     sourcemap: false,
     rollupOptions: {
       output: {
         manualChunks: {
           'vue-core': ['vue', 'vue-router', 'pinia'],
           icons: ['@lucide/vue'],
+          charts: ['echarts/core', 'echarts/charts', 'echarts/components', 'echarts/renderers'],
         },
       },
     },

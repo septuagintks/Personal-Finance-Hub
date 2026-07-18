@@ -419,6 +419,16 @@ add_test(
 )
 set_tests_properties(openapi_contract PROPERTIES LABELS "api;contract;static")
 
+add_test(
+    NAME release_hardening_contracts
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/sql/validate_release_hardening.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+set_tests_properties(release_hardening_contracts PROPERTIES
+    LABELS "release;security;frontend;static"
+)
+
 # Integration Tests
 add_subdirectory(tests/integration)
 

@@ -134,6 +134,8 @@ Phase 分支合并前，根据改动范围执行以下门禁：
 6. Release Candidate 的 Chromium、Firefox、WebKit、Accessibility 与固定数据集性能矩阵。
 7. Markdown 链接、格式、旧路径和秘密模式扫描。
 
+Phase 2 发布门禁还必须执行 `frontend` 的 bundle、直接依赖许可证、production source map 和秘密扫描。联网环境执行 `pnpm audit --prod --audit-level high`；离线结构检查不能替代漏洞数据库结果。
+
 代码改动至少运行仓库根目录的 `quality_check.ps1` 或平台等价命令。涉及 migration、PostgreSQL adapter、Drogon、Provider、Scheduler、Outbox、Docker 或生产装配的改动，必须补对应真实环境门禁，不能只依赖 PostgreSQL OFF 结果。
 
 ---

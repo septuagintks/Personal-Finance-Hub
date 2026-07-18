@@ -1,0 +1,6 @@
+{
+  "initialJsGzipBytes": 256000,
+  "totalJsGzipBytes": 430080,
+  "maxAsyncChunkGzipBytes": 204800,
+  "cssGzipBytes": 65536
+}

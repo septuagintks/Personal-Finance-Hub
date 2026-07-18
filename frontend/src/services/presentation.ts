@@ -73,15 +73,23 @@ export function formatInstant(
     if (preferredDate) {
       const time = new Intl.DateTimeFormat(locale, {
         timeZone,
-        timeStyle: 'short',
+        hour: 'numeric',
+        minute: '2-digit',
+        timeZoneName: 'shortOffset',
       }).format(instant);
       return `${preferredDate} ${time}`;
     }
-    return new Intl.DateTimeFormat(locale, {
+    const date = new Intl.DateTimeFormat(locale, {
       timeZone,
       dateStyle: 'medium',
-      timeStyle: 'short',
     }).format(instant);
+    const time = new Intl.DateTimeFormat(locale, {
+      timeZone,
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZoneName: 'shortOffset',
+    }).format(instant);
+    return `${date}, ${time}`;
   } catch {
     return value;
   }

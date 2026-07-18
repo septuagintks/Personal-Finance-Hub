@@ -149,6 +149,42 @@ Production ON 必须实际执行：
 - 用户维护、USER/OPERATOR 授权、探针、Metrics 和 dead-letter 重试脱敏。
 - Outbox claim/retry/dead letter、四个 Scheduler Job、lease 和优雅停止。
 
+### 6.1 Web Release Matrix
+
+```bash
+corepack pnpm install --frozen-lockfile
+corepack pnpm --dir frontend quality
+corepack pnpm --dir frontend exec playwright install chromium firefox webkit
+PLAYWRIGHT_FULL_BROWSERS=1 corepack pnpm --dir frontend e2e
+corepack pnpm audit --prod --audit-level high
+```
+
+`PLAYWRIGHT_EXECUTABLE_PATH` 只用于本机单浏览器验证，不得与 `PLAYWRIGHT_FULL_BROWSERS=1` 同时设置。
+
+### 6.2 Fixed Performance Profiles
+
+只在可删除的 PostgreSQL 测试库和专用测试用户上执行。先通过 API 创建用户并取得短期 access token；数据库 URL 使用具备夹具写入权限的测试角色，任何凭据和结果原文都不得提交。
+
+```bash
+export PFH_PERF_DATABASE_URL='<test-database-uri>'
+export PFH_PERF_BASE_URL='http://127.0.0.1:8081'
+export PFH_PERF_ACCESS_TOKEN='<ephemeral-access-token>'
+
+python3 tools/phase2_performance.py seed \
+  --profile daily --user-id <test-user-id> --confirm-test-database
+python3 tools/phase2_performance.py benchmark \
+  --profile daily --base-url "$PFH_PERF_BASE_URL" --enforce \
+  --output /tmp/pfh-phase2-daily.json
+
+python3 tools/phase2_performance.py seed \
+  --profile stress --user-id <test-user-id> --confirm-test-database
+python3 tools/phase2_performance.py benchmark \
+  --profile stress --base-url "$PFH_PERF_BASE_URL" --enforce \
+  --output /tmp/pfh-phase2-stress.json
+```
+
+每次 seed 会先清理该用户的 `PFH-PERF-*` 夹具，使 Daily 与 Stress 互斥。记录 p50/p95、响应大小、数据库/应用资源、页面指标和关键查询的 `EXPLAIN (ANALYZE, BUFFERS)` 脱敏摘要；不要提交完整数据库 URL、Token、原始日志或大体积结果。
+
 ---
 
 ## 7. Provider 验证

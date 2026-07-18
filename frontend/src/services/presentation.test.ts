@@ -36,6 +36,25 @@ describe('presentation adapters', () => {
     expect(dayFirst).toContain('8:30');
   });
 
+  it('disambiguates repeated local times across a daylight-saving transition', () => {
+    const beforeFallback = formatInstant('2026-11-01T05:30:00Z', {
+      locale: 'en-US',
+      timeZone: 'America/New_York',
+      dateFormat: 'YYYY-MM-DD',
+    });
+    const afterFallback = formatInstant('2026-11-01T06:30:00Z', {
+      locale: 'en-US',
+      timeZone: 'America/New_York',
+      dateFormat: 'YYYY-MM-DD',
+    });
+
+    expect(beforeFallback).toContain('2026-11-01 1:30');
+    expect(afterFallback).toContain('2026-11-01 1:30');
+    expect(beforeFallback).toContain('GMT-4');
+    expect(afterFallback).toContain('GMT-5');
+    expect(beforeFallback).not.toBe(afterFallback);
+  });
+
   it('converts only dimensionless chart ratios to finite numbers', () => {
     expect(toChartRatios(['100000000000000000000', '25000000000000000000'])).toEqual([1, 0.25]);
     expect(toChartRatios(['not-a-decimal', '0'])).toEqual([0, 0]);

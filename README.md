@@ -132,9 +132,10 @@ Docs/                 Architecture, plans, guides, standards and archive
 | PostgreSQL fixture | 12/12 scenarios PASS |
 | Flyway V1-V6 | migrate/info/validate/no-op PASS |
 | Docker | cold build、healthy、non-root、RLS、Outbox/Scheduler PASS |
-| Phase 2 S01-S10 Windows Debug | 380/380 PASS |
-| Frontend contract/lint/typecheck/unit/build | PASS（59 tests） |
-| Frontend Edge Desktop/Mobile contract E2E + axe | 34/34 PASS |
+| Phase 2 S11 Windows Debug / Release | 381/381 PASS |
+| Frontend contract/lint/typecheck/unit/build/release gates | PASS（62 tests） |
+| Frontend Edge responsive contract E2E + axe | 37/37 PASS |
+| Target Linux/PostgreSQL/Docker/three-browser S12 | Pending |
 
 ---
 

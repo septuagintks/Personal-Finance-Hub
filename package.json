@@ -9,6 +9,7 @@
     "web:lint": "corepack pnpm --dir frontend lint",
     "web:format:check": "corepack pnpm --dir frontend format:check",
     "web:build": "corepack pnpm --dir frontend build",
+    "web:release:check": "corepack pnpm --dir frontend release:check",
     "web:test": "corepack pnpm --dir frontend test",
     "web:e2e": "corepack pnpm --dir frontend e2e",
     "web:quality": "corepack pnpm --dir frontend quality"

@@ -32,6 +32,9 @@ const currencies = [
   { code: 'USD', symbol: '$', precision: 2, displayName: 'US Dollar', isCrypto: false },
 ];
 
+const longAccountName =
+  'InternationalTravelReserveAndReconciliationAccountForAnnualFinancialReporting';
+
 function makeAccount(id: number, overrides: Partial<Account> = {}): Account {
   return {
     id,
@@ -100,6 +103,7 @@ function installAccountApi(
   const state = {
     accounts: [
       makeAccount(1, { name: 'Everyday Cash' }),
+      makeAccount(4, { name: longAccountName, currencyCode: 'USD' }),
       makeAccount(2, {
         name: 'Old Wallet',
         isArchived: true,
@@ -251,6 +255,7 @@ for (const viewport of [
 
       await expect(page.getByRole('heading', { name: 'Accounts', exact: true })).toBeVisible();
       await expect(page.getByText('Everyday Cash')).toBeVisible();
+      await expect(page.getByText(longAccountName)).toBeVisible();
       await page.getByRole('button', { name: 'Archived' }).click();
       await expect(page.getByText('Old Wallet')).toBeVisible();
       await page.getByRole('button', { name: 'Active' }).click();

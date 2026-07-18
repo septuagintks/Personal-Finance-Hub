@@ -4,7 +4,18 @@ import { expect, test, type Page, type Route } from '@playwright/test';
 const currencies = [
   { code: 'CNY', symbol: '¥', precision: 2, displayName: 'Chinese Yuan', isCrypto: false },
   { code: 'USD', symbol: '$', precision: 2, displayName: 'US Dollar', isCrypto: false },
+  {
+    code: 'USDT',
+    symbol: 'USDT',
+    precision: 8,
+    displayName: 'Tether USD stablecoin',
+    isCrypto: true,
+  },
 ];
+
+const longCategoryName =
+  'InternationalReconciliationAndTravelExpenseDocumentationForAnnualReporting';
+const longTagName = 'year-end-regulatory-reconciliation-documentation-review';
 
 let preference = {
   baseCurrency: 'CNY',
@@ -39,11 +50,11 @@ function resource(id: number, name: string, board: 'income' | 'expense' = 'expen
 }
 
 function installApi(page: Page): void {
-  const categories = [resource(1, 'Food')];
+  const categories = [resource(1, longCategoryName)];
   const tags = [
     {
       id: 1,
-      name: 'tax',
+      name: longTagName,
       isDeleted: false,
       deletedAt: null as string | null,
       createdAt: '2026-07-18T00:00:00Z',
@@ -140,8 +151,10 @@ function installApi(page: Page): void {
 }
 
 for (const viewport of [
-  { name: 'desktop', width: 1440, height: 900 },
-  { name: 'mobile', width: 390, height: 844 },
+  { name: 'desktop-wide', width: 1440, height: 900 },
+  { name: 'desktop-short', width: 1280, height: 720 },
+  { name: 'tablet', width: 1024, height: 768 },
+  { name: 'mobile-narrow', width: 360, height: 800 },
 ]) {
   test(`settings lifecycle / ${viewport.name}`, async ({ page }) => {
     preference = { ...preference, locale: 'en-US', theme: 'system' };
@@ -150,11 +163,21 @@ for (const viewport of [
     await page.goto('/settings');
 
     await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
+    await expect(
+      page.locator('.settings-row__name strong').filter({ hasText: longCategoryName }),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      ),
+    ).toBe(false);
     await page.getByRole('button', { name: 'New category' }).click();
     const categoryDialog = page.getByRole('dialog', { name: 'New category' });
     await categoryDialog.getByLabel('Name').fill('Travel');
     await categoryDialog.getByRole('button', { name: 'Save' }).click();
-    const categoryRow = page.locator('.settings-row').filter({ hasText: 'Travel' });
+    const categoryRow = page.locator('.settings-row').filter({
+      has: page.locator('strong').filter({ hasText: /^Travel$/ }),
+    });
     await expect(categoryRow).toBeVisible();
     await categoryRow.getByTitle('Edit').click();
     const editDialog = page.getByRole('dialog', { name: 'Edit category' });
@@ -168,6 +191,12 @@ for (const viewport of [
     await expect(tripsRow).toContainText('Active');
 
     await page.getByRole('tab', { name: 'Tags' }).click();
+    await expect(page.getByText(longTagName)).toBeVisible();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      ),
+    ).toBe(false);
     await page.getByRole('button', { name: 'New tag' }).click();
     const tagDialog = page.getByRole('dialog', { name: 'New tag' });
     await tagDialog.getByLabel('Name').fill('vacation');
@@ -175,6 +204,7 @@ for (const viewport of [
     await expect(page.locator('.settings-row').filter({ hasText: 'vacation' })).toBeVisible();
 
     await page.getByRole('tab', { name: 'Preferences' }).click();
+    await page.getByLabel('Base currency').selectOption('USDT');
     await page.getByLabel('Language').selectOption('zh-CN');
     await page.getByLabel('Theme').selectOption('dark');
     await page.getByRole('button', { name: 'Save preferences' }).click();

@@ -12,18 +12,21 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "build": "vue-tsc --noEmit && vite build",
+    "bundle:check": "node tools/validate-bundle.mjs",
+    "dependency:check": "node tools/validate-dependencies.mjs",
+    "security:check": "node tools/validate-release-security.mjs",
+    "release:check": "corepack pnpm bundle:check && corepack pnpm dependency:check && corepack pnpm security:check",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
-    "quality": "corepack pnpm api:check && corepack pnpm lint && corepack pnpm format:check && corepack pnpm test && corepack pnpm build"
+    "quality": "corepack pnpm api:check && corepack pnpm lint && corepack pnpm format:check && corepack pnpm test && corepack pnpm build && corepack pnpm release:check"
   },
   "dependencies": {
     "@lucide/vue": "1.24.0",
-    "axios": "1.8.4",
+    "axios": "1.16.0",
     "decimal.js": "10.5.0",
     "echarts": "6.1.0",
-    "element-plus": "2.14.3",
     "pinia": "3.0.3",
     "vue": "3.5.13",
     "vue-router": "4.5.0"

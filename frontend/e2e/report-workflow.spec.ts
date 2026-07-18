@@ -165,3 +165,29 @@ for (const viewport of [
     await expectAccessibleAndContained(page);
   });
 }
+
+test('reports honor reduced motion without suppressing chart content', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  installApi(page);
+  await page.goto('/reports?startDate=2026-01&endDate=2026-07&dimension=root_category');
+
+  await expectChartsPainted(page);
+  expect(
+    await page.evaluate(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches),
+  ).toBe(true);
+  const motion = await page.evaluate(() => {
+    const probe = document.createElement('div');
+    probe.style.animationDuration = '1s';
+    probe.style.transitionDuration = '1s';
+    document.body.append(probe);
+    const styles = window.getComputedStyle(probe);
+    const result = {
+      animationDuration: styles.animationDuration,
+      transitionDuration: styles.transitionDuration,
+    };
+    probe.remove();
+    return result;
+  });
+  expect(motion).toEqual({ animationDuration: '1e-05s', transitionDuration: '1e-05s' });
+  await expectAccessibleAndContained(page);
+});
