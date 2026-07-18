@@ -208,6 +208,24 @@ for (const viewport of [
     await expect(page.getByText('Meal 1')).toBeVisible();
     await expectAccessibleAndContained(page);
 
+    if (viewport.name === 'desktop') {
+      await page.setViewportSize({ width: 640, height: 360 });
+      const results = page.getByRole('region', { name: 'Transaction results' });
+      await page.getByRole('button', { name: 'Apply' }).focus();
+      await page.keyboard.press('Tab');
+      await expect(results).toBeFocused();
+      expect(await results.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(
+        true,
+      );
+      expect(
+        await results.evaluate((element) => {
+          const style = getComputedStyle(element);
+          return style.outlineStyle !== 'none' && Number.parseFloat(style.outlineWidth) >= 1;
+        }),
+      ).toBe(true);
+      await page.setViewportSize(viewport);
+    }
+
     await page.getByRole('button', { name: 'Record transaction' }).click();
     const create = page.getByRole('dialog', { name: 'Record transaction' });
     await create.getByLabel('Amount', { exact: true }).fill('18.50');

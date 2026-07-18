@@ -273,8 +273,11 @@ onMounted(async () => {
 
     <section
       class="ledger-list"
+      role="region"
+      aria-label="Transaction results"
       aria-live="polite"
       :aria-busy="transactions.listState === 'loading'"
+      tabindex="0"
     >
       <div class="ledger-list__head" aria-hidden="true">
         <span>When</span><span>Entry</span><span>Account</span><span>Classification</span
