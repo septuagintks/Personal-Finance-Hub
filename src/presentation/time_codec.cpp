@@ -152,7 +152,7 @@ TimeCodec::parse_rfc3339(std::string_view value) {
 std::string TimeCodec::format_rfc3339(
     std::chrono::system_clock::time_point value) {
     const auto seconds = std::chrono::floor<std::chrono::seconds>(value);
-    const auto subseconds = std::chrono::duration_cast<std::chrono::nanoseconds>(
+    const auto subseconds = std::chrono::duration_cast<std::chrono::microseconds>(
         value - seconds).count();
     const auto days = std::chrono::floor<std::chrono::days>(seconds);
     const std::chrono::year_month_day date(days);
@@ -168,7 +168,7 @@ std::string TimeCodec::format_rfc3339(
            << std::setw(2) << time.seconds().count();
     if (subseconds != 0) {
         auto fraction = std::to_string(subseconds);
-        fraction.insert(0, 9 - fraction.size(), '0');
+        fraction.insert(0, 6 - fraction.size(), '0');
         while (fraction.back() == '0') {
             fraction.pop_back();
         }

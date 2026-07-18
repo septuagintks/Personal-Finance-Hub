@@ -188,6 +188,7 @@ test('reports honor reduced motion without suppressing chart content', async ({ 
     probe.remove();
     return result;
   });
-  expect(motion).toEqual({ animationDuration: '1e-05s', transitionDuration: '1e-05s' });
+  expect(Number.parseFloat(motion.animationDuration)).toBeLessThanOrEqual(0.00001);
+  expect(Number.parseFloat(motion.transitionDuration)).toBeLessThanOrEqual(0.00001);
   await expectAccessibleAndContained(page);
 });

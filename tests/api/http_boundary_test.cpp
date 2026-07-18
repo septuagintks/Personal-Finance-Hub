@@ -29,6 +29,13 @@ TEST(HttpBoundaryTest, Rfc3339OffsetNormalizesToUtc) {
     auto round_trip = TimeCodec::parse_rfc3339(formatted);
     ASSERT_TRUE(round_trip.has_value());
     EXPECT_EQ(*round_trip, *fractional);
+
+    auto nanosecond_input = TimeCodec::parse_rfc3339(
+        "2026-07-14T08:30:45.123456789+08:00");
+    ASSERT_TRUE(nanosecond_input.has_value());
+    EXPECT_EQ(
+        TimeCodec::format_rfc3339(*nanosecond_input),
+        "2026-07-14T00:30:45.123456Z");
 }
 
 TEST(HttpBoundaryTest, Rfc3339RejectsInvalidCalendarDateAndMissingZone) {

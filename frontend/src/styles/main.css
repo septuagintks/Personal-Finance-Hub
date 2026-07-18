@@ -127,10 +127,7 @@ a {
   font-size: 0.9rem;
   font-weight: 700;
   text-decoration: none;
-  transition:
-    background-color 160ms ease,
-    border-color 160ms ease,
-    transform 160ms ease;
+  transition: transform 160ms ease;
 }
 
 .button:hover:not(:disabled) {
@@ -141,7 +138,9 @@ a {
 
 .button:disabled {
   cursor: wait;
-  opacity: 0.58;
+  color: var(--color-surface);
+  background: var(--color-accent-dark);
+  border-color: var(--color-accent-dark);
 }
 
 .button--small {
