@@ -41,7 +41,8 @@ Docs/
 │   ├── Phase_2_S08_Delivery_Summary.md
 │   ├── Phase_2_S09_Delivery_Summary.md
 │   ├── Phase_2_S10_Delivery_Summary.md
-│   └── Phase_2_S11_Delivery_Summary.md
+│   ├── Phase_2_S11_Delivery_Summary.md
+│   └── Phase_2_S12_Delivery_Summary.md
 ├── Guides/
 │   ├── Database_Migration_Guide.md
 │   ├── Dependency_Installation_Guide.md
@@ -96,7 +97,7 @@ Phase 1 后端基线已经完成并通过：
 - FreeCurrencyAPI 主源、exchangerate.fun 整批备用和历史降级。
 - Ubuntu 24.04 Docker 冷构建、non-root、双角色、FORCE RLS、Outbox/Scheduler 与优雅停止。
 
-Phase 2 当前分支已完成 S01-S11 Windows Release Candidate。现有 Web 覆盖认证、账户、分类、标签、偏好、日常流水、Transfer 聚合、Dashboard、维度报表、CSV 导出、个人审计、余额维护和 Operator 运维面；数据库迁移已演进到 V10，Web Edge、发布预算和固定性能工具已落地。本机 Debug/Release CTest 均为 381/381、Vitest/MSW 62/62、Edge E2E 37/37。真实 Drogon/PostgreSQL、Linux/Docker、10,000/100,000 行基准和 Chromium/Firefox/WebKit 执行按 P2-S12 交给目标环境验收。Phase 3 保留给账单导入与支付平台生态。
+Phase 2 当前分支已完成 S01-S11 Windows Release Candidate 与 S12 Windows 验收。现有 Web 覆盖认证、账户、分类、标签、偏好、日常流水、Transfer 聚合、Dashboard、维度报表、CSV 导出、个人审计、余额维护和 Operator 运维面；数据库迁移已演进到 V10，Web Edge、发布预算和固定性能工具已落地。本机 Debug/Release CTest 均为 381/381、Vitest/MSW 62/62、Edge E2E 37/37。真实 Drogon/PostgreSQL、Linux/Docker、10,000/100,000 行基准和 Chromium/Firefox/WebKit 执行已按 P2-S12 交给目标环境验收；返回前不得签署 Phase 或合并 `main`。Phase 3 保留给账单导入与支付平台生态。
 
 汇率实时能力当前覆盖 20 种法币与 BTC。其他 12 种加密货币没有实时保证，系统会返回完整历史降级或明确不可用；完整加密货币定价不在当前计划内。
 
