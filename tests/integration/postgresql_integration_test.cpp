@@ -435,6 +435,7 @@ TEST_F(PostgreSQLIntegrationTest, CoreRepositoriesRoundTripAndEnforceTenantIsola
             auto audit = audits.append(
                 tx,
                 AuditLogEntry{
+                    0,
                     alice.user,
                     AuditActorType::User,
                     AuditAction::Create,
@@ -443,6 +444,7 @@ TEST_F(PostgreSQLIntegrationTest, CoreRepositoriesRoundTripAndEnforceTenantIsola
                     "",
                     "{}",
                     R"({"source":"fixture"})",
+                    "",
                     now});
             if (!audit) return audit;
 
@@ -948,6 +950,7 @@ TEST_F(PostgreSQLIntegrationTest, SupplementalAuditReceiptRollsBackWithInvalidAu
     )SQL");
     PostgresSupplementalAuditStore store(database->request);
     AuditLogEntry invalid{
+        0,
         std::nullopt,
         AuditActorType::System,
         AuditAction::SecurityEvent,
@@ -956,6 +959,7 @@ TEST_F(PostgreSQLIntegrationTest, SupplementalAuditReceiptRollsBackWithInvalidAu
         "",
         "",
         "{",
+        "",
         sample_time()};
     auto failed = store.append_once(outbox_id, "fixture-handler", invalid);
     ASSERT_FALSE(failed.has_value());

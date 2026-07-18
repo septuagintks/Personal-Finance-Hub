@@ -189,25 +189,25 @@ CategoryRepositoryImpl::find_identity_for_update(
     const std::optional<std::int64_t> parent_value = parent_id.has_value()
         ? std::optional<std::int64_t>(parent_id->value()) : std::nullopt;
     try {
-        drogon::orm::Result result;
-        if (template_id.has_value()) {
-            const std::string sql = std::string("SELECT ") + kCategoryColumns +
-                " FROM categories WHERE user_id = $1 "
-                "AND board = $2::category_board "
-                "AND parent_id IS NOT DISTINCT FROM $3 "
-                "AND template_id = $4 FOR UPDATE NOWAIT";
-            result = (*context)->transaction().execSqlSync(
-                sql, user_id.value(), pg::toSqlText(board), parent_value,
-                *template_id);
-        } else {
+        const auto result = [&]() {
+            if (template_id.has_value()) {
+                const std::string sql = std::string("SELECT ") + kCategoryColumns +
+                    " FROM categories WHERE user_id = $1 "
+                    "AND board = $2::category_board "
+                    "AND parent_id IS NOT DISTINCT FROM $3 "
+                    "AND template_id = $4 FOR UPDATE NOWAIT";
+                return (*context)->transaction().execSqlSync(
+                    sql, user_id.value(), pg::toSqlText(board), parent_value,
+                    *template_id);
+            }
             const std::string sql = std::string("SELECT ") + kCategoryColumns +
                 " FROM categories WHERE user_id = $1 "
                 "AND board = $2::category_board "
                 "AND parent_id IS NOT DISTINCT FROM $3 "
                 "AND name = $4 FOR UPDATE NOWAIT";
-            result = (*context)->transaction().execSqlSync(
+            return (*context)->transaction().execSqlSync(
                 sql, user_id.value(), pg::toSqlText(board), parent_value, name);
-        }
+        }();
         return result.empty()
             ? domain::RepositoryResult<domain::Category>(
                   std::unexpected(domain::RepositoryError::not_found(

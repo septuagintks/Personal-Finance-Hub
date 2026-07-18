@@ -23,6 +23,9 @@ public:
 
 class Result {
 public:
+    Result() = delete;
+    explicit Result(std::nullptr_t) {}
+
     using const_iterator = std::vector<Row>::const_iterator;
 
     [[nodiscard]] bool empty() const noexcept { return rows_.empty(); }

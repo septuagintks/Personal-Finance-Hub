@@ -37,7 +37,7 @@ public:
     Result execSqlSync(
         const std::string&,
         Arguments&&...) {
-        return {};
+        return Result{nullptr};
     }
 
     [[nodiscard]] std::shared_ptr<Transaction> newTransaction(
