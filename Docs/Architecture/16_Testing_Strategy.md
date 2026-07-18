@@ -11,7 +11,7 @@ Status: Approved
 
 PFH 测试优先证明金融正确性、事务一致性、租户隔离、API 契约和后台任务可恢复性。测试层次应同时提供快速反馈与真实运行环境证据，任何 In-Memory 或静态门禁都不能替代 PostgreSQL、Drogon 和 Linux production ON 验收。
 
-Phase 1 的固定测试数量、环境和最终结果归档在 [S09-S12 交付摘要](../Archive/Phase_1_S09-S12_Delivery_Summary.md)，本文件只维护持续有效的测试规则。
+固定测试数量、环境和最终结果分别归档在 [Phase 1 S09-S12](../Archive/Phase_1_S09-S12_Delivery_Summary.md) 与 [Phase 2 S09-S12](../Archive/Phase_2_S09-S12_Delivery_Summary.md) 交付摘要中，本文件只维护持续有效的测试规则。
 
 ---
 

@@ -4,7 +4,7 @@ Version: 0.1.0-alpha
 Backend: C++23
 Architecture: Clean Architecture + Lightweight DDD
 
-Personal Finance Hub 是仓库、后端和 API 的工程名称；面向用户的 Web 产品暂定名为 **Candy's Ledger**。Phase 1 已完成高精度、可审计的财务后端，Phase 2 正在交付 Vue 3 产品体验。
+Personal Finance Hub 是仓库、后端和 API 的工程名称；面向用户的 Web 产品暂定名为 **Candy's Ledger**。Phase 1 后端与 Phase 2 Vue 3 产品体验均已完成并通过跨平台交付门禁。
 
 ---
 
@@ -125,17 +125,17 @@ Docs/                 Architecture, plans, guides, standards and archive
 
 | 门禁 | 结果 |
 | ---- | ---- |
-| Windows Debug / PostgreSQL OFF | 349/349 PASS |
-| Windows Release / PostgreSQL OFF | 349/349 PASS |
-| Linux Debug / PostgreSQL ON | 351/351 PASS |
-| Linux Release / PostgreSQL ON | 351/351 PASS |
-| PostgreSQL fixture | 12/12 scenarios PASS |
-| Flyway V1-V6 | migrate/info/validate/no-op PASS |
-| Docker | cold build、healthy、non-root、RLS、Outbox/Scheduler PASS |
-| Phase 2 S11 Windows Debug / Release | 381/381 PASS |
-| Frontend contract/lint/typecheck/unit/build/release gates | PASS（62 tests） |
-| Frontend Edge responsive contract E2E + axe | 37/37 PASS |
-| Target Linux/PostgreSQL/Docker/three-browser S12 | Pending |
+| Windows Debug / PostgreSQL OFF | 382/382 PASS |
+| Windows Release / PostgreSQL OFF | 382/382 PASS |
+| Linux Debug / PostgreSQL ON | 384/384 PASS |
+| Linux Release / PostgreSQL ON | 384/384 PASS |
+| Linux PostgreSQL OFF | 382/382 PASS |
+| PostgreSQL fixture | Repository、UoW、RLS、NUMERIC 与并发场景 PASS |
+| Flyway V1-V10 | migrate/info/validate/no-op、角色和 RLS PASS |
+| Frontend unit / release gates | Vitest/MSW 63/63，质量与安全 PASS |
+| Frontend Edge E2E | 37/37 PASS |
+| Chromium / Firefox / WebKit E2E | 111/111 PASS |
+| Docker / runtime / recovery | cold build、healthy、Provider、Outbox/Scheduler、restore、rollback PASS |
 
 ---
 
@@ -144,8 +144,8 @@ Docs/                 Architecture, plans, guides, standards and archive
 - 当前实时汇率路径覆盖 20 种法币与 BTC。
 - 其他 12 种加密货币没有实时保证，只能使用完整历史快照降级或返回不可用。
 - 完整加密货币实时定价不在当前计划内。
-- Phase 1 不开放转账聚合删除。
-- 完整前端属于 Phase 2。
+- Transfer 聚合删除采用可审计软删除；不提供物理删除。
+- 当前 Web 产品不承诺原生移动端或离线写入。
 - 账单导入、银行和支付平台接入保留到 Phase 3。
 
 ---
@@ -155,6 +155,8 @@ Docs/                 Architecture, plans, guides, standards and archive
 - [文档中心](Docs/README.md)
 - [总体开发计划](Docs/Development_Plans/Overall_Development_Plan.md)
 - [Phase 1 开发记录](Docs/Archive/Phase_1_Development_Record.md)
+- [Phase 2 开发记录](Docs/Archive/Phase_2_Development_Record.md)
+- [Phase 2 开发计划](Docs/Development_Plans/Phase_2/Phase_2_Development_Plan.md)
 - [技术架构](Docs/Architecture/01_Technical_Architecture.md)
 - [OpenAPI 3.1](Docs/Architecture/10_REST_API_OpenAPI.json)
 - [开发者快速参考](Docs/Guides/Quick_Reference.md)

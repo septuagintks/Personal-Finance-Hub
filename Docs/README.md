@@ -32,17 +32,6 @@ Docs/
 │   ├── Phase_1/Phase_1_Development_Plan.md
 │   ├── Phase_2/Phase_2_Development_Plan.md
 │   └── Phase_3/Phase_3_Development_Plan.md
-├── Development/
-│   ├── Phase_2_S01-S02_Delivery_Summary.md
-│   ├── Phase_2_S03-S04_Delivery_Summary.md
-│   ├── Phase_2_S05_Delivery_Summary.md
-│   ├── Phase_2_S06_Delivery_Summary.md
-│   ├── Phase_2_S07_Delivery_Summary.md
-│   ├── Phase_2_S08_Delivery_Summary.md
-│   ├── Phase_2_S09_Delivery_Summary.md
-│   ├── Phase_2_S10_Delivery_Summary.md
-│   ├── Phase_2_S11_Delivery_Summary.md
-│   └── Phase_2_S12_Delivery_Summary.md
 ├── Guides/
 │   ├── Database_Migration_Guide.md
 │   ├── Dependency_Installation_Guide.md
@@ -56,7 +45,11 @@ Docs/
     ├── Phase_1_Development_Record.md
     ├── Phase_1_S01-S04_Delivery_Summary.md
     ├── Phase_1_S05-S08_Delivery_Summary.md
-    └── Phase_1_S09-S12_Delivery_Summary.md
+    ├── Phase_1_S09-S12_Delivery_Summary.md
+    ├── Phase_2_Development_Record.md
+    ├── Phase_2_S01-S04_Delivery_Summary.md
+    ├── Phase_2_S05-S08_Delivery_Summary.md
+    └── Phase_2_S09-S12_Delivery_Summary.md
 ```
 
 ---
@@ -78,7 +71,14 @@ Docs/
 - [S05-S08 金融与持久化](Archive/Phase_1_S05-S08_Delivery_Summary.md)
 - [S09-S12 应用、API 与最终签署](Archive/Phase_1_S09-S12_Delivery_Summary.md)
 
-### 2.3 日常操作
+### 2.3 Phase 2 结果
+
+- [开发路线与最终边界](Archive/Phase_2_Development_Record.md)
+- [S01-S04 工程、契约与会话](Archive/Phase_2_S01-S04_Delivery_Summary.md)
+- [S05-S08 日常记账工作流](Archive/Phase_2_S05-S08_Delivery_Summary.md)
+- [S09-S12 分析、维护与最终签署](Archive/Phase_2_S09-S12_Delivery_Summary.md)
+
+### 2.4 日常操作
 
 - 配置变量：[`config/README.md`](../config/README.md)
 - 依赖安装：[Dependency Installation](Guides/Dependency_Installation_Guide.md)
@@ -97,7 +97,7 @@ Phase 1 后端基线已经完成并通过：
 - FreeCurrencyAPI 主源、exchangerate.fun 整批备用和历史降级。
 - Ubuntu 24.04 Docker 冷构建、non-root、双角色、FORCE RLS、Outbox/Scheduler 与优雅停止。
 
-Phase 2 当前分支已完成 S01-S11 Windows Release Candidate 与 S12 Windows 验收。现有 Web 覆盖认证、账户、分类、标签、偏好、日常流水、Transfer 聚合、Dashboard、维度报表、CSV 导出、个人审计、余额维护和 Operator 运维面；数据库迁移已演进到 V10，Web Edge、发布预算和固定性能工具已落地。本机 Debug/Release CTest 均为 381/381、Vitest/MSW 62/62、Edge E2E 37/37。真实 Drogon/PostgreSQL、Linux/Docker、10,000/100,000 行基准和 Chromium/Firefox/WebKit 执行已按 P2-S12 交给目标环境验收；返回前不得签署 Phase 或合并 `main`。Phase 3 保留给账单导入与支付平台生态。
+Phase 2 已完成并通过最终目标环境验收：Web 覆盖认证、账户、分类、标签、偏好、日常流水、Transfer 聚合、Dashboard、维度报表、CSV 导出、个人审计、余额维护和 Operator 运维面；数据库迁移已演进到 V10。Windows Debug/Release PostgreSQL OFF 为 382/382，Linux production ON 为 384/384，Vitest/MSW 为 63/63，Chromium/Firefox/WebKit 为 111/111；Docker、Provider、Outbox/Scheduler、恢复和回滚均通过。Phase 3 保留给账单导入与支付平台生态。
 
 汇率实时能力当前覆盖 20 种法币与 BTC。其他 12 种加密货币没有实时保证，系统会返回完整历史降级或明确不可用；完整加密货币定价不在当前计划内。
 

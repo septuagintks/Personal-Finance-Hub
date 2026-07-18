@@ -30,6 +30,15 @@ Phase 1 的归档入口为：
 - `Phase_1_S05-S08_Delivery_Summary.md`：金融原语、领域模型、数据库与持久化。
 - `Phase_1_S09-S12_Delivery_Summary.md`：应用层、API、认证、后台任务与最终跨平台签署。
 
+### 1.3 Phase 2 归档结构
+
+Phase 2 使用相同的结果投影规则：
+
+- `Phase_2_Development_Record.md`：开发路线、最终产品范围、验收矩阵和能力边界。
+- `Phase_2_S01-S04_Delivery_Summary.md`：工程、OpenAPI、Web Edge 与浏览器会话。
+- `Phase_2_S05-S08_Delivery_Summary.md`：账户、元数据、普通流水与 Transfer 工作流。
+- `Phase_2_S09-S12_Delivery_Summary.md`：分析、维护、产品硬化与最终跨平台签署。
+
 ---
 
 ## 2. 已统一的设计结论

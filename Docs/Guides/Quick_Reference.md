@@ -82,7 +82,7 @@ docker compose run --rm flyway info
 
 测试命名遵循 `<Class>_When<Condition>_<Expected>`，详见 [`tests/TEST_NAMING_CONVENTION.md`](../../tests/TEST_NAMING_CONVENTION.md)。
 
-最终 Phase 1 基线：Windows PostgreSQL OFF 349/349，Linux production ON 351/351，PostgreSQL fixture 12/12 scenarios。
+最终基线：Phase 1 的 Windows PostgreSQL OFF 为 349/349、Linux production ON 为 351/351；Phase 2 完成后分别为 Windows 382/382、Linux production ON 384/384，前端 Vitest/MSW 63/63、三浏览器 111/111。详细结果见对应 Phase 的归档摘要。
 
 ---
 
@@ -122,5 +122,6 @@ Presentation -> Application -> Domain <- Infrastructure
 - [总体开发计划](../Development_Plans/Overall_Development_Plan.md)
 - [Phase 1 开发计划](../Development_Plans/Phase_1/Phase_1_Development_Plan.md)
 - [Phase 1 开发记录](../Archive/Phase_1_Development_Record.md)
+- [Phase 2 开发记录](../Archive/Phase_2_Development_Record.md)
 - [技术架构](../Architecture/01_Technical_Architecture.md)
 - [REST API OpenAPI](../Architecture/10_REST_API_OpenAPI.json)
