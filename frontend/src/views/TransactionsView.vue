@@ -137,6 +137,15 @@ function occurredText(value: string): string {
   });
 }
 
+function handleLedgerKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+  const element = event.currentTarget;
+  if (!(element instanceof HTMLElement) || element.scrollWidth <= element.clientWidth) return;
+  event.preventDefault();
+  const distance = Math.max(40, Math.round(element.clientWidth * 0.75));
+  element.scrollLeft += event.key === 'ArrowRight' ? distance : -distance;
+}
+
 async function submitCreate(payload: CreateTransactionRequest): Promise<void> {
   createPending.value = true;
   createError.value = '';
@@ -278,6 +287,7 @@ onMounted(async () => {
       aria-live="polite"
       :aria-busy="transactions.listState === 'loading'"
       tabindex="0"
+      @keydown="handleLedgerKeydown"
     >
       <div class="ledger-list__head" aria-hidden="true">
         <span>When</span><span>Entry</span><span>Account</span><span>Classification</span
