@@ -53,6 +53,7 @@ def main() -> int:
     password_hasher = read(
         "src/infrastructure/security/argon2_password_hasher.cpp"
     )
+    initial_migration = read("migrations/V1__initial_schema.sql")
     auth_migration = read("migrations/V4__authentication_session_security.sql")
     transfer_rate_migration = read(
         "migrations/V5__align_transfer_rate_precision.sql"
@@ -64,6 +65,10 @@ def main() -> int:
         "migrations/V9__transfer_corrections.sql"
     )
     operations_migration = read("migrations/V10__operations_and_roles.sql")
+    all_migrations = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((ROOT / "migrations").glob("V*.sql"))
+    )
     role_init = read("docker/postgres/init-roles.sql")
     idempotency = read(
         "src/infrastructure/persistence/idempotency_repository_impl.cpp"
@@ -244,6 +249,20 @@ def main() -> int:
         and "request_idempotency" in role_init
         and "tenant_tables <> 11" in role_init,
         "Role initialization must include the V7 FORCE RLS table",
+        failures,
+    )
+    require(
+        "CREATE OR REPLACE FUNCTION pfh_current_user_id()" in initial_migration
+        and "current_app_user_id" not in all_migrations
+        and all(
+            migration.count("pfh_current_user_id()") == 2
+            for migration in (
+                idempotency_migration,
+                correction_migration,
+                transfer_correction_migration,
+            )
+        ),
+        "Tenant RLS migrations must use the canonical pfh_current_user_id() function",
         failures,
     )
     require(

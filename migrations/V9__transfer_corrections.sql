@@ -23,5 +23,5 @@ CREATE INDEX idx_transfer_corrections_user_time
 ALTER TABLE transfer_corrections ENABLE ROW LEVEL SECURITY;
 ALTER TABLE transfer_corrections FORCE ROW LEVEL SECURITY;
 CREATE POLICY rls_transfer_corrections ON transfer_corrections
-    USING (user_id = current_app_user_id())
-    WITH CHECK (user_id = current_app_user_id());
+    USING (user_id = pfh_current_user_id())
+    WITH CHECK (user_id = pfh_current_user_id());

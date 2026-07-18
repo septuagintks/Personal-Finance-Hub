@@ -23,5 +23,5 @@ CREATE INDEX idx_transaction_corrections_user_time
 ALTER TABLE transaction_corrections ENABLE ROW LEVEL SECURITY;
 ALTER TABLE transaction_corrections FORCE ROW LEVEL SECURITY;
 CREATE POLICY rls_transaction_corrections ON transaction_corrections
-    USING (user_id = current_app_user_id())
-    WITH CHECK (user_id = current_app_user_id());
+    USING (user_id = pfh_current_user_id())
+    WITH CHECK (user_id = pfh_current_user_id());
