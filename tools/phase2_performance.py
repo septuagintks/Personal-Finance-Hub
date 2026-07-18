@@ -208,13 +208,13 @@ INSERT INTO transactions (
     user_id, account_id, category_id, type, amount, currency_code,
     description, transfer_group_id, transaction_time, created_at, updated_at)
 SELECT
-    {user_id}, fixture_accounts.source_id, NULL, 'transfer'::transaction_type,
+    {user_id}, fixture_accounts.source_id, NULL::BIGINT, 'transfer'::transaction_type,
     -100.00000000, 'CNY', format('{prefix}-transfer-out-%s', groups.position),
     groups.id, groups.occurred_at, groups.occurred_at + INTERVAL '1 second', NOW()
 FROM groups CROSS JOIN fixture_accounts
 UNION ALL
 SELECT
-    {user_id}, fixture_accounts.target_id, NULL, 'transfer'::transaction_type,
+    {user_id}, fixture_accounts.target_id, NULL::BIGINT, 'transfer'::transaction_type,
     14.00000000, 'USD', format('{prefix}-transfer-in-%s', groups.position),
     groups.id, groups.occurred_at, groups.occurred_at + INTERVAL '1 second', NOW()
 FROM groups CROSS JOIN fixture_accounts;

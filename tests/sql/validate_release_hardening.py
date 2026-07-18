@@ -137,6 +137,11 @@ def main() -> int:
         failures,
     )
     require(
+        performance.count("NULL::BIGINT, 'transfer'::transaction_type") == 2,
+        "Performance transfer fixtures must type nullable category ids for PostgreSQL unions",
+        failures,
+    )
+    require(
         "static_cast<volatile char*>(value.data())" in transport
         and 'CURLOPT_FOLLOWLOCATION, 0L' in transport
         and 'CURLOPT_PROTOCOLS_STR, "https"' in transport,
