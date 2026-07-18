@@ -1030,7 +1030,7 @@ Web 专用端点位于 `/api/v1/web/auth/*`，与 JSON Token 端点并存：
 - Refresh Token 通过 `pfh_refresh` Cookie 返回，固定 `Path=/api/v1/web/auth`，并设置 `HttpOnly`、`Secure`、`SameSite=Strict`、`Cache-Control: no-store`。
 - `refresh` 只读取 Cookie，成功后轮换 Cookie；失败时清除 Cookie 并返回统一认证错误。
 - `logout` 同时要求当前 Access Token 和 Cookie，撤销会话并清除 Cookie。
-- 所有 Web Cookie 写端点要求 `Origin` 与 HTTPS `Host` 同源；存在 `Sec-Fetch-Site` 时必须为 `same-origin`。
+- 所有 Web Cookie 写端点要求 `Origin` 与 Web Edge 报告的外部 scheme 和 `Host` 精确同源；生产环境的外部 scheme 必须为 HTTPS。存在 `Sec-Fetch-Site` 时必须为 `same-origin`。
 - 浏览器不得把 Access Token 或 Refresh Token 写入 `localStorage`、`sessionStorage`、IndexedDB 或日志。
 
 ---

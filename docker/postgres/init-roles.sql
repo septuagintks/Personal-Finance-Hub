@@ -12,7 +12,9 @@ SELECT (
         SELECT 1
         FROM pg_auth_members AS membership
         JOIN pg_roles AS member_role ON member_role.oid = membership.member
-        WHERE member_role.rolname IN (:'request_user', :'background_user'))
+        JOIN pg_roles AS granted_role ON granted_role.oid = membership.roleid
+        WHERE member_role.rolname IN (:'request_user', :'background_user')
+           OR granted_role.rolname IN (:'request_user', :'background_user'))
     AND NOT EXISTS (
         SELECT 1
         FROM pg_roles

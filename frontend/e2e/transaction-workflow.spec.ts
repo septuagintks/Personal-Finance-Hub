@@ -223,6 +223,8 @@ for (const viewport of [
           return style.outlineStyle !== 'none' && Number.parseFloat(style.outlineWidth) >= 1;
         }),
       ).toBe(true);
+      await page.keyboard.press('ArrowRight');
+      await expect.poll(() => results.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
       await page.setViewportSize(viewport);
     }
 

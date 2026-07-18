@@ -388,6 +388,8 @@ def main() -> int:
         and "request_password=${" not in read("docker-compose.yml")
         and ":'request_user' <> :'background_user'" in role_init
         and "pg_auth_members" in role_init
+        and "granted_role.oid = membership.roleid" in role_init
+        and "granted_role.rolname IN" in role_init
         and "rolcreatedb OR rolcreaterole OR rolreplication" in role_init
         and "$pfh_role_preflight$" in role_init
         and "\\quit 1" not in role_init,

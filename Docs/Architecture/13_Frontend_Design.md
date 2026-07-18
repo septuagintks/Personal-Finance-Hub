@@ -52,6 +52,7 @@ Browser
 - 开发环境由 Vite 代理 `/api`；生产环境由 non-root Nginx 提供静态资源并反向代理 API。
 - Compose 中 Backend 只暴露给内部网络，不发布宿主端口；浏览器和非浏览器客户端均从 Web Edge 的同源 `/api/*` 入口访问。
 - Web 与 API 默认同源并使用 HTTPS，不开放宽泛 CORS。
+- 外部 TLS 终止代理必须覆盖 `X-Forwarded-Proto: https`；内层 Nginx 只保留精确的 `https`，其他值回退到自身连接 scheme。直接 Compose HTTP 只用于低层运行验证，浏览器 Web Session 仍依赖 Secure Cookie 和 HTTPS。
 - Web Edge 对 HTML 使用 `no-store`、对 hashed assets 使用 immutable cache，并统一设置 CSP、frame denial、MIME、Referrer、Permissions 与 COOP 响应头。
 - 浏览器不直接访问 PostgreSQL、汇率 Provider、Outbox 或 Scheduler。
 - 前端不复制金融、汇率、报表、权限或事务规则，后端响应是最终事实。

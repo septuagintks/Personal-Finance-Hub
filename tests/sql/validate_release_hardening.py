@@ -51,8 +51,11 @@ def main() -> int:
     require(
         "server app:8080" in nginx
         and "proxy_pass http://pfh_backend" in nginx
+        and "map $http_x_forwarded_proto $pfh_external_scheme" in nginx
+        and "https https;" in nginx
+        and "proxy_set_header X-Forwarded-Proto $pfh_external_scheme" in nginx
         and "http://backend:8080" not in nginx,
-        "Web edge must proxy to the Compose app service",
+        "Web edge must proxy to the Compose app and preserve an external HTTPS scheme",
         failures,
     )
     require(
