@@ -1,81 +1,107 @@
 # Phase 2 S12 Delivery Summary
 
-Date: 2026-07-18
-Status: Windows Remediation Complete; Target-Environment Revalidation Pending
+Date: 2026-07-19
+Status: Target-Environment Matrix Passed; Ready for Windows Review
 
 ## 1. Current Validation Candidate
 
 - Branch: `feature/phase2-product-experience`.
-- Original S11 Release Candidate: `733a7836531014439f589c5995da87d1238ff7e6` (`feat: complete phase 2 S11 release candidate`).
-- Current validation candidate: `b70c41a721a857b7eb887a7548227b2a45f14989` (`fix: harden phase 2 release boundaries`).
-- The current candidate includes the macOS ABI/time/accessibility fixes, the V8/V9 migration correction, and the Windows release-boundary review fixes described below.
-- Windows commits `cf13b6f67a118430a1174a99e1b52235e6c51568` and `b70c41a721a857b7eb887a7548227b2a45f14989` are reachable from the remote branch and verify as `Good signature` with key `36E772C15CA7CC4E`.
+- Windows delegated baseline: `ce6468f3411de6fa47072974252a02b8e705ff53` (`docs: prepare phase 2 target revalidation`).
+- Final target-environment candidate: `f3abd40c96379775c422811e4b826889b5ea7af3` (`fix: make ledger scroll region keyboard accessible`).
+- The local branch and `origin/feature/phase2-product-experience` both pointed to the final candidate before this summary update.
+- The original S11 Release Candidate remains `733a7836531014439f589c5995da87d1238ff7e6`.
 
-## 2. Windows Environment
+The macOS target run produced the following linear commits after the delegated baseline:
 
-- Windows 23H2 build `22631.6060`, AMD64; PowerShell `7.6.3`; China Standard Time.
-- GCC `16.1.0`; CMake `4.3.2`; Ninja `1.13.2`; Python `3.14.6`; Git `2.55.0.windows.2`.
-- Node.js `24.15.0`; pnpm `10.14.0`; Microsoft Edge `150.0.4078.65`.
-- Docker, `psql`, and Flyway are not available on this machine.
+| Commit                                     | Purpose                                                                                                      | Signature                    |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------ | ---------------------------- |
+| `466b952b78c325d7c9a339e3ca5ad7390cd2cd7d` | Harden role initialization, UTC timestamp binding, NOWAIT conflict mapping, and runtime idempotency fixtures | Good, key `81BFB01482975987` |
+| `0fc53c268e75d72c417ae920a7ef5a97f174f45e` | Preserve forwarded same-origin scheme and Drogon 1.8.7 refresh cookies                                       | Good, key `81BFB01482975987` |
+| `6c2da63b570c0cbc72faabfc21c424732460d5f9` | Type Transfer performance fixture `category_id` values as `BIGINT`                                           | Good, key `81BFB01482975987` |
+| `944ac2dd03ab9580d3a0cd21df5e3284f8cff7b3` | Keep the Daily CSV benchmark inside the API range contract                                                   | Good, key `81BFB01482975987` |
+| `f3abd40c96379775c422811e4b826889b5ea7af3` | Make the horizontally scrolling transaction ledger keyboard accessible                                       | Good, key `81BFB01482975987` |
 
-## 3. Windows Results
+## 2. Validation Environments
 
-- `quality_check.ps1`: PASS on the current validation candidate.
-- Debug PostgreSQL OFF configure/build and CTest: `381/381 PASS`.
-- Independent Release PostgreSQL OFF build and CTest: `381/381 PASS`.
-- OpenAPI generated-type drift, TypeScript, ESLint, Prettier, Vitest/MSW `63/63`, production build, bundle budgets, 66-package runtime license policy, source-map policy, secret scan, and Markdown checks: PASS.
-- `pnpm audit --prod --audit-level high`: no known vulnerabilities.
-- Microsoft Edge E2E: `37/37 PASS`.
-- Full browser configuration enumerates `111` tests in 7 files across Chromium, Firefox, and WebKit. Enumeration is PASS; actual three-browser execution is `NOT RUN` on Windows.
+Windows baseline evidence was produced on Windows 23H2 build `22631.6060`, AMD64, with GCC `16.1.0`, CMake `4.3.2`, Ninja `1.13.2`, Python `3.14.6`, Node.js `24.15.0`, pnpm `10.14.0`, and Edge `150.0.4078.65`. Docker, PostgreSQL, and Flyway were unavailable there, so Windows did not represent those gates as passing.
 
-## 4. Delegated Target Matrix
+The final target matrix ran with:
 
-The target side must validate the same RC lineage and return evidence for:
+- macOS `26.5.2`, Darwin `25.5.0`, arm64; Colima `0.10.3`.
+- Ubuntu `24.04.4`, aarch64; GCC `13.3.0`; CMake `3.28.3`; Ninja `1.11.1`; tzdata `2026b`.
+- PostgreSQL/psql `16.14`; Flyway OSS `10.22.0`; Drogon `1.8.7`; OpenSSL `3.0.13`; Argon2 `20190702`; libcurl `8.5.0`.
+- Docker client `29.6.2`, server `29.5.2`; isolated Compose binary `v5.1.4`.
+- Node.js `24.16.0`; pnpm `10.14.0`; Playwright `1.61.1`; Chromium `149`, Firefox `151`, and WebKit `26.5`.
+- `PFH_FREECURRENCYAPI_API_KEY`: `SET` outside the repositories. Its value and derived metadata were not read into evidence.
 
-- Linux Debug and Release with `PFH_BUILD_POSTGRESQL=ON`, including real `postgresql_integration` and `drogon_runtime_integration` targets.
-- PostgreSQL 16+ V1-V10 empty migration, info, validate, second no-op, role initialization, FORCE RLS, pooled isolation, repository, concurrency, NUMERIC, idempotency, maintenance, and Operator scenarios.
-- Clean frontend install/build plus actual Chromium, Firefox, and WebKit `111`-test execution and manual WCAG keyboard, focus, contrast, zoom, and reduced-motion review.
-- Daily 10,000-row and Stress 100,000-row fixed profiles, API/page/CSV budgets, memory/resource observations, and key query-plan summaries.
-- Clean Backend and Web image builds, `docker compose config`, same-origin proxy and security headers, non-root/read-only runtime, health, Provider failover, Outbox/Scheduler, restart, SIGTERM, and sanitized logs.
-- Backup/restore, previous-image rollback, and forward-only migration recovery rehearsal.
+## 3. Linux And PostgreSQL Results
 
-## 5. Phase Decision
+Final reruns after all candidate fixes:
 
-Phase 2 remains `In Progress`. The target environment completed the independent Linux, frontend, browser, and image checks against the earlier candidate. Windows corrected the unpublished V8/V9 function reference and completed a release-boundary review, but the database-dependent runtime, full Compose, performance, backup/restore, and rollback gates have not yet run against the current candidate. Do not mark the Phase complete or merge it into `main` until that matrix passes.
+| Configuration                      | Build | CTest          | External runtime                                                   |
+| ---------------------------------- | ----- | -------------- | ------------------------------------------------------------------ |
+| Debug, `PFH_BUILD_POSTGRESQL=ON`   | PASS  | `384/384 PASS` | `postgresql_integration` and `drogon_runtime_integration` executed |
+| Release, `PFH_BUILD_POSTGRESQL=ON` | PASS  | `384/384 PASS` | `postgresql_integration` and `drogon_runtime_integration` executed |
+| Debug, `PFH_BUILD_POSTGRESQL=OFF`  | PASS  | `382/382 PASS` | Not registered by design                                           |
 
-## 6. macOS/Colima Target-Environment Results
+Database and authorization validation:
 
-- Validation time: 2026-07-18 17:21:21 +08:00 (Asia/Shanghai).
-- Branch: `feature/phase2-product-experience`.
-- Tested commit: `ccce0c99a5fe4fa7869e9149cdea2d11088cab60`, following signed fixes `1964616bf03b918390a2a17609fd36ade3c6c0f5` and `ccce0c99a5fe4fa7869e9149cdea2d11088cab60`. Both use the local default GPG key `81BFB01482975987` and verify as `Good signature`.
-- Environment: macOS 26.5.2 / arm64; Colima 0.10.3; Ubuntu 24.04.4 / aarch64; GCC 13.3.0; CMake 3.28.3; Ninja 1.11.1; PostgreSQL 16.14; Drogon 1.8.7; OpenSSL 3.0.13; Argon2 20190702; libcurl 8.5.0; tzdata 2026b; Docker client 29.6.2 / server 29.5.2; Node 24.16.0; pnpm 11.14.0.
+- Disposable PostgreSQL 16.14 empty database: V1-V10 `migrate`, `info`, `validate`, and second no-op all `PASS`; V8/V9 use the canonical `pfh_current_user_id()` function.
+- Normal request/background role initialization and all three rejection cases `PASS`. Reused role names, administrator reuse, and pre-existing membership fail before role mutation with nonzero exit status.
+- Request and background roles are distinct `LOGIN NOINHERIT` roles. The request role is non-BYPASSRLS with write defaults; the background role is BYPASSRLS with read-only defaults and only approved column grants.
+- Flyway history access, cleanup-function denial, and all 11 `public` tenant tables with ENABLE/FORCE RLS: `PASS`.
+- Repository/UoW, pooled tenant rebinding, two-user isolation, NUMERIC boundaries, idempotency cleanup, NOWAIT conflicts, maintenance, Operator/dead-letter, and exact V10 readiness scenarios: `PASS`.
 
-Results:
+## 4. Compose And Runtime Results
 
-- Linux Debug and Release `PFH_BUILD_POSTGRESQL=ON` builds: `PASS`; the non-external CTest collection was `381/381 PASS` for each configuration. PostgreSQL OFF was independently `381/381 PASS`.
-- Frontend clean install and quality gates: `PASS`; typecheck, ESLint, Prettier, production build, bundle/license/security gates, and Vitest `62/62` passed. `pnpm audit --prod --audit-level high` reported no known high-severity production vulnerabilities.
-- Full Playwright matrix: `PASS`, `111/111` across Chromium, Firefox, and WebKit after the cross-engine reduced-motion and WCAG contrast fixes.
-- Compose configuration: `PASS` with isolated Compose v5.1.4 binary because the host Docker CLI has no Compose plugin. No secret values were persisted.
-- Backend image: `PASS`; clean arm64 build, image digest `sha256:8e16adc26337996d04ea365e82ebb8faa0cfb2ee30a18e7ca73bddbc418866b8`, 37,164,020 bytes, non-root `pfh`, built-in `/livez` healthcheck.
-- Web image: `PASS`; clean arm64 build, image digest `sha256:ced3359c5713f10f3ca8a6c74dbeeb28a193ac48e3cd4e697ab6a2155c8bf889`, 22,453,077 bytes, non-root `pfh`, no source maps. A standalone static check under read-only rootfs, `cap_drop=ALL`, and `no-new-privileges` returned HTTP 200 with the configured CSP, cache, and security headers.
+- Compose configuration, cold Backend build, and cold Web build: `PASS`.
+- Final Backend image: `sha256:315d2e9572741cecae4d1a19b77976df8721c6cd93f7f4eab6d7a21fa6fe49f7`, `37,160,648` bytes, immutable tag `pfh-s12r-app-verified:f3abd40`.
+- Final Web image: `sha256:cb80dfc0b92ba6c70243fabb49b65992c9694e9ff0ed771f1643182d993bb753`, `22,453,938` bytes, immutable tag `pfh-s12r-web-verified:f3abd40`.
+- Both arm64 images run as non-root user `pfh` with read-only root filesystems, `cap_drop=ALL`, and `no-new-privileges`. The Backend exposes no host port.
+- Same-origin Web and Bearer API matrices: `PASS`. Coverage includes registration, login, refresh rotation, logout clearing, accounts, categories, tags, preferences, transactions, transfers, corrections, reports, analytics, CSV, maintenance, USER/OPERATOR authorization, dead-letter retry, Cookie attributes, TraceId, ETag, Blob JSON errors, CSP, cache policy, and security headers.
+- FreeCurrencyAPI primary batch, exchangerate.fun whole-batch fallback, and both historical-complete and historical-incomplete dual-failure paths: `PASS`. Successful and degraded Outbox events were published with handler receipts; no mixed or partial Provider batch was persisted.
+- Scheduler lease exclusion, competing worker skip, timed-out Outbox ownership recovery after restart, and SIGTERM shutdown: `PASS`. All tested application instances exited `0` within the grace period with no OOM.
+- Refined post-rollback App/Web log scans found no authorization value, Cookie value, JWT, Provider credential, database URL, full Provider URL, response body, or host-private path. Normal `refresh-token` job names and lowercase `/api/v1/users/` routes were not treated as credential or macOS path matches.
 
-Database-dependent results:
+## 5. Frontend And Accessibility Results
 
-- `BLOCKED`: Flyway V1-V7 applied to the disposable PostgreSQL 16.14 database, but V8 failed at `migrations/V8__transaction_corrections.sql:25` with SQLSTATE `42883`; V9 contains the same undefined function reference. V8 was rolled back.
-- `NOT RUN`: V9/V10 migration completion, role initialization, real Repository/UoW fixture, pooled RLS/concurrency scenarios, Drogon API runtime, Provider/Outbox/Scheduler runtime, and full Compose topology. These were stopped at the migration boundary and were not represented as passing.
-- `NOT RUN`: Daily/Stress performance profiles, backup/restore, image rollback, and forward-only migration recovery rehearsal.
+- Frozen clean install, OpenAPI generated-type drift, typecheck, ESLint, Prettier, production build, bundle, runtime license, dependency security, source-map, and secret gates: `PASS`.
+- Vitest/MSW: `63/63 PASS`; `pnpm audit --prod --audit-level high`: no known high-severity production vulnerability.
+- Full Playwright execution: `111/111 PASS` across Chromium, Firefox, and WebKit after the final ledger accessibility fix.
+- Keyboard, visible focus, contrast, 200% zoom-equivalent short viewport, reduced motion, Desktop, Tablet, and narrow-screen review: `PASS`.
+- The transaction ledger exposes a named focusable region. Real Tab navigation entered the region, the focus indicator remained visible, and keyboard horizontal scrolling moved it by `40 px` without overlapping adjacent content.
 
-The only project fixes in this target run are the two signed commits listed above. These results remain valid evidence for that tested commit, but they do not replace revalidation of the later migration, role, readiness, Provider-transport, and frontend error-boundary changes.
+## 6. Performance Results
 
-## 7. Windows Remediation And Review
+Both fixed profiles seeded successfully and passed `tools/phase2_performance.py benchmark --enforce` against the same-origin Compose runtime.
 
-- `cf13b6f67a118430a1174a99e1b52235e6c51568` corrected V8/V9 to use the canonical `pfh_current_user_id()` RLS function and added a static regression preventing the invalid alias from returning.
-- `b70c41a721a857b7eb887a7548227b2a45f14989` hardened role initialization, startup role assertions, exact V10 readiness, same-origin Backend exposure, Provider URL-memory cleansing, and controlled JSON errors returned as Blob responses.
-- `role-init` now rejects unsafe role reuse before mutation, keeps runtime passwords out of `psql` argv, restores request-role write defaults, limits Flyway history to read-only access, clears stale background grants, and scopes the 11-table FORCE RLS assertion to `public` relations.
-- Windows reran Debug and Release CTest at `381/381 PASS`, Vitest/MSW at `63/63 PASS`, Chromium E2E at `37/37 PASS`, all static PostgreSQL/release/migration gates, frontend quality/build/security/license gates, and `git diff --check`.
-- Bundle measurements remained within policy: initial JS gzip `61,558 B`, total JS gzip `314,552 B`, largest asynchronous chunk gzip `182,705 B`, and CSS gzip `9,076 B`.
-- Real PostgreSQL, Flyway, Docker, production-ON runtime, Provider failover, Daily/Stress performance, backup/restore, and rollback were `NOT RUN` on Windows because the required local tools are unavailable.
+| Profile | Fixture          | First page p95 | Filter p95 | Dashboard p95 | CSV first-byte p95 |
+| ------- | ---------------- | -------------- | ---------- | ------------- | ------------------ |
+| Daily   | `10,000/20/200`  | `2.02 ms`      | `1.99 ms`  | `7.57 ms`     | `65.05 ms`         |
+| Stress  | `100,000/50/500` | `3.21 ms`      | `3.10 ms`  | `20.01 ms`    | `95.79 ms`         |
 
-## 8. Revalidation Required For Phase Signature
+Page measurements:
 
-The target side must run the remaining matrix from a clean checkout of `b70c41a721a857b7eb887a7548227b2a45f14989`: V1-V10 migrate/info/validate/no-op, unsafe-role rejection and least-privilege role checks, real PostgreSQL/Drogon fixtures, complete same-origin Compose workflows, Provider/Outbox/Scheduler/restart/SIGTERM scenarios, Daily and Stress profiles, backup/restore, rollback, and sanitized runtime-artifact review. The rotated Provider key must be injected outside both repositories. Any required item that is not `PASS` keeps Phase 2 unsigned and unmerged.
+| Profile | Filter interactive | Public LCP | INP     | CLS      | axe |
+| ------- | ------------------ | ---------- | ------- | -------- | --- |
+| Daily   | `55.86 ms`         | `64 ms`    | `24 ms` | `0.0116` | `0` |
+| Stress  | `54.72 ms`         | `88 ms`    | `24 ms` | `0.0116` | `0` |
+
+- The measured primary-action contrast ratio was `7.38:1`; reduced motion and visible focus remained active during the page checks.
+- Stress observation: App `37.03% CPU / 134 MiB`; PostgreSQL `55.40% CPU / 120 MiB`.
+- Warm shared-buffer query plans had zero reads. First-page/filter plans were approximately `0.217 ms`, the 4,813-row monthly range was `1.398 ms`, and the 3,960-row account aggregate was `7.105 ms`.
+- Full benchmark JSON, raw plans, screenshots, and resource captures remained temporary evidence and were not added to either repository.
+
+## 7. Recovery And Rollback Results
+
+- A custom-format `pg_dump` of `2,416,534` bytes restored into an independent PostgreSQL 16 tmpfs instance.
+- Source and restored counts matched: `8` users, `59` accounts, `100,004` transactions, `37` Outbox events, `7` exchange rates, and `10` migrations.
+- The restored Backend became healthy; `/livez` and `/readyz` returned `200`; login and Stress core reads passed. Its final precise log scan passed, SIGTERM exit was `0`, and no OOM occurred.
+- Forward-only migration recovery used external ignored V11/V12 rehearsal files. V11 introduced an invalid state, V12 advanced it to `ready` and added the required constraint, then Flyway `validate` and no-op passed. Repository V1-V10 files and checksums were unchanged.
+- Immutable image rollback: a local successor image exited `42` and made the Web liveness proxy return `502`; Compose was then recreated from `pfh-s12r-app-verified:f3abd40`. The restored App was healthy, readiness returned `200`, and data counts, login, and core reads all passed.
+
+## 8. Phase Decision And Ownership
+
+The macOS/Colima target-environment matrix required by S12 is complete with no remaining target-side blocker. Phase 2 itself remains `In Progress`: Windows must review the five signed target fixes and this final evidence, perform the Phase signature and documentation consolidation, and decide the merge into `main`.
+
+No API key, Token, Cookie, database credential or connection string, dump, raw log, benchmark JSON, query plan, screenshot batch, image, binary, archive, or private machine path is committed. The target side returns ownership without merging `main` or marking Phase 2 complete.
