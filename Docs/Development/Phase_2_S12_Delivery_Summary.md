@@ -1,14 +1,15 @@
 # Phase 2 S12 Delivery Summary
 
 Date: 2026-07-18
-Status: Windows Validation Complete; Target-Environment Validation Blocked on V8/V9
+Status: Windows Remediation Complete; Target-Environment Revalidation Pending
 
-## 1. Fixed Release Candidate
+## 1. Current Validation Candidate
 
 - Branch: `feature/phase2-product-experience`.
-- Release Candidate: `733a7836531014439f589c5995da87d1238ff7e6` (`feat: complete phase 2 S11 release candidate`).
-- The RC is reachable at the matching remote branch and carries a verified good signature from key `36E772C15CA7CC4E`.
-- Windows validation ran from a clean worktree at that exact commit.
+- Original S11 Release Candidate: `733a7836531014439f589c5995da87d1238ff7e6` (`feat: complete phase 2 S11 release candidate`).
+- Current validation candidate: `b70c41a721a857b7eb887a7548227b2a45f14989` (`fix: harden phase 2 release boundaries`).
+- The current candidate includes the macOS ABI/time/accessibility fixes, the V8/V9 migration correction, and the Windows release-boundary review fixes described below.
+- Windows commits `cf13b6f67a118430a1174a99e1b52235e6c51568` and `b70c41a721a857b7eb887a7548227b2a45f14989` are reachable from the remote branch and verify as `Good signature` with key `36E772C15CA7CC4E`.
 
 ## 2. Windows Environment
 
@@ -19,10 +20,10 @@ Status: Windows Validation Complete; Target-Environment Validation Blocked on V8
 
 ## 3. Windows Results
 
-- `quality_check.ps1`: PASS on the fixed RC.
+- `quality_check.ps1`: PASS on the current validation candidate.
 - Debug PostgreSQL OFF configure/build and CTest: `381/381 PASS`.
 - Independent Release PostgreSQL OFF build and CTest: `381/381 PASS`.
-- OpenAPI generated-type drift, TypeScript, ESLint, Prettier, Vitest/MSW `62/62`, production build, bundle budgets, 66-package runtime license policy, source-map policy, secret scan, and Markdown checks: PASS.
+- OpenAPI generated-type drift, TypeScript, ESLint, Prettier, Vitest/MSW `63/63`, production build, bundle budgets, 66-package runtime license policy, source-map policy, secret scan, and Markdown checks: PASS.
 - `pnpm audit --prod --audit-level high`: no known vulnerabilities.
 - Microsoft Edge E2E: `37/37 PASS`.
 - Full browser configuration enumerates `111` tests in 7 files across Chromium, Firefox, and WebKit. Enumeration is PASS; actual three-browser execution is `NOT RUN` on Windows.
@@ -40,7 +41,7 @@ The target side must validate the same RC lineage and return evidence for:
 
 ## 5. Phase Decision
 
-Phase 2 remains `In Progress`. The target environment completed the independent Linux, frontend, browser, and image checks, but the empty PostgreSQL database cannot apply V8 because V8/V9 reference the undefined `current_app_user_id()` function instead of `pfh_current_user_id()`. Database-dependent runtime, performance, backup/restore, and rollback gates therefore remain open. Do not mark the Phase complete or merge it into `main` until Windows resolves the migration decision and reruns the blocked matrix.
+Phase 2 remains `In Progress`. The target environment completed the independent Linux, frontend, browser, and image checks against the earlier candidate. Windows corrected the unpublished V8/V9 function reference and completed a release-boundary review, but the database-dependent runtime, full Compose, performance, backup/restore, and rollback gates have not yet run against the current candidate. Do not mark the Phase complete or merge it into `main` until that matrix passes.
 
 ## 6. macOS/Colima Target-Environment Results
 
@@ -64,4 +65,17 @@ Database-dependent results:
 - `NOT RUN`: V9/V10 migration completion, role initialization, real Repository/UoW fixture, pooled RLS/concurrency scenarios, Drogon API runtime, Provider/Outbox/Scheduler runtime, and full Compose topology. These were stopped at the migration boundary and were not represented as passing.
 - `NOT RUN`: Daily/Stress performance profiles, backup/restore, image rollback, and forward-only migration recovery rehearsal.
 
-The only project fixes in this target run are the two signed commits listed above. The migration files were intentionally not altered; Windows must choose between correcting the unpublished V8/V9 baseline with checksums recomputed or introducing a strictly forward compatibility migration before retrying the database matrix. Phase 2 remains unsigned and incomplete.
+The only project fixes in this target run are the two signed commits listed above. These results remain valid evidence for that tested commit, but they do not replace revalidation of the later migration, role, readiness, Provider-transport, and frontend error-boundary changes.
+
+## 7. Windows Remediation And Review
+
+- `cf13b6f67a118430a1174a99e1b52235e6c51568` corrected V8/V9 to use the canonical `pfh_current_user_id()` RLS function and added a static regression preventing the invalid alias from returning.
+- `b70c41a721a857b7eb887a7548227b2a45f14989` hardened role initialization, startup role assertions, exact V10 readiness, same-origin Backend exposure, Provider URL-memory cleansing, and controlled JSON errors returned as Blob responses.
+- `role-init` now rejects unsafe role reuse before mutation, keeps runtime passwords out of `psql` argv, restores request-role write defaults, limits Flyway history to read-only access, clears stale background grants, and scopes the 11-table FORCE RLS assertion to `public` relations.
+- Windows reran Debug and Release CTest at `381/381 PASS`, Vitest/MSW at `63/63 PASS`, Chromium E2E at `37/37 PASS`, all static PostgreSQL/release/migration gates, frontend quality/build/security/license gates, and `git diff --check`.
+- Bundle measurements remained within policy: initial JS gzip `61,558 B`, total JS gzip `314,552 B`, largest asynchronous chunk gzip `182,705 B`, and CSS gzip `9,076 B`.
+- Real PostgreSQL, Flyway, Docker, production-ON runtime, Provider failover, Daily/Stress performance, backup/restore, and rollback were `NOT RUN` on Windows because the required local tools are unavailable.
+
+## 8. Revalidation Required For Phase Signature
+
+The target side must run the remaining matrix from a clean checkout of `b70c41a721a857b7eb887a7548227b2a45f14989`: V1-V10 migrate/info/validate/no-op, unsafe-role rejection and least-privilege role checks, real PostgreSQL/Drogon fixtures, complete same-origin Compose workflows, Provider/Outbox/Scheduler/restart/SIGTERM scenarios, Daily and Stress profiles, backup/restore, rollback, and sanitized runtime-artifact review. The rotated Provider key must be injected outside both repositories. Any required item that is not `PASS` keeps Phase 2 unsigned and unmerged.
