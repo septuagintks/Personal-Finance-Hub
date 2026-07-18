@@ -10,7 +10,7 @@ Status: Windows Release Candidate Complete; Target-Environment Validation Pendin
 - Added reduced-motion behavior, DST-offset presentation, long-text coverage, and Desktop/short-screen/Tablet/narrow-Mobile settings validation.
 - Added an explicit Playwright Chromium/Firefox/WebKit release matrix while preserving the local Edge workflow.
 - Added fixed Daily and Stress PostgreSQL fixture/benchmark tooling for transaction list, filtering, Dashboard, and CSV p50/p95 measurements.
-- Added a lockfile-built Web image, same-origin Nginx proxy, strict response headers and cache policy, `/livez` healthchecks, and read-only least-privilege Compose services.
+- Added a lockfile-built Web image, same-origin Nginx proxy, internal-only Backend port, strict response headers and cache policy, `/livez` healthchecks, and read-only least-privilege Compose services.
 - Pinned the vcpkg baseline to an immutable commit and added an offline release-hardening CTest gate.
 
 ## 2. Security And Performance Boundaries

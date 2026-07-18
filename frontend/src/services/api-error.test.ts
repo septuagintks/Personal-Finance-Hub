@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { describe, expect, it } from 'vitest';
-import { ApiError, toApiError } from './api-error';
+import { ApiError, toApiError, toApiErrorAsync } from './api-error';
 
 describe('API error projection', () => {
   it('keeps controlled fields and retry semantics', () => {
@@ -39,5 +39,35 @@ describe('API error projection', () => {
     const projected = toApiError(error);
     expect(projected.status).toBe(0);
     expect(projected.retryable).toBe(true);
+  });
+
+  it('decodes controlled JSON errors returned through a Blob response', async () => {
+    const projected = await toApiErrorAsync({
+      response: {
+        status: 400,
+        data: new Blob(
+          [
+            JSON.stringify({
+              error_code: 'VALIDATION_ERROR',
+              message: 'Narrow the export range.',
+              trace_id: 'trace-export',
+              retryable: false,
+              field_errors: [],
+            }),
+          ],
+          { type: 'application/json' },
+        ),
+        headers: { 'content-type': 'application/json; charset=utf-8' },
+      },
+      isAxiosError: true,
+    });
+
+    expect(projected).toMatchObject({
+      status: 400,
+      errorCode: 'VALIDATION_ERROR',
+      message: 'Narrow the export range.',
+      traceId: 'trace-export',
+      retryable: false,
+    });
   });
 });

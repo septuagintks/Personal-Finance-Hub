@@ -68,15 +68,25 @@ application::VoidResult DatabaseClientFactory::verify_request_role(
     std::string_view expected_role) {
     try {
         constexpr const char* kSql = R"SQL(
-            SELECT current_user, rolbypassrls, rolsuper
+            SELECT current_user, rolbypassrls, rolsuper, rolcreatedb,
+                   rolcreaterole, rolreplication, rolinherit
             FROM pg_roles
             WHERE rolname = current_user
         )SQL";
         const auto result = client->execSqlSync(kSql);
         if (result.empty() || result[0][0].as<std::string>() != expected_role ||
-            result[0][1].as<bool>() || result[0][2].as<bool>()) {
+            result[0][1].as<bool>() || result[0][2].as<bool>() ||
+            result[0][3].as<bool>() || result[0][4].as<bool>() ||
+            result[0][5].as<bool>() || result[0][6].as<bool>()) {
             return application::err(startup_database_error(
                 "Request database role violates the RLS security policy"));
+        }
+        const auto read_only = client->execSqlSync(
+            "SHOW default_transaction_read_only");
+        if (read_only.empty() ||
+            read_only[0][0].as<std::string>() != "off") {
+            return application::err(startup_database_error(
+                "Request database role must allow write transactions"));
         }
         return application::ok();
     } catch (const std::exception&) {
@@ -90,13 +100,16 @@ application::VoidResult DatabaseClientFactory::verify_background_role(
     std::string_view expected_role) {
     try {
         constexpr const char* kRoleSql = R"SQL(
-            SELECT current_user, rolbypassrls, rolsuper
+            SELECT current_user, rolbypassrls, rolsuper, rolcreatedb,
+                   rolcreaterole, rolreplication, rolinherit
             FROM pg_roles
             WHERE rolname = current_user
         )SQL";
         const auto role = client->execSqlSync(kRoleSql);
         if (role.empty() || role[0][0].as<std::string>() != expected_role ||
-            !role[0][1].as<bool>() || role[0][2].as<bool>()) {
+            !role[0][1].as<bool>() || role[0][2].as<bool>() ||
+            role[0][3].as<bool>() || role[0][4].as<bool>() ||
+            role[0][5].as<bool>() || role[0][6].as<bool>()) {
             return application::err(startup_database_error(
                 "Background database role must be non-superuser with BYPASSRLS"));
         }

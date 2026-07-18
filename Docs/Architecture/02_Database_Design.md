@@ -207,10 +207,10 @@ Outbox 状态为 pending、processing、published、failed 或 dead_letter。pro
 
 RLS policy 使用 `pfh_current_user_id()` 读取事务级 `app.current_user_id`：
 
-- request role 是 non-superuser、non-BYPASSRLS。
+- request role 是无成员继承的 non-superuser、non-BYPASSRLS，且默认允许写事务；它只能读取 Flyway 历史，不能修改 migration 事实。
 - 每个 request-scoped 短事务使用 `SET LOCAL` 绑定 UserId。
 - 未绑定 tenant 时 RLS fail closed。
-- background role 是独立 non-superuser、BYPASSRLS、默认只读；它只拥有 `accounts(currency_code, is_archived)` 与 `users(base_currency_code)` 的列级 `SELECT` 权限，不得读取 `users.password_hash` 或其他账户/身份字段。
+- background role 与 request/admin role 必须不同，是无成员继承的 non-superuser、BYPASSRLS、默认只读；角色初始化会先清除旧表、序列和函数直授权，再只授予 `accounts(currency_code, is_archived)` 与 `users(base_currency_code)` 的列级 `SELECT`，不得读取 `users.password_hash` 或其他账户/身份字段。
 - background client 不进入 Controller、认证、普通 Repository 或写 adapter。
 
 应用授权角色与数据库连接角色是两个独立边界：`users.role` 决定 USER/OPERATOR API 权限，request/background role 决定 SQL 与 RLS 能力。Operator HTTP 请求仍使用受限 request role，不能获得 background role 或管理员数据库权限。
@@ -247,7 +247,7 @@ V1-V10 的迁移、角色授权和重复执行由部署门禁验证；真实 Pos
 1. V1-V10 空库和 legacy upgrade。
 2. 33 种币种、55 个分类模板与父子 board 一致性。
 3. FORCE RLS、两用户隔离、未绑定 fail closed 和连接池复用。
-4. request/background 数据库角色权限与默认只读，以及 USER/OPERATOR 应用授权隔离。
+4. request/background 角色名预检、管理属性、成员继承、默认读写状态、Flyway 历史只读、background 列级权限，以及 USER/OPERATOR 应用授权隔离。
 5. `NUMERIC(20,8/10)` round-trip、Half-Even 和超界拒绝。
 6. Unit of Work commit/rollback 与业务/Outbox 原子性。
 7. optimistic lock、Transfer 锁顺序与完整聚合清理。

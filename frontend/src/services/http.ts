@@ -1,5 +1,5 @@
 import axios, { type AxiosError, type AxiosInstance, type InternalAxiosRequestConfig } from 'axios';
-import { ApiError, toApiError } from './api-error';
+import { ApiError, toApiErrorAsync } from './api-error';
 
 declare module 'axios' {
   interface AxiosRequestConfig {
@@ -122,7 +122,7 @@ http.interceptors.response.use(
         sessionExpiredHandler?.();
       }
     }
-    throw new ApiError(toApiError(error));
+    throw new ApiError(await toApiErrorAsync(error));
   },
 );
 

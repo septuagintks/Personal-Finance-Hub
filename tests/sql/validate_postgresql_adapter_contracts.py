@@ -47,6 +47,7 @@ def main() -> int:
         "src/infrastructure/persistence/registration_defaults_repository_impl.cpp"
     )
     composition = read("src/bootstrap/production_composition_root.cpp")
+    database_factory = read("src/bootstrap/database_client_factory.cpp")
     token_service = read(
         "src/infrastructure/security/openssl_token_service.cpp"
     )
@@ -376,12 +377,45 @@ def main() -> int:
         failures,
     )
     require(
+        "pfh_role_preflight_ok" in role_init
+        and "\\getenv request_password PFH_REQUEST_DB_PASSWORD" in role_init
+        and "request_password=${" not in read("docker-compose.yml")
+        and ":'request_user' <> :'background_user'" in role_init
+        and "pg_auth_members" in role_init
+        and "rolcreatedb OR rolcreaterole OR rolreplication" in role_init,
+        "Role initialization must keep passwords out of argv and reject unsafe roles before mutation",
+        failures,
+    )
+    require(
+        "RESET default_transaction_read_only" in role_init
+        and "REVOKE ALL PRIVILEGES ON TABLE public.flyway_schema_history"
+        in role_init
+        and "GRANT SELECT ON TABLE public.flyway_schema_history" in role_init
+        and "relnamespace = 'public'::regnamespace" in role_init,
+        "Request role and FORCE RLS initialization must fail closed",
+        failures,
+    )
+    require(
         "REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public" in role_init
+        and "REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public"
+        in role_init
+        and "REVOKE ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public"
+        in role_init
         and "GRANT SELECT (currency_code, is_archived) ON public.accounts"
         in role_init
         and "GRANT SELECT (base_currency_code) ON public.users" in role_init
         and "GRANT SELECT ON public.accounts, public.users" not in role_init,
         "Background role must expose only active-currency columns",
+        failures,
+    )
+    require(
+        database_factory.count("rolcreatedb") == 2
+        and database_factory.count("rolcreaterole") == 2
+        and database_factory.count("rolreplication") == 2
+        and database_factory.count("rolinherit") == 2
+        and '!= "off"' in database_factory
+        and '!= "on"' in database_factory,
+        "Production startup must validate complete request/background role attributes",
         failures,
     )
     require(
@@ -471,6 +505,12 @@ def main() -> int:
         and "'operator'::audit_actor_type" in operations
         and "'retry'::audit_action" in operations,
         "Operations adapter must keep cursors stable, sanitize dead letters, and retry atomically",
+        failures,
+    )
+    require(
+        "HAVING COALESCE(bool_and(success), FALSE)" in operations
+        and "current == expected_migration_version" in operations,
+        "Readiness must require an exact, fully successful Flyway version",
         failures,
     )
     require(

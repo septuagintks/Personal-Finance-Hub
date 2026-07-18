@@ -339,6 +339,33 @@ TEST_F(PostgreSQLIntegrationTest, RequestRoleRlsIsFailClosedAndPoolContextDoesNo
         database->background->execSqlSync("SHOW default_transaction_read_only")[0][0]
             .as<std::string>(),
         "on");
+    EXPECT_EQ(
+        database->request->execSqlSync("SHOW default_transaction_read_only")[0][0]
+            .as<std::string>(),
+        "off");
+    EXPECT_EQ(
+        scalar_count(
+            database->request,
+            "SELECT has_table_privilege(current_user, "
+            "'public.flyway_schema_history', 'SELECT')::int"),
+        1);
+    EXPECT_EQ(
+        scalar_count(
+            database->request,
+            "SELECT (has_table_privilege(current_user, "
+            "'public.flyway_schema_history', 'INSERT') OR "
+            "has_table_privilege(current_user, "
+            "'public.flyway_schema_history', 'UPDATE') OR "
+            "has_table_privilege(current_user, "
+            "'public.flyway_schema_history', 'DELETE'))::int"),
+        0);
+    EXPECT_EQ(
+        scalar_count(
+            database->background,
+            "SELECT has_function_privilege(current_user, "
+            "'public.pfh_cleanup_expired_request_idempotency(integer)', "
+            "'EXECUTE')::int"),
+        0);
 
     bool background_write_rejected = false;
     try {
@@ -1114,15 +1141,23 @@ int main(int argc, char** argv) {
             connect("PFH_TEST_DB_BACKGROUND", 2)});
 
         const auto request_role = database->request->execSqlSync(
-            "SELECT current_user, rolsuper, rolbypassrls FROM pg_roles "
+            "SELECT current_user, rolsuper, rolbypassrls, rolcreatedb, "
+            "rolcreaterole, rolreplication, rolinherit FROM pg_roles "
             "WHERE rolname=current_user");
         const auto background_role = database->background->execSqlSync(
-            "SELECT current_user, rolsuper, rolbypassrls FROM pg_roles "
+            "SELECT current_user, rolsuper, rolbypassrls, rolcreatedb, "
+            "rolcreaterole, rolreplication, rolinherit FROM pg_roles "
             "WHERE rolname=current_user");
         if (request_role.size() != 1 || background_role.size() != 1 ||
             request_role[0][1].as<bool>() || request_role[0][2].as<bool>() ||
+            request_role[0][3].as<bool>() || request_role[0][4].as<bool>() ||
+            request_role[0][5].as<bool>() || request_role[0][6].as<bool>() ||
             background_role[0][1].as<bool>() ||
-            !background_role[0][2].as<bool>()) {
+            !background_role[0][2].as<bool>() ||
+            background_role[0][3].as<bool>() ||
+            background_role[0][4].as<bool>() ||
+            background_role[0][5].as<bool>() ||
+            background_role[0][6].as<bool>()) {
             throw std::runtime_error("PostgreSQL test role boundary is invalid");
         }
     } catch (const std::exception& error) {

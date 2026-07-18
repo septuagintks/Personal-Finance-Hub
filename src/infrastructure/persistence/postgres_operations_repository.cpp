@@ -60,15 +60,16 @@ PostgresOperationsRepository::readiness(
     }
     try {
         const auto migration = db_->execSqlSync(R"SQL(
-            SELECT COALESCE(MAX(version::bigint), 0)
+            SELECT COALESCE(
+                MAX(version::bigint) FILTER (WHERE version IS NOT NULL), 0)
             FROM flyway_schema_history
-            WHERE success = TRUE AND version IS NOT NULL
+            HAVING COALESCE(bool_and(success), FALSE)
         )SQL");
         const auto current = migration.size() == 1
             ? pg::getBigInt(migration[0], 0)
             : 0;
         return application::ReadinessState{
-            true, current >= expected_migration_version};
+            true, current == expected_migration_version};
     } catch (const std::exception&) {
         return application::ReadinessState{true, false};
     }

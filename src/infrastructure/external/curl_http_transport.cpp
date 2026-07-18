@@ -6,7 +6,6 @@
 
 #include <curl/curl.h>
 
-#include <algorithm>
 #include <chrono>
 #include <climits>
 #include <cstddef>
@@ -34,7 +33,10 @@ struct CurlDeleter {
 class CleansedString {
 public:
     ~CleansedString() {
-        std::fill(value.begin(), value.end(), '\0');
+        auto* bytes = static_cast<volatile char*>(value.data());
+        for (std::size_t index = 0; index < value.size(); ++index) {
+            bytes[index] = '\0';
+        }
     }
 
     std::string value;

@@ -40,6 +40,10 @@ services:
     image: postgres:16-alpine
     environment:
       PGPASSWORD: ${PFH_POSTGRES_ADMIN_PASSWORD:?set PFH_POSTGRES_ADMIN_PASSWORD}
+      PFH_REQUEST_DB_USER: ${PFH_DB_USER:-pfh_user}
+      PFH_REQUEST_DB_PASSWORD: ${PFH_DB_PASSWORD:?set PFH_DB_PASSWORD}
+      PFH_BACKGROUND_DB_USER: ${PFH_BACKGROUND_DB_USER:-pfh_background}
+      PFH_BACKGROUND_DB_PASSWORD: ${PFH_BACKGROUND_DB_PASSWORD:?set PFH_BACKGROUND_DB_PASSWORD}
     command:
       - psql
       - -h
@@ -50,14 +54,6 @@ services:
       - ${PFH_DB_NAME:-pfh_dev}
       - -v
       - ON_ERROR_STOP=1
-      - -v
-      - request_user=${PFH_DB_USER:-pfh_user}
-      - -v
-      - request_password=${PFH_DB_PASSWORD:?set PFH_DB_PASSWORD}
-      - -v
-      - background_user=${PFH_BACKGROUND_DB_USER:-pfh_background}
-      - -v
-      - background_password=${PFH_BACKGROUND_DB_PASSWORD:?set PFH_BACKGROUND_DB_PASSWORD}
       - -f
       - /opt/pfh/init-roles.sql
     volumes:
@@ -87,8 +83,8 @@ services:
       PFH_JWT_SECRET: ${PFH_JWT_SECRET:?set PFH_JWT_SECRET}
       PFH_PASSWORD_PEPPER: ${PFH_PASSWORD_PEPPER:-}
       PFH_FREECURRENCYAPI_API_KEY: ${PFH_FREECURRENCYAPI_API_KEY:?set PFH_FREECURRENCYAPI_API_KEY}
-    ports:
-      - "${PFH_HTTP_PORT:-8080}:8080"
+    expose:
+      - "8080"
     depends_on:
       role-init:
         condition: service_completed_successfully

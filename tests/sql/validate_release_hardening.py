@@ -28,6 +28,7 @@ def main() -> int:
     styles = read("frontend/src/styles/main.css")
     playwright = read("frontend/playwright.config.ts")
     performance = read("tools/phase2_performance.py")
+    transport = read("src/infrastructure/external/curl_http_transport.cpp")
     package = json.loads(read("frontend/package.json"))
     vcpkg = json.loads(read("vcpkg.json"))
 
@@ -81,6 +82,13 @@ def main() -> int:
         "Compose must include hardened read-only Web and API services",
         failures,
     )
+    app_section = compose.split("\n  app:", 1)[1].split("\n  web:", 1)[0]
+    require(
+        "\n    ports:" not in app_section
+        and '\n    expose:\n      - "8080"' in app_section,
+        "Compose Backend must remain internal to the same-origin Web edge",
+        failures,
+    )
     require(
         "manifest: true" in vite
         and "sourcemap: false" in vite
@@ -126,6 +134,13 @@ def main() -> int:
         and 'fixture_prefix = "PFH-PERF-%"' in performance
         and "[arguments.psql, database_url" not in performance,
         "Performance seeding must isolate profiles, protect test data, and keep credentials out of argv",
+        failures,
+    )
+    require(
+        "static_cast<volatile char*>(value.data())" in transport
+        and 'CURLOPT_FOLLOWLOCATION, 0L' in transport
+        and 'CURLOPT_PROTOCOLS_STR, "https"' in transport,
+        "Provider transport must cleanse credential-bearing URLs and stay on HTTPS",
         failures,
     )
 
