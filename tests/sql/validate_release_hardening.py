@@ -142,6 +142,11 @@ def main() -> int:
         failures,
     )
     require(
+        'export_days = 365 if arguments.profile == "daily" else 28' in performance,
+        "Performance CSV windows must stay within the 366-day exclusive range",
+        failures,
+    )
+    require(
         "static_cast<volatile char*>(value.data())" in transport
         and 'CURLOPT_FOLLOWLOCATION, 0L' in transport
         and 'CURLOPT_PROTOCOLS_STR, "https"' in transport,

@@ -337,7 +337,7 @@ def benchmark(arguments: argparse.Namespace) -> None:
     base = arguments.base_url.rstrip("/")
     profile = PROFILES[arguments.profile]
     now = datetime.now(timezone.utc)
-    export_days = 366 if arguments.profile == "daily" else 28
+    export_days = 365 if arguments.profile == "daily" else 28
     from_value = (now - timedelta(days=export_days)).isoformat().replace("+00:00", "Z")
     to_value = (now + timedelta(days=1)).isoformat().replace("+00:00", "Z")
     endpoints = {
