@@ -616,7 +616,7 @@ Result<NetWorthDto> FinanceApplicationService::net_worth(
         (*scope)->transactions(),
         (*scope)->exchange_rates(),
         (*scope)->preferences(),
-        &(*scope)->categories());
+        &(*scope)->categories(), (*scope)->cash_flow_projection());
     return reports.net_worth(user_id, clock_.now());
 }
 
@@ -629,7 +629,7 @@ Result<CashFlowTrendDto> FinanceApplicationService::cash_flow_trend(
         (*scope)->transactions(),
         (*scope)->exchange_rates(),
         (*scope)->preferences(),
-        &(*scope)->categories());
+        &(*scope)->categories(), (*scope)->cash_flow_projection());
     return reports.cash_flow_trend(
         query.user_id,
         query.start_year,
@@ -647,7 +647,7 @@ Result<DashboardSummaryDto> FinanceApplicationService::dashboard_summary(
         (*scope)->transactions(),
         (*scope)->exchange_rates(),
         (*scope)->preferences(),
-        &(*scope)->categories());
+        &(*scope)->categories(), (*scope)->cash_flow_projection());
     return reports.dashboard_summary(user_id, clock_.now());
 }
 
@@ -660,7 +660,7 @@ Result<ReportAnalysisDto> FinanceApplicationService::report_analysis(
         (*scope)->transactions(),
         (*scope)->exchange_rates(),
         (*scope)->preferences(),
-        &(*scope)->categories());
+        &(*scope)->categories(), (*scope)->cash_flow_projection());
     return reports.analysis(query, clock_.now());
 }
 
@@ -673,7 +673,7 @@ Result<CsvExportDto> FinanceApplicationService::export_transactions_csv(
         (*scope)->transactions(),
         (*scope)->exchange_rates(),
         (*scope)->preferences(),
-        &(*scope)->categories());
+        &(*scope)->categories(), (*scope)->cash_flow_projection());
     return reports.export_transactions_csv(query);
 }
 

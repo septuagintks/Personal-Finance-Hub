@@ -16,6 +16,8 @@
 
 namespace pfh::application {
 
+class ICashFlowProjection;
+
 class IRequestScope {
 public:
     virtual ~IRequestScope() = default;
@@ -30,6 +32,9 @@ public:
     [[nodiscard]] virtual domain::IAuditLogRepository& audit_logs() noexcept = 0;
     [[nodiscard]] virtual IIdempotencyRepository& idempotency() noexcept = 0;
     [[nodiscard]] virtual IUnitOfWork& unit_of_work() noexcept = 0;
+    [[nodiscard]] virtual ICashFlowProjection* cash_flow_projection() noexcept {
+        return nullptr;
+    }
 };
 
 class IRequestScopeFactory {

@@ -5,6 +5,7 @@
 #include "pfh/application/scheduler/i_background_executor.h"
 #include "pfh/presentation/api_application.h"
 #include "pfh/presentation/http/auth_rate_limiter.h"
+#include "pfh/presentation/http/http_admission_metrics.h"
 
 #ifdef PFH_HAS_POSTGRESQL
 
@@ -32,11 +33,13 @@ public:
         ApiApplication& application,
         application::IBackgroundExecutor& request_executor,
         application::IBackgroundExecutor& auth_executor,
-        HttpServerConfig server)
+        HttpServerConfig server,
+        HttpAdmissionMetrics& admission_metrics)
         : application_(application),
           request_executor_(request_executor),
           auth_executor_(auth_executor),
           server_(std::move(server)),
+          admission_metrics_(admission_metrics),
           auth_rate_limiter_(
               server_.auth_rate_limit_attempts,
               std::chrono::seconds(server_.auth_rate_limit_window_seconds),
@@ -50,6 +53,7 @@ private:
     application::IBackgroundExecutor& request_executor_;
     application::IBackgroundExecutor& auth_executor_;
     HttpServerConfig server_;
+    HttpAdmissionMetrics& admission_metrics_;
     AuthRateLimiter auth_rate_limiter_;
 };
 

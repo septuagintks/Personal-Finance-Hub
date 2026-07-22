@@ -3,7 +3,7 @@
 // C++23
 //
 // Append-only semantics: only INSERT. Historical query uses
-// fetched_at <= target_time ORDER BY fetched_at DESC LIMIT 1.
+// fetched_at <= target_time ORDER BY fetched_at DESC, id DESC LIMIT 1.
 
 #pragma once
 
@@ -50,12 +50,16 @@ public:
         const domain::Currency& base,
         const domain::Currency& target) override {
         const domain::ExchangeRate* best = nullptr;
-        for (const auto& [_, rate] : merge_rates()) {
+        std::int64_t best_id = 0;
+        const auto merged = merge_rates();
+        for (const auto& [id, rate] : merged) {
             if (rate.base() != base || rate.target() != target) {
                 continue;
             }
-            if (best == nullptr || rate.fetched_at() > best->fetched_at()) {
+            if (best == nullptr || rate.fetched_at() > best->fetched_at() ||
+                (rate.fetched_at() == best->fetched_at() && id > best_id)) {
                 best = &rate;
+                best_id = id;
             }
         }
         if (best == nullptr) {
@@ -70,15 +74,19 @@ public:
         const domain::Currency& target,
         std::chrono::system_clock::time_point target_time) override {
         const domain::ExchangeRate* best = nullptr;
-        for (const auto& [_, rate] : merge_rates()) {
+        std::int64_t best_id = 0;
+        const auto merged = merge_rates();
+        for (const auto& [id, rate] : merged) {
             if (rate.base() != base || rate.target() != target) {
                 continue;
             }
             if (rate.fetched_at() > target_time) {
                 continue;
             }
-            if (best == nullptr || rate.fetched_at() > best->fetched_at()) {
+            if (best == nullptr || rate.fetched_at() > best->fetched_at() ||
+                (rate.fetched_at() == best->fetched_at() && id > best_id)) {
                 best = &rate;
+                best_id = id;
             }
         }
         if (best == nullptr) {
@@ -92,11 +100,23 @@ public:
     [[nodiscard]] domain::RepositoryResult<std::vector<domain::ExchangeRate>> find_all_for_pair(
         const domain::Currency& base,
         const domain::Currency& target) override {
-        std::vector<domain::ExchangeRate> result;
-        for (const auto& [_, rate] : merge_rates()) {
+        std::vector<std::pair<std::int64_t, domain::ExchangeRate>> matching;
+        for (const auto& [id, rate] : merge_rates()) {
             if (rate.base() == base && rate.target() == target) {
-                result.push_back(rate);
+                matching.emplace_back(id, rate);
             }
+        }
+        std::sort(matching.begin(), matching.end(), [](const auto& lhs, const auto& rhs) {
+            if (lhs.second.fetched_at() != rhs.second.fetched_at()) {
+                return lhs.second.fetched_at() < rhs.second.fetched_at();
+            }
+            return lhs.first < rhs.first;
+        });
+
+        std::vector<domain::ExchangeRate> result;
+        result.reserve(matching.size());
+        for (auto& [_, rate] : matching) {
+            result.push_back(std::move(rate));
         }
         return result;
     }
@@ -111,26 +131,86 @@ public:
             return std::unexpected(domain::RepositoryError::validation(
                 "Exchange-rate history range is invalid"));
         }
-        auto all = find_all_for_pair(base, target);
-        if (!all) {
-            return all;
-        }
-        std::sort(all->begin(), all->end(), [](const auto& lhs, const auto& rhs) {
-            return lhs.fetched_at() < rhs.fetched_at();
-        });
-        std::vector<domain::ExchangeRate> result;
+        std::map<
+            std::chrono::system_clock::time_point,
+            std::pair<std::int64_t, domain::ExchangeRate>> latest_by_time;
         const domain::ExchangeRate* anchor = nullptr;
-        for (const auto& rate : *all) {
-            if (rate.fetched_at() <= from) {
-                anchor = &rate;
+        std::int64_t anchor_id = 0;
+        const auto merged = merge_rates();
+        for (const auto& [id, rate] : merged) {
+            if (rate.base() != base || rate.target() != target ||
+                rate.fetched_at() > to) {
                 continue;
             }
-            if (rate.fetched_at() <= to) {
-                result.push_back(rate);
+            if (rate.fetched_at() <= from) {
+                if (anchor == nullptr || rate.fetched_at() > anchor->fetched_at() ||
+                    (rate.fetched_at() == anchor->fetched_at() && id > anchor_id)) {
+                    anchor = &rate;
+                    anchor_id = id;
+                }
+                continue;
+            }
+            auto [position, inserted] = latest_by_time.try_emplace(
+                rate.fetched_at(), id, rate);
+            if (!inserted && id > position->second.first) {
+                position->second = {id, rate};
             }
         }
+
+        std::vector<domain::ExchangeRate> result;
+        result.reserve(latest_by_time.size() + (anchor == nullptr ? 0U : 1U));
         if (anchor != nullptr) {
-            result.insert(result.begin(), *anchor);
+            result.push_back(*anchor);
+        }
+        for (auto& [_, entry] : latest_by_time) {
+            result.push_back(std::move(entry.second));
+        }
+        return result;
+    }
+
+    [[nodiscard]] domain::RepositoryResult<
+        std::vector<std::optional<domain::ExchangeRate>>>
+    find_historical_at_points(
+        const std::vector<domain::HistoricalRatePoint>& points) override {
+        if (points.size() > domain::kMaximumHistoricalRatePointBatch) {
+            return std::unexpected(domain::RepositoryError::resource_limit(
+                "Historical rate point batch exceeds 1024 items"));
+        }
+
+        std::map<
+            std::pair<std::string, std::string>,
+            std::vector<std::pair<std::int64_t, domain::ExchangeRate>>> rates_by_pair;
+        for (const auto& [id, rate] : merge_rates()) {
+            rates_by_pair[{rate.base().code(), rate.target().code()}]
+                .emplace_back(id, rate);
+        }
+        for (auto& [_, rates] : rates_by_pair) {
+            std::sort(rates.begin(), rates.end(), [](const auto& lhs, const auto& rhs) {
+                if (lhs.second.fetched_at() != rhs.second.fetched_at()) {
+                    return lhs.second.fetched_at() < rhs.second.fetched_at();
+                }
+                return lhs.first < rhs.first;
+            });
+        }
+
+        std::vector<std::optional<domain::ExchangeRate>> result;
+        result.reserve(points.size());
+        for (const auto& point : points) {
+            const auto pair = rates_by_pair.find(
+                {point.base.code(), point.target.code()});
+            if (pair == rates_by_pair.end()) {
+                result.emplace_back(std::nullopt);
+                continue;
+            }
+            const auto after = std::upper_bound(
+                pair->second.begin(), pair->second.end(), point.at,
+                [](const auto value, const auto& entry) {
+                    return value < entry.second.fetched_at();
+                });
+            result.emplace_back(
+                after == pair->second.begin()
+                    ? std::optional<domain::ExchangeRate>{}
+                    : std::optional<domain::ExchangeRate>{std::prev(after)->second});
         }
         return result;
     }

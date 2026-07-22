@@ -13,6 +13,7 @@
 #include "pfh/application/error.h"
 #include "pfh/application/error_mapping.h"
 #include "pfh/application/input_constraints.h"
+#include "pfh/application/query/i_cash_flow_projection.h"
 #include "pfh/domain/currency_conversion_service.h"
 #include "pfh/domain/repositories/i_account_repository.h"
 #include "pfh/domain/repositories/i_category_repository.h"
@@ -21,12 +22,14 @@
 #include "pfh/domain/repositories/i_user_preference_repository.h"
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <iterator>
 #include <limits>
 #include <map>
 #include <optional>
 #include <set>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -41,48 +44,68 @@ private:
         explicit HistoricalRateCache(domain::IExchangeRateRepository& rates)
             : rates_(rates) {}
 
+        [[nodiscard]] VoidResult prepare_transactions(
+            const std::vector<domain::TransactionReadModel>& rows,
+            const domain::Currency& report_base) {
+            std::vector<std::pair<domain::Currency, TimePoint>> conversions;
+            conversions.reserve(rows.size());
+            for (const auto& row : rows) {
+                if (row.transaction.type() ==
+                    domain::TransactionType::Transfer) {
+                    continue;
+                }
+                if (row.transaction.amount().currency() != report_base &&
+                    !row.transaction.amount().is_zero()) {
+                    conversions.emplace_back(
+                        row.transaction.amount().currency(),
+                        row.transaction.occurred_at());
+                }
+            }
+            return prepare_conversions(conversions, report_base);
+        }
+
+        [[nodiscard]] VoidResult prepare_balances(
+            const std::vector<domain::AccountBalanceAt>& balances,
+            const domain::Currency& report_base,
+            TimePoint at) {
+            std::vector<std::pair<domain::Currency, TimePoint>> conversions;
+            conversions.reserve(balances.size());
+            for (const auto& balance : balances) {
+                if (balance.balance.currency() != report_base &&
+                    !balance.balance.is_zero()) {
+                    conversions.emplace_back(balance.balance.currency(), at);
+                }
+            }
+            return prepare_conversions(conversions, report_base);
+        }
+
         [[nodiscard]] Result<std::optional<domain::ExchangeRate>> find(
             const domain::Currency& base,
             const domain::Currency& target,
             TimePoint at) {
-            const auto key = std::pair{base.code(), target.code()};
-            const auto [chunk_from, chunk_to] = month_chunk(at);
-            auto found = chunks_.find(key);
-            if (found == chunks_.end() ||
-                found->second.from != chunk_from ||
-                found->second.to != chunk_to) {
-                auto history = rates_.find_history_for_pair(
-                    base, target, chunk_from,
-                    chunk_to - std::chrono::microseconds(1));
-                if (!history) {
-                    return err(from_repository(history.error()));
+            const PointKey key{base.code(), target.code(), at};
+            auto found = point_rates_.find(key);
+            if (found == point_rates_.end()) {
+                auto loaded = rates_.find_historical_at_points(
+                    {domain::HistoricalRatePoint{base, target, at}});
+                if (!loaded) return err(from_repository(loaded.error()));
+                if (loaded->size() != 1U) {
+                    return err(Error::infrastructure_failure(
+                        "Historical exchange-rate batch size is inconsistent"));
                 }
-                std::stable_sort(
-                    history->begin(), history->end(),
-                    [](const auto& lhs, const auto& rhs) {
-                        return lhs.fetched_at() < rhs.fetched_at();
-                    });
-                Chunk chunk{chunk_from, chunk_to, std::move(*history)};
-                found = chunks_.insert_or_assign(key, std::move(chunk)).first;
+                found = point_rates_.emplace(key, std::move(loaded->front())).first;
             }
-
-            const auto& history = found->second.history;
-            const auto after = std::upper_bound(
-                history.begin(), history.end(), at,
-                [](TimePoint value, const domain::ExchangeRate& rate) {
-                    return value < rate.fetched_at();
-                });
-            if (after == history.begin()) {
+            if (!found->second.has_value()) {
                 return std::optional<domain::ExchangeRate>{};
             }
-            const auto selected = *std::prev(after);
-            if (selected.fetched_at() + std::chrono::hours(24) < at) {
+            if (found->second->fetched_at() + std::chrono::hours(24) < at) {
                 used_historical_rate_ = true;
             }
-            return std::optional<domain::ExchangeRate>{std::move(selected)};
+            return found->second;
         }
 
         void reset_evidence() noexcept {
+            point_rates_.clear();
             used_historical_rate_ = false;
         }
 
@@ -93,29 +116,56 @@ private:
         }
 
     private:
-        struct Chunk {
-            TimePoint from;
-            TimePoint to;
-            std::vector<domain::ExchangeRate> history;
-        };
+        using PointKey = std::tuple<std::string, std::string, TimePoint>;
 
-        [[nodiscard]] static std::pair<TimePoint, TimePoint> month_chunk(
-            TimePoint at) {
-            namespace ch = std::chrono;
-            const auto day = ch::floor<ch::days>(at);
-            const ch::year_month_day date(day);
-            const ch::year_month month{date.year(), date.month()};
-            const ch::sys_days start{month / ch::day{1}};
-            const ch::sys_days next{(month + ch::months{1}) / ch::day{1}};
-            return {
-                ch::time_point_cast<TimePoint::duration>(start),
-                ch::time_point_cast<TimePoint::duration>(next)};
+        [[nodiscard]] VoidResult prepare_conversions(
+            const std::vector<std::pair<domain::Currency, TimePoint>>& conversions,
+            const domain::Currency& report_base) {
+            point_rates_.clear();
+            auto usd = domain::Currency::create(domain::Currency::pivot_code());
+            if (!usd) return err(from_domain(usd.error()));
+
+            std::map<PointKey, domain::HistoricalRatePoint> unique;
+            const auto add = [&](const domain::Currency& base,
+                                 const domain::Currency& target,
+                                 TimePoint at) {
+                unique.try_emplace(
+                    PointKey{base.code(), target.code(), at},
+                    domain::HistoricalRatePoint{base, target, at});
+            };
+            for (const auto& [currency, at] : conversions) {
+                add(currency, report_base, at);
+                add(report_base, currency, at);
+                if (currency != *usd && report_base != *usd) {
+                    add(*usd, currency, at);
+                    add(*usd, report_base, at);
+                }
+            }
+            if (unique.size() > domain::kMaximumHistoricalRatePointBatch) {
+                return err(Error::resource_limit(
+                    "Historical exchange-rate point limit exceeded"));
+            }
+            if (unique.empty()) return ok();
+
+            std::vector<domain::HistoricalRatePoint> requested;
+            requested.reserve(unique.size());
+            for (const auto& [_, point] : unique) requested.push_back(point);
+            auto loaded = rates_.find_historical_at_points(requested);
+            if (!loaded) return err(from_repository(loaded.error()));
+            if (loaded->size() != requested.size()) {
+                return err(Error::infrastructure_failure(
+                    "Historical exchange-rate batch size is inconsistent"));
+            }
+            auto value = loaded->begin();
+            for (const auto& [key, _] : unique) {
+                point_rates_.emplace(key, std::move(*value));
+                ++value;
+            }
+            return ok();
         }
 
         domain::IExchangeRateRepository& rates_;
-        std::map<
-            std::pair<std::string, std::string>,
-            Chunk> chunks_;
+        std::map<PointKey, std::optional<domain::ExchangeRate>> point_rates_;
         bool used_historical_rate_ = false;
     };
 
@@ -144,12 +194,14 @@ public:
         domain::ITransactionRepository& transactions,
         domain::IExchangeRateRepository& rates,
         domain::IUserPreferenceRepository& preferences,
-        domain::ICategoryRepository* categories = nullptr)
+        domain::ICategoryRepository* categories = nullptr,
+        ICashFlowProjection* cash_flow_projection = nullptr)
         : accounts_(accounts),
           transactions_(transactions),
           rates_(rates),
           preferences_(preferences),
-          categories_(categories) {}
+          categories_(categories),
+          cash_flow_projection_(cash_flow_projection) {}
 
     // Window is half-open [from, to): `from` inclusive, `to` EXCLUSIVE. This
     // matches the documented month window [month_start, next_month_start) so a
@@ -179,6 +231,10 @@ public:
             query,
             kMaximumAggregateReportRows,
             kMaximumReportInputBytes,
+            [&](const std::vector<domain::TransactionReadModel>& rows) {
+                return rate_cache.prepare_transactions(
+                    rows, pref->base_currency());
+            },
             [&](const domain::TransactionReadModel& row) -> VoidResult {
                 if (row.transaction.type() == domain::TransactionType::Transfer) {
                     return ok();
@@ -267,6 +323,10 @@ public:
             transaction_query,
             kMaximumAggregateReportRows,
             kMaximumReportInputBytes,
+            [&](const std::vector<domain::TransactionReadModel>& rows) {
+                return rate_cache.prepare_transactions(
+                    rows, preference->base_currency());
+            },
             [&](const domain::TransactionReadModel& row) -> VoidResult {
                 if (row.transaction.type() == domain::TransactionType::Transfer) {
                     return ok();
@@ -339,12 +399,13 @@ public:
             return err(Error::validation(
                 "Cash-flow month range is invalid"));
         }
-        const int start_serial = start_year * 12 +
-            static_cast<int>(start_month) - 1;
-        const int end_serial = end_year * 12 +
-            static_cast<int>(end_month) - 1;
-        if (end_serial - start_serial >= 120) {
-            return err(Error::validation(
+        const auto start_serial = static_cast<std::int64_t>(start_year) * 12 +
+            static_cast<std::int64_t>(start_month) - 1;
+        const auto end_serial = static_cast<std::int64_t>(end_year) * 12 +
+            static_cast<std::int64_t>(end_month) - 1;
+        if (end_serial - start_serial >=
+            static_cast<std::int64_t>(kMaximumReportMonths)) {
+            return err(Error::resource_limit(
                 "Cash-flow month range cannot exceed 120 months"));
         }
 
@@ -380,41 +441,86 @@ public:
             expenses.emplace_back(*zero, preference->base_currency());
         }
 
-        HistoricalRateCache rate_cache(rates_);
-        TransactionListQuery transaction_query;
-        transaction_query.user_id = user_id;
-        transaction_query.occurred_from = windows.front().first;
-        transaction_query.occurred_to = windows.back().second;
-        auto visited = visit_transaction_pages(
-            transaction_query,
-            kMaximumAggregateReportRows,
-            kMaximumReportInputBytes,
-            [&](const domain::TransactionReadModel& row) -> VoidResult {
-                const auto& transaction = row.transaction;
-                if (transaction.type() == domain::TransactionType::Transfer) {
-                    return ok();
+        if (cash_flow_projection_ != nullptr) {
+            auto projected = cash_flow_projection_->aggregate_monthly(
+                CashFlowProjectionQuery{
+                    user_id,
+                    windows.front().first,
+                    windows.back().second,
+                    preference->base_currency(),
+                    preference->timezone()});
+            if (!projected) return err(from_repository(projected.error()));
+            if (projected->size() > periods.size()) {
+                return err(Error::infrastructure_failure(
+                    "Cash-flow projection returned too many month buckets"));
+            }
+            std::map<std::string, std::size_t> period_indexes;
+            for (std::size_t index = 0; index < periods.size(); ++index) {
+                period_indexes.emplace(periods[index], index);
+            }
+            std::set<std::size_t> assigned;
+            for (const auto& point : *projected) {
+                const auto index = period_indexes.find(point.period);
+                if (index == period_indexes.end() ||
+                    !assigned.insert(index->second).second) {
+                    return err(Error::infrastructure_failure(
+                        "Cash-flow projection returned an invalid month bucket"));
                 }
-                const auto occurred_at = transaction.occurred_at();
-                auto after = std::upper_bound(
-                    windows.begin(), windows.end(), occurred_at,
-                    [](TimePoint value, const auto& window) {
-                        return value < window.first;
-                    });
-                if (after == windows.begin()) return ok();
-                const auto window = std::prev(after);
-                if (occurred_at < window->first || occurred_at >= window->second) {
-                    return ok();
+                if (point.missing_exchange_rate) {
+                    return err(Error(
+                        ErrorCode::InvalidExchangeRate,
+                        "Missing exchange rate for cash-flow projection",
+                        point.period));
                 }
-                const auto bucket = static_cast<std::size_t>(
-                    std::distance(windows.begin(), window));
-                auto converted = convert_to_base(
-                    transaction.amount(), preference->base_currency(),
-                    occurred_at, rate_cache);
-                if (!converted) return err(converted.error());
-                const ConvertedTransaction value{&transaction, std::move(*converted)};
-                return add_cash_flow(value, incomes[bucket], expenses[bucket]);
-            });
-        if (!visited) return err(visited.error());
+                incomes[index->second] = domain::Money(
+                    point.income, preference->base_currency());
+                expenses[index->second] = domain::Money(
+                    point.expense, preference->base_currency());
+            }
+        } else {
+            HistoricalRateCache rate_cache(rates_);
+            TransactionListQuery transaction_query;
+            transaction_query.user_id = user_id;
+            transaction_query.occurred_from = windows.front().first;
+            transaction_query.occurred_to = windows.back().second;
+            auto visited = visit_transaction_pages(
+                transaction_query,
+                kMaximumAggregateReportRows,
+                kMaximumReportInputBytes,
+                [&](const std::vector<domain::TransactionReadModel>& rows) {
+                    return rate_cache.prepare_transactions(
+                        rows, preference->base_currency());
+                },
+                [&](const domain::TransactionReadModel& row) -> VoidResult {
+                    const auto& transaction = row.transaction;
+                    if (transaction.type() == domain::TransactionType::Transfer) {
+                        return ok();
+                    }
+                    const auto occurred_at = transaction.occurred_at();
+                    auto after = std::upper_bound(
+                        windows.begin(), windows.end(), occurred_at,
+                        [](TimePoint value, const auto& window) {
+                            return value < window.first;
+                        });
+                    if (after == windows.begin()) return ok();
+                    const auto window = std::prev(after);
+                    if (occurred_at < window->first ||
+                        occurred_at >= window->second) {
+                        return ok();
+                    }
+                    const auto bucket = static_cast<std::size_t>(
+                        std::distance(windows.begin(), window));
+                    auto converted = convert_to_base(
+                        transaction.amount(), preference->base_currency(),
+                        occurred_at, rate_cache);
+                    if (!converted) return err(converted.error());
+                    const ConvertedTransaction value{
+                        &transaction, std::move(*converted)};
+                    return add_cash_flow(
+                        value, incomes[bucket], expenses[bucket]);
+                });
+            if (!visited) return err(visited.error());
+        }
 
         CashFlowTrendDto result;
         result.base_currency = preference->base_currency().code();
@@ -467,23 +573,24 @@ private:
         if (!add(row.transaction.description().size()) ||
             (row.category_name.has_value() &&
              !add(row.category_name->size()))) {
-            return err(Error::validation(
+            return err(Error::resource_limit(
                 "Report input size exceeds the supported budget"));
         }
         for (const auto& tag : row.tags) {
             if (!add(sizeof(domain::Tag)) || !add(tag.name().size())) {
-                return err(Error::validation(
+                return err(Error::resource_limit(
                     "Report input size exceeds the supported budget"));
             }
         }
         return total;
     }
 
-    template <typename Visitor>
+    template <typename PagePreparer, typename Visitor>
     [[nodiscard]] VoidResult visit_transaction_pages(
         const TransactionListQuery& query,
         std::size_t maximum_rows,
         std::size_t maximum_bytes,
+        PagePreparer&& prepare_page,
         Visitor&& visitor) {
         if (!query.user_id.is_valid() ||
             (query.account_id.has_value() && !query.account_id->is_valid()) ||
@@ -529,7 +636,7 @@ private:
                 page->items.size() > maximum_rows - row_count ||
                 (row_count + page->items.size() == maximum_rows &&
                  page->has_more)) {
-                return err(Error::validation(
+                return err(Error::resource_limit(
                     "Report row limit exceeded; narrow the requested range"));
             }
 
@@ -540,7 +647,7 @@ private:
                 if (input_bytes > maximum_bytes ||
                     page_bytes > maximum_bytes - input_bytes ||
                     *estimated > maximum_bytes - input_bytes - page_bytes) {
-                    return err(Error::validation(
+                    return err(Error::resource_limit(
                         "Report input byte limit exceeded; narrow the requested range"));
                 }
                 page_bytes += *estimated;
@@ -566,6 +673,9 @@ private:
 
             row_count += page->items.size();
             input_bytes += page_bytes;
+            if (auto prepared = prepare_page(page->items); !prepared) {
+                return prepared;
+            }
             for (const auto& row : page->items) {
                 if (auto consumed = visitor(row); !consumed) {
                     return consumed;
@@ -575,6 +685,22 @@ private:
             page_query.before = *next_cursor;
         }
         return ok();
+    }
+
+    template <typename Visitor>
+    [[nodiscard]] VoidResult visit_transaction_pages(
+        const TransactionListQuery& query,
+        std::size_t maximum_rows,
+        std::size_t maximum_bytes,
+        Visitor&& visitor) {
+        return visit_transaction_pages(
+            query,
+            maximum_rows,
+            maximum_bytes,
+            [](const std::vector<domain::TransactionReadModel>&) {
+                return ok();
+            },
+            std::forward<Visitor>(visitor));
     }
 
     [[nodiscard]] static VoidResult add_cash_flow(
@@ -627,6 +753,10 @@ private:
         const domain::Currency& base,
         TimePoint now,
         HistoricalRateCache& rate_cache) {
+        if (auto prepared = rate_cache.prepare_balances(balances, base, now);
+            !prepared) {
+            return err(prepared.error());
+        }
         std::vector<AccountValue> result;
         result.reserve(balances.size());
         for (const auto& balance : balances) {
@@ -887,7 +1017,7 @@ private:
             categories_->find_all_for_user_including_deleted(user_id);
         if (!categories) return err(from_repository(categories.error()));
         if (categories->size() > kMaximumReportMetadataItems) {
-            return err(Error::validation(
+            return err(Error::resource_limit(
                 "Report category metadata limit exceeded"));
         }
         for (auto& category : *categories) {
@@ -953,7 +1083,7 @@ private:
         auto found = totals.amounts.find(key);
         if (found == totals.amounts.end()) {
             if (totals.order.size() >= kMaximumBreakdownBuckets) {
-                return err(Error::validation(
+                return err(Error::resource_limit(
                     "Report category bucket limit exceeded"));
             }
             totals.order.push_back(bucket);
@@ -1027,9 +1157,9 @@ private:
     //   5. USD triangulation           -> USD->from & USD->base, cross-rate
     //   6. otherwise                    -> error (missing rate; NOT latest)
     //
-    // Reproducibility: the request-local cache loads one UTC calendar-month
-    // chunk at a time, including the latest anchor at-or-before the chunk start.
-    // It never falls back to a future/latest rate.
+    // Reproducibility: the request-local cache batches only the exact business
+    // timestamps present on the current bounded page. It never materializes a
+    // whole history window and never falls back to a future/latest rate.
     [[nodiscard]] Result<domain::Money> convert_to_base(
         const domain::Money& amount,
         const domain::Currency& base,
@@ -1119,6 +1249,7 @@ private:
     // first-level parent and resolves human names. When null, falls back to
     // grouping by the raw category id (id string as name).
     domain::ICategoryRepository* categories_ = nullptr;
+    ICashFlowProjection* cash_flow_projection_ = nullptr;
 };
 
 } // namespace pfh::application

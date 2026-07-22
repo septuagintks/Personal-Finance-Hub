@@ -12,6 +12,7 @@
 #include "pfh/infrastructure/persistence/drogon_unit_of_work.h"
 #include "pfh/infrastructure/persistence/exchange_rate_repository_impl.h"
 #include "pfh/infrastructure/persistence/idempotency_repository_impl.h"
+#include "pfh/infrastructure/persistence/postgres_cash_flow_projection.h"
 #include "pfh/infrastructure/persistence/tag_repository_impl.h"
 #include "pfh/infrastructure/persistence/transaction_repository_impl.h"
 #include "pfh/infrastructure/persistence/user_preference_repository_impl.h"
@@ -33,6 +34,7 @@ public:
           tags_(db, user_id),
           preferences_(db, user_id),
           exchange_rates_(db),
+          cash_flow_projection_(db, user_id),
           idempotency_(user_id),
           uow_(std::move(db), user_id) {}
 
@@ -62,6 +64,10 @@ public:
     [[nodiscard]] application::IUnitOfWork& unit_of_work() noexcept override {
         return uow_;
     }
+    [[nodiscard]] application::ICashFlowProjection*
+    cash_flow_projection() noexcept override {
+        return &cash_flow_projection_;
+    }
 
 private:
     domain::UserId user_id_;
@@ -71,6 +77,7 @@ private:
     TagRepositoryImpl tags_;
     UserPreferenceRepositoryImpl preferences_;
     ExchangeRateRepositoryImpl exchange_rates_;
+    PostgresCashFlowProjection cash_flow_projection_;
     AuditLogRepositoryImpl audit_logs_;
     IdempotencyRepositoryImpl idempotency_;
     DrogonUnitOfWork uow_;

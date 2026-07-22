@@ -7,6 +7,7 @@
 #include "pfh/presentation/http/time_codec.h"
 
 #include <nlohmann/json.hpp>
+#include <spdlog/spdlog.h>
 
 #include <charconv>
 #include <cstdint>
@@ -130,14 +131,35 @@ template <typename TypedId>
     return std::optional<std::chrono::system_clock::time_point>(*value);
 }
 
+[[nodiscard]] HttpResponse report_error_response(
+    const application::Error& error,
+    std::string_view trace_id,
+    ReportResourceMetrics& metrics,
+    bool csv_export = false) {
+    if (error.code == application::ErrorCode::ResourceLimitExceeded) {
+        if (csv_export) {
+            metrics.record_csv_export_rejection();
+        } else {
+            metrics.record_report_query_rejection();
+        }
+        spdlog::warn(
+            "Report resource rejected trace_id={} reason=resource_limit surface={}",
+            trace_id,
+            csv_export ? "csv_export" : "report_query");
+    }
+    return HttpResponseMapper::error(error, trace_id);
+}
+
 } // namespace
 
 HttpResponse ReportController::net_worth(const HttpRequest& request) {
     auto user = require_user(request);
     if (!user) return HttpResponseMapper::error(user.error(), request.trace_id);
     auto result = service_.net_worth(*user);
-    return result ? HttpResponseMapper::json(200, net_worth_json(*result))
-                  : HttpResponseMapper::error(result.error(), request.trace_id);
+    return result
+        ? HttpResponseMapper::json(200, net_worth_json(*result))
+        : report_error_response(
+              result.error(), request.trace_id, resource_metrics_);
 }
 
 HttpResponse ReportController::cash_flow(const HttpRequest& request) {
@@ -165,7 +187,10 @@ HttpResponse ReportController::cash_flow(const HttpRequest& request) {
     if (!end) return HttpResponseMapper::error(end.error(), request.trace_id);
     auto result = service_.cash_flow_trend(application::CashFlowTrendQuery{
         *user, start->year, start->month, end->year, end->month});
-    if (!result) return HttpResponseMapper::error(result.error(), request.trace_id);
+    if (!result) {
+        return report_error_response(
+            result.error(), request.trace_id, resource_metrics_);
+    }
     nlohmann::json trends = nlohmann::json::array();
     for (const auto& period : result->trends) {
         trends.push_back(nlohmann::json{
@@ -188,7 +213,10 @@ HttpResponse ReportController::dashboard_summary(const HttpRequest& request) {
             request.trace_id);
     }
     auto result = service_.dashboard_summary(*user);
-    if (!result) return HttpResponseMapper::error(result.error(), request.trace_id);
+    if (!result) {
+        return report_error_response(
+            result.error(), request.trace_id, resource_metrics_);
+    }
 
     nlohmann::json distribution = nlohmann::json::array();
     for (const auto& slice : result->asset_distribution) {
@@ -261,7 +289,10 @@ HttpResponse ReportController::analysis(const HttpRequest& request) {
 
     auto result = service_.report_analysis(application::ReportAnalysisQuery{
         *user, start->year, start->month, end->year, end->month, *dimension});
-    if (!result) return HttpResponseMapper::error(result.error(), request.trace_id);
+    if (!result) {
+        return report_error_response(
+            result.error(), request.trace_id, resource_metrics_);
+    }
 
     nlohmann::json trend = nlohmann::json::array();
     for (const auto& point : result->net_worth_trend) {
@@ -341,7 +372,10 @@ HttpResponse ReportController::export_transactions(const HttpRequest& request) {
         query.keyword = found->second;
     }
     auto result = service_.export_transactions_csv(query);
-    if (!result) return HttpResponseMapper::error(result.error(), request.trace_id);
+    if (!result) {
+        return report_error_response(
+            result.error(), request.trace_id, resource_metrics_, true);
+    }
 
     HttpResponse response;
     response.status = 200;

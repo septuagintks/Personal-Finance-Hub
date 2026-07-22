@@ -2,6 +2,7 @@
 
 #include "pfh/application/services/auth_service.h"
 #include "pfh/application/services/finance_application_service.h"
+#include "pfh/application/input_constraints.h"
 #include "pfh/domain/resource_limits.h"
 #include "pfh/infrastructure/persistence/in_memory_audit_log_repository.h"
 #include "pfh/infrastructure/persistence/in_memory_auth_session_repository.h"
@@ -133,9 +134,11 @@ protected:
           timezone_controller_(finance_),
           transaction_controller_(finance_),
           transfer_controller_(finance_),
-          report_controller_(finance_),
+          report_controller_(finance_, report_resource_metrics_),
           maintenance_controller_(finance_),
-          operations_controller_(operations_service_),
+          operations_controller_(
+              operations_service_, admission_metrics_,
+              report_resource_metrics_),
           jwt_filter_(tokens_, sessions_, users_, clock_),
           app_(
               auth_controller_, jwt_filter_, account_controller_,
@@ -215,6 +218,18 @@ protected:
     FinanceApplicationService finance_;
     InMemoryOperationsRepository operations_repository_;
     OperationsApplicationService operations_service_;
+    HttpAdmissionMetrics admission_metrics_{HttpAdmissionCapacity{
+        1024U, 4U, 32U, 4096U, 2U, 8U, 1024U, 20U, 60U, 100U}};
+    ReportResourceMetrics report_resource_metrics_{ReportResourceCapacity{
+        kMaximumAggregateReportRows,
+        kMaximumDetailedReportRows,
+        kMaximumReportInputBytes,
+        kMaximumCsvOutputBytes,
+        kMaximumBreakdownBuckets,
+        kMaximumBreakdownExpansions,
+        kMaximumHistoricalRatePointBatch,
+        kMaximumReportMonths,
+        kMaximumCsvRangeDays}};
     AuthController auth_controller_;
     AccountController account_controller_;
     CategoryController category_controller_;
@@ -1718,6 +1733,28 @@ TEST_F(ResourceApiTest, ReportApiEnforcesRangeAndMissingRateErrors) {
         {{"startDate", "0001-01"}, {"endDate", "0001-01"},
          {"periodType", "MONTH"}}).status, 400);
 
+    const auto report_rejections_before =
+        report_resource_metrics_.snapshot().report_query_rejections;
+    const auto oversized_report = request(
+        HttpMethod::Get, "/api/v1/reports/cash-flow", {}, token,
+        {{"startDate", "2016-07"}, {"endDate", "2026-07"},
+         {"periodType", "MONTH"}});
+    EXPECT_EQ(oversized_report.status, 422) << oversized_report.body;
+    EXPECT_EQ(
+        report_resource_metrics_.snapshot().report_query_rejections,
+        report_rejections_before + 1U);
+
+    const auto csv_rejections_before =
+        report_resource_metrics_.snapshot().csv_export_rejections;
+    const auto oversized_export = request(
+        HttpMethod::Get, "/api/v1/exports/transactions.csv", {}, token,
+        {{"from", "2025-01-01T00:00:00Z"},
+         {"to", "2026-01-03T00:00:00Z"}});
+    EXPECT_EQ(oversized_export.status, 422) << oversized_export.body;
+    EXPECT_EQ(
+        report_resource_metrics_.snapshot().csv_export_rejections,
+        csv_rejections_before + 1U);
+
     const auto usd_account = request(
         HttpMethod::Post, "/api/v1/accounts",
         {{"name", "USD Missing Rate"}, {"type", "savings"},
@@ -2235,6 +2272,18 @@ TEST_F(ResourceApiTest, OperatorRoutesUseCurrentServerRoleAndSanitizeDeadLetters
     EXPECT_TRUE(summary_body["outbox"]["failed"]["count"].is_number_unsigned());
     EXPECT_TRUE(summary_body["outbox"]["failed"]["saturated"].is_boolean());
     EXPECT_TRUE(summary_body["expiredIdempotency"]["saturated"].is_boolean());
+    EXPECT_EQ(
+        summary_body["httpAdmission"]["capacity"]["requestQueueTasks"],
+        32U);
+    EXPECT_EQ(
+        summary_body["httpAdmission"]["rejections"]["requestQueue"],
+        0U);
+    EXPECT_EQ(
+        summary_body["reportResources"]["capacity"]["detailedRows"],
+        kMaximumDetailedReportRows);
+    EXPECT_EQ(
+        summary_body["reportResources"]["rejections"]["csvExport"],
+        0U);
     const auto metrics = request(
         HttpMethod::Get,
         "/api/v1/operations/metrics",
@@ -2242,6 +2291,15 @@ TEST_F(ResourceApiTest, OperatorRoutesUseCurrentServerRoleAndSanitizeDeadLetters
         operator_token);
     EXPECT_EQ(metrics.status, 200);
     EXPECT_NE(metrics.body.find("pfh_outbox_messages_saturated"), std::string::npos);
+    EXPECT_NE(metrics.body.find("pfh_http_admission_capacity"), std::string::npos);
+    EXPECT_NE(
+        metrics.body.find(
+            "pfh_http_admission_rejections_total{reason=\"auth_queue\"} 0"),
+        std::string::npos);
+    EXPECT_NE(
+        metrics.body.find(
+            "pfh_report_resource_rejections_total{surface=\"report_query\"} 0"),
+        std::string::npos);
 }
 
 } // namespace pfh::test

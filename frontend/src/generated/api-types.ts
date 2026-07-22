@@ -1129,6 +1129,47 @@ export interface components {
             lastFinishedAt: string | null;
             lastDurationMs: number;
         };
+        HttpAdmissionCapacity: {
+            maximumRequestBodyBytes: number;
+            requestWorkerThreads: number;
+            requestQueueTasks: number;
+            requestQueueBytes: number;
+            authWorkerThreads: number;
+            authQueueTasks: number;
+            authQueueBytes: number;
+            authRateLimitAttempts: number;
+            authRateLimitWindowSeconds: number;
+            authRateLimitSources: number;
+        };
+        HttpAdmissionRejections: {
+            oversizedBody: number;
+            authRateLimit: number;
+            requestQueue: number;
+            authQueue: number;
+        };
+        HttpAdmissionSummary: {
+            capacity: components["schemas"]["HttpAdmissionCapacity"];
+            rejections: components["schemas"]["HttpAdmissionRejections"];
+        };
+        ReportResourceCapacity: {
+            aggregateRows: number;
+            detailedRows: number;
+            inputBytes: number;
+            csvOutputBytes: number;
+            breakdownBuckets: number;
+            breakdownExpansions: number;
+            historicalRatePoints: number;
+            cashFlowMonths: number;
+            csvRangeDays: number;
+        };
+        ReportResourceRejections: {
+            reportQuery: number;
+            csvExport: number;
+        };
+        ReportResourceSummary: {
+            capacity: components["schemas"]["ReportResourceCapacity"];
+            rejections: components["schemas"]["ReportResourceRejections"];
+        };
         OperationsSummary: {
             /** Format: date-time */
             generatedAt: string;
@@ -1137,6 +1178,8 @@ export interface components {
             outbox: components["schemas"]["OutboxCounts"];
             handlerReceipts: components["schemas"]["HandlerReceiptSummary"];
             expiredIdempotency: components["schemas"]["BoundedCount"];
+            httpAdmission: components["schemas"]["HttpAdmissionSummary"];
+            reportResources: components["schemas"]["ReportResourceSummary"];
             leases: components["schemas"]["OperationalLease"][];
             jobs: components["schemas"]["JobRuntime"][];
         };

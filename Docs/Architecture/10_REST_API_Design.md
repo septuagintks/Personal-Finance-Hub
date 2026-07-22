@@ -541,6 +541,7 @@ POST /api/v1/operations/dead-letters/{outboxId}/retry
 
 - `/livez` 不经过有界应用队列，只证明进程可响应；`/readyz` 脱敏检查 request DB、必要 migration 与 Scheduler 启动状态，未就绪返回 `503`。
 - Operations API 必须同时通过 JWT 和服务端当前持久化 `OPERATOR` 角色校验；USER 返回 `403`。Metrics 采用 Prometheus 文本格式并要求同一 Operator 认证。
+- summary 固定返回 `httpAdmission` 与 `reportResources`，同时公开当前不可变容量和进程生命周期内的单调拒绝计数。Prometheus 对应使用低基数的 `pfh_http_admission_*` 与 `pfh_report_resource_*`；不得使用路径、用户、TraceId 或财务数据作为 label。
 - dead-letter 列表只返回脱敏标识、事件类型、状态、重试计数与时间，不返回 payload、原始错误、claim token 或 owner。
 - 重试请求必须携带 `Idempotency-Key`；服务端使用持久化 retry command、行锁和状态条件保证并发重试只发生一次，并在同一事务写 Operator Audit 与 TraceId。
 

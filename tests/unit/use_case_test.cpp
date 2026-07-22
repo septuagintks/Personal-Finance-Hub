@@ -1377,6 +1377,11 @@ public:
         std::chrono::system_clock::time_point) override {
         return std::unexpected(RepositoryError::database("db down"));
     }
+    domain::RepositoryResult<std::vector<std::optional<ExchangeRate>>>
+    find_historical_at_points(
+        const std::vector<HistoricalRatePoint>&) override {
+        return std::unexpected(RepositoryError::database("db down"));
+    }
 };
 
 class CountingAccountRepository final : public IAccountRepository {
@@ -1609,17 +1614,40 @@ public:
         history_ranges.emplace_back(from, to);
         return delegate_.find_history_for_pair(base, target, from, to);
     }
+    RepositoryResult<std::vector<std::optional<ExchangeRate>>>
+    find_historical_at_points(
+        const std::vector<HistoricalRatePoint>& points) override {
+        ++point_batch_calls;
+        point_batches.push_back(points);
+        return delegate_.find_historical_at_points(points);
+    }
 
     std::size_t latest_calls = 0;
     std::size_t historical_calls = 0;
     std::size_t all_calls = 0;
     std::size_t history_calls = 0;
+    std::size_t point_batch_calls = 0;
     std::vector<std::pair<
         std::chrono::system_clock::time_point,
         std::chrono::system_clock::time_point>> history_ranges;
+    std::vector<std::vector<HistoricalRatePoint>> point_batches;
 
 private:
     IExchangeRateRepository& delegate_;
+};
+
+class RecordingCashFlowProjection final : public ICashFlowProjection {
+public:
+    RepositoryResult<std::vector<CashFlowMonthlyProjection>> aggregate_monthly(
+        const CashFlowProjectionQuery& query) override {
+        ++calls;
+        queries.push_back(query);
+        return result;
+    }
+
+    std::size_t calls = 0;
+    std::vector<CashFlowProjectionQuery> queries;
+    std::vector<CashFlowMonthlyProjection> result;
 };
 
 [[nodiscard]] TransactionReadModel make_report_row(
@@ -1856,7 +1884,8 @@ TEST_F(UseCaseTest, ReportsBatchTransactionsAndCacheRateHistoryPerRequest) {
     EXPECT_EQ(transactions.page_calls, 1U);
     EXPECT_EQ(transactions.range_calls, 0U);
     EXPECT_EQ(transactions.find_by_user_calls, 0U);
-    EXPECT_EQ(rates.history_calls, 2U);
+    EXPECT_EQ(rates.point_batch_calls, 2U);
+    EXPECT_EQ(rates.history_calls, 0U);
     EXPECT_EQ(rates.historical_calls, 0U);
     EXPECT_EQ(rates.latest_calls, 0U);
     EXPECT_EQ(rates.all_calls, 0U);
@@ -1866,7 +1895,54 @@ TEST_F(UseCaseTest, ReportsBatchTransactionsAndCacheRateHistoryPerRequest) {
     EXPECT_EQ(transactions.page_calls, 2U);
     EXPECT_EQ(transactions.range_calls, 0U);
     EXPECT_EQ(transactions.find_by_user_calls, 0U);
-    EXPECT_EQ(rates.history_calls, 4U);
+    EXPECT_EQ(rates.point_batch_calls, 3U);
+    EXPECT_EQ(rates.history_calls, 0U);
+}
+
+TEST_F(UseCaseTest, CashFlowTrendUsesBoundedProjectionWhenAvailable) {
+    const auto seeded = seed();
+    CountingTransactionRepository transactions(*tx_repo_);
+    RecordingCashFlowProjection projection;
+    projection.result.push_back(CashFlowMonthlyProjection{
+        "2024-06", dec("125.5"), dec("40.25"), false});
+    ReportQueryService reports(
+        *account_repo_, transactions, *rate_repo_, *pref_repo_, nullptr,
+        &projection);
+
+    auto trend = reports.cash_flow_trend(
+        seeded.user, 2024, 5, 2024, 7);
+
+    ASSERT_TRUE(trend.has_value()) << trend.error().message;
+    ASSERT_EQ(trend->trends.size(), 3U);
+    EXPECT_EQ(trend->trends[0].period, "2024-05");
+    EXPECT_EQ(trend->trends[0].income, "0");
+    EXPECT_EQ(trend->trends[1].period, "2024-06");
+    EXPECT_EQ(trend->trends[1].income, "125.5");
+    EXPECT_EQ(trend->trends[1].expense, "40.25");
+    EXPECT_EQ(trend->trends[1].net, "85.25");
+    EXPECT_EQ(trend->trends[2].period, "2024-07");
+    EXPECT_EQ(trend->trends[2].income, "0");
+    EXPECT_EQ(transactions.page_calls, 0U);
+    ASSERT_EQ(projection.calls, 1U);
+    ASSERT_EQ(projection.queries.size(), 1U);
+    EXPECT_EQ(projection.queries.front().timezone, "Asia/Shanghai");
+    EXPECT_EQ(projection.queries.front().base_currency.code(), "USD");
+}
+
+TEST_F(UseCaseTest, CashFlowProjectionPropagatesMissingRateAsDomainError) {
+    const auto seeded = seed();
+    RecordingCashFlowProjection projection;
+    projection.result.push_back(CashFlowMonthlyProjection{
+        "2024-06", dec("0"), dec("0"), true});
+    ReportQueryService reports(
+        *account_repo_, *tx_repo_, *rate_repo_, *pref_repo_, nullptr,
+        &projection);
+
+    auto trend = reports.cash_flow_trend(
+        seeded.user, 2024, 6, 2024, 6);
+
+    ASSERT_FALSE(trend.has_value());
+    EXPECT_EQ(trend.error().code, ErrorCode::InvalidExchangeRate);
 }
 
 TEST_F(UseCaseTest, ReportsScanTransactionsWithBoundedKeysetPages) {
@@ -1917,7 +1993,7 @@ TEST_F(UseCaseTest, ReportAnalysisRejectsRowsBeyondDetailedBudget) {
         sample_time() + std::chrono::days(1));
 
     ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, ErrorCode::ValidationError);
+    EXPECT_EQ(result.error().code, ErrorCode::ResourceLimitExceeded);
     EXPECT_NE(result.error().message.find("row limit"), std::string::npos);
     EXPECT_EQ(transactions.range_calls, 0U);
 }
@@ -1940,7 +2016,7 @@ TEST_F(UseCaseTest, CashFlowRejectsAggregateInputBeyondByteBudget) {
         sample_time() + std::chrono::hours(1));
 
     ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, ErrorCode::ValidationError);
+    EXPECT_EQ(result.error().code, ErrorCode::ResourceLimitExceeded);
     EXPECT_NE(result.error().message.find("input byte"), std::string::npos);
 }
 
@@ -1971,7 +2047,7 @@ TEST_F(UseCaseTest, TagBreakdownRejectsExpansionBeyondBudget) {
         sample_time() + std::chrono::days(1));
 
     ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, ErrorCode::ValidationError);
+    EXPECT_EQ(result.error().code, ErrorCode::ResourceLimitExceeded);
     EXPECT_NE(result.error().message.find("tag expansion"), std::string::npos);
 }
 
@@ -1995,11 +2071,11 @@ TEST_F(UseCaseTest, CsvExportRejectsActualOutputBeyondByteBudget) {
     auto result = reports.export_transactions_csv(query);
 
     ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, ErrorCode::ValidationError);
+    EXPECT_EQ(result.error().code, ErrorCode::ResourceLimitExceeded);
     EXPECT_NE(result.error().message.find("CSV output byte"), std::string::npos);
 }
 
-TEST_F(UseCaseTest, HistoricalRateCacheLoadsAtMostOneCalendarMonthPerQuery) {
+TEST_F(UseCaseTest, HistoricalRateCacheBatchesOnlyRequestedBusinessPoints) {
     namespace ch = std::chrono;
     const auto seeded = seed();
     const auto january = ch::time_point_cast<ch::system_clock::duration>(
@@ -2027,8 +2103,14 @@ TEST_F(UseCaseTest, HistoricalRateCacheLoadsAtMostOneCalendarMonthPerQuery) {
 
     CountingTransactionRepository transactions(*tx_repo_);
     transactions.page_handler = make_report_page_handler(
-        2,
+        3,
         [=](std::int64_t id) {
+            if (id == 3) {
+                return make_report_row(
+                    id, seeded.user, seeded.cny_wallet,
+                    january + ch::hours(1), {}, "EUR",
+                    TransactionType::Transfer);
+            }
             return make_report_row(
                 id, seeded.user, seeded.cny_wallet,
                 id == 2 ? december : january, {}, "CNY");
@@ -2041,9 +2123,13 @@ TEST_F(UseCaseTest, HistoricalRateCacheLoadsAtMostOneCalendarMonthPerQuery) {
         seeded.user, 2015, 1, 2024, 12);
 
     ASSERT_TRUE(result.has_value()) << result.error().message;
-    ASSERT_FALSE(rates.history_ranges.empty());
-    for (const auto& [from, to] : rates.history_ranges) {
-        EXPECT_LE(to - from, ch::days(32));
+    ASSERT_EQ(rates.point_batch_calls, 1U);
+    ASSERT_EQ(rates.point_batches.size(), 1U);
+    EXPECT_EQ(rates.point_batches.front().size(), 4U);
+    EXPECT_EQ(rates.history_calls, 0U);
+    EXPECT_EQ(rates.historical_calls, 0U);
+    for (const auto& point : rates.point_batches.front()) {
+        EXPECT_TRUE(point.at == january || point.at == december);
     }
 }
 

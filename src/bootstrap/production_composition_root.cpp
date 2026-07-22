@@ -7,6 +7,7 @@
 #include "pfh/application/services/auth_service.h"
 #include "pfh/application/services/finance_application_service.h"
 #include "pfh/application/services/operations_application_service.h"
+#include "pfh/application/input_constraints.h"
 #include "pfh/application/error_mapping.h"
 #include "pfh/application/events/local_event_bus.h"
 #include "pfh/application/events/outbox_publisher.h"
@@ -494,6 +495,35 @@ application::VoidResult ProductionCompositionRoot::initialize() {
             std::move(operation_jobs),
             config_.scheduler.enabled,
             application::kExpectedMigrationVersion);
+    http_admission_metrics_ =
+        std::make_unique<presentation::HttpAdmissionMetrics>(
+            presentation::HttpAdmissionCapacity{
+                static_cast<std::size_t>(
+                    config_.server.maximum_request_body_bytes),
+                config_.server.request_worker_threads,
+                config_.server.request_queue_capacity,
+                static_cast<std::size_t>(
+                    config_.server.request_queue_byte_capacity),
+                config_.server.auth_worker_threads,
+                config_.server.auth_queue_capacity,
+                static_cast<std::size_t>(
+                    config_.server.auth_queue_byte_capacity),
+                config_.server.auth_rate_limit_attempts,
+                static_cast<std::size_t>(
+                    config_.server.auth_rate_limit_window.count()),
+                config_.server.auth_rate_limit_sources});
+    report_resource_metrics_ =
+        std::make_unique<presentation::ReportResourceMetrics>(
+            presentation::ReportResourceCapacity{
+                application::kMaximumAggregateReportRows,
+                application::kMaximumDetailedReportRows,
+                application::kMaximumReportInputBytes,
+                application::kMaximumCsvOutputBytes,
+                application::kMaximumBreakdownBuckets,
+                application::kMaximumBreakdownExpansions,
+                domain::kMaximumHistoricalRatePointBatch,
+                application::kMaximumReportMonths,
+                application::kMaximumCsvRangeDays});
     auth_controller_ = std::make_unique<presentation::AuthController>(
         *auth_service_);
     account_controller_ = std::make_unique<presentation::AccountController>(
@@ -513,12 +543,14 @@ application::VoidResult ProductionCompositionRoot::initialize() {
     transfer_controller_ =
         std::make_unique<presentation::TransferController>(*finance_service_);
     report_controller_ =
-        std::make_unique<presentation::ReportController>(*finance_service_);
+        std::make_unique<presentation::ReportController>(
+            *finance_service_, *report_resource_metrics_);
     maintenance_controller_ =
         std::make_unique<presentation::MaintenanceController>(*finance_service_);
     operations_controller_ =
         std::make_unique<presentation::OperationsController>(
-            *operations_service_);
+            *operations_service_, *http_admission_metrics_,
+            *report_resource_metrics_);
     jwt_filter_ = std::make_unique<presentation::JwtFilter>(
         *token_service_, *sessions_, *users_, *clock_);
     api_application_ = std::make_unique<presentation::ApiApplication>(
@@ -558,7 +590,8 @@ application::VoidResult ProductionCompositionRoot::initialize() {
             config_.server.auth_rate_limit_attempts,
             static_cast<std::uint32_t>(
                 config_.server.auth_rate_limit_window.count()),
-            config_.server.auth_rate_limit_sources});
+            config_.server.auth_rate_limit_sources},
+        *http_admission_metrics_);
     http_adapter_->configure();
     return application::ok();
 }

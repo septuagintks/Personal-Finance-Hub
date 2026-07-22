@@ -801,6 +801,49 @@ TEST_F(RepositoryIntegrationTest, ExchangeRateRepository_WhenQueryingHistorical_
     EXPECT_EQ(latest->rate().to_string(), "7.3");
 }
 
+TEST_F(RepositoryIntegrationTest, ExchangeRateRepository_MatchesPostgresTimestampAndIdOrdering) {
+    auto write = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            for (const auto& value : {
+                     rate("USD", "CNY", "7.3", 3000),
+                     rate("USD", "CNY", "7.1", 1000),
+                     rate("USD", "CNY", "7.2", 2000),
+                     rate("USD", "CNY", "7.25", 2000)}) {
+                auto appended = rate_repo_->append(tx, value);
+                if (!appended) return std::unexpected(appended.error());
+            }
+            return {};
+        });
+    ASSERT_TRUE(write.has_value()) << write.error().message;
+
+    auto all = rate_repo_->find_all_for_pair(ccy("USD"), ccy("CNY"));
+    ASSERT_TRUE(all.has_value()) << all.error().message;
+    ASSERT_EQ(all->size(), 4U);
+    EXPECT_EQ((*all)[0].rate().to_string(), "7.1");
+    EXPECT_EQ((*all)[1].rate().to_string(), "7.2");
+    EXPECT_EQ((*all)[2].rate().to_string(), "7.25");
+    EXPECT_EQ((*all)[3].rate().to_string(), "7.3");
+
+    auto historical = rate_repo_->find_historical(
+        ccy("USD"), ccy("CNY"), time_at(2000));
+    ASSERT_TRUE(historical.has_value()) << historical.error().message;
+    EXPECT_EQ(historical->rate().to_string(), "7.25");
+
+    auto history = rate_repo_->find_history_for_pair(
+        ccy("USD"), ccy("CNY"), time_at(2000), time_at(3000));
+    ASSERT_TRUE(history.has_value()) << history.error().message;
+    ASSERT_EQ(history->size(), 2U);
+    EXPECT_EQ((*history)[0].rate().to_string(), "7.25");
+    EXPECT_EQ((*history)[1].rate().to_string(), "7.3");
+
+    auto points = rate_repo_->find_historical_at_points({
+        {ccy("USD"), ccy("CNY"), time_at(2000)}});
+    ASSERT_TRUE(points.has_value()) << points.error().message;
+    ASSERT_EQ(points->size(), 1U);
+    ASSERT_TRUE((*points)[0].has_value());
+    EXPECT_EQ((*points)[0]->rate().to_string(), "7.25");
+}
+
 TEST_F(RepositoryIntegrationTest, ExchangeRateRepository_HistoryIncludesAnchorAndRange) {
     auto write = uow_->execute_in_transaction(
         [&](ITransactionContext& tx) -> RepositoryVoidResult {
@@ -823,6 +866,43 @@ TEST_F(RepositoryIntegrationTest, ExchangeRateRepository_HistoryIncludesAnchorAn
     EXPECT_EQ((*history)[0].rate().to_string(), "7.2");
     EXPECT_EQ((*history)[1].rate().to_string(), "7.3");
     EXPECT_EQ((*history)[2].rate().to_string(), "7.4");
+}
+
+TEST_F(RepositoryIntegrationTest, ExchangeRateRepository_PointBatchPreservesOrderAndMissingValues) {
+    auto write = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            for (const auto& value : {
+                     rate("USD", "CNY", "7.1", 1000),
+                     rate("USD", "CNY", "7.2", 2000)}) {
+                auto appended = rate_repo_->append(tx, value);
+                if (!appended) return std::unexpected(appended.error());
+            }
+            return {};
+        });
+    ASSERT_TRUE(write.has_value()) << write.error().message;
+
+    const std::vector<HistoricalRatePoint> points{
+        {ccy("USD"), ccy("CNY"), time_at(500)},
+        {ccy("USD"), ccy("CNY"), time_at(2500)},
+        {ccy("USD"), ccy("CNY"), time_at(1500)},
+        {ccy("USD"), ccy("CNY"), time_at(2500)}};
+    auto result = rate_repo_->find_historical_at_points(points);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    ASSERT_EQ(result->size(), points.size());
+    EXPECT_FALSE((*result)[0].has_value());
+    ASSERT_TRUE((*result)[1].has_value());
+    ASSERT_TRUE((*result)[2].has_value());
+    ASSERT_TRUE((*result)[3].has_value());
+    EXPECT_EQ((*result)[1]->rate().to_string(), "7.2");
+    EXPECT_EQ((*result)[2]->rate().to_string(), "7.1");
+    EXPECT_EQ((*result)[3]->rate().to_string(), "7.2");
+
+    std::vector<HistoricalRatePoint> too_many(
+        kMaximumHistoricalRatePointBatch + 1U,
+        HistoricalRatePoint{ccy("USD"), ccy("CNY"), time_at(2500)});
+    auto rejected = rate_repo_->find_historical_at_points(too_many);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().status, RepositoryStatus::ResourceLimitExceeded);
 }
 
 // ---- Preference fallback ----

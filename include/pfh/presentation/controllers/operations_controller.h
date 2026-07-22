@@ -3,6 +3,8 @@
 #pragma once
 
 #include "pfh/application/services/operations_application_service.h"
+#include "pfh/presentation/http/http_admission_metrics.h"
+#include "pfh/presentation/http/report_resource_metrics.h"
 #include "pfh/presentation/http/http_types.h"
 
 #include <string_view>
@@ -12,8 +14,12 @@ namespace pfh::presentation {
 class OperationsController {
 public:
     explicit OperationsController(
-        application::OperationsApplicationService& service)
-        : service_(service) {}
+        application::OperationsApplicationService& service,
+        const HttpAdmissionMetrics& admission_metrics,
+        const ReportResourceMetrics& report_resource_metrics)
+        : service_(service),
+          admission_metrics_(admission_metrics),
+          report_resource_metrics_(report_resource_metrics) {}
 
     [[nodiscard]] HttpResponse liveness(const HttpRequest& request) const;
     [[nodiscard]] HttpResponse readiness(const HttpRequest& request);
@@ -26,6 +32,8 @@ public:
 
 private:
     application::OperationsApplicationService& service_;
+    const HttpAdmissionMetrics& admission_metrics_;
+    const ReportResourceMetrics& report_resource_metrics_;
 };
 
 } // namespace pfh::presentation

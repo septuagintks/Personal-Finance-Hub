@@ -47,6 +47,11 @@ public:
         std::chrono::system_clock::time_point from,
         std::chrono::system_clock::time_point to) override;
 
+    [[nodiscard]] domain::RepositoryResult<
+        std::vector<std::optional<domain::ExchangeRate>>>
+    find_historical_at_points(
+        const std::vector<domain::HistoricalRatePoint>& points) override;
+
 private:
     drogon::orm::DbClientPtr db_;
 };

@@ -18,6 +18,8 @@ inline constexpr std::size_t kMaximumCsvOutputBytes = 32U * 1024U * 1024U;
 inline constexpr std::size_t kMaximumBreakdownBuckets = 10'000;
 inline constexpr std::size_t kMaximumBreakdownExpansions = 100'000;
 inline constexpr std::size_t kMaximumReportMetadataItems = 10'000;
+inline constexpr std::size_t kMaximumReportMonths = 120;
+inline constexpr std::size_t kMaximumCsvRangeDays = 366;
 
 /// Locale tags use a deliberately small ASCII subset at the public boundary:
 /// non-empty alphanumeric segments separated by single hyphens. This accepts

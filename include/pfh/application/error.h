@@ -138,6 +138,11 @@ struct Error {
         return Error(ErrorCode::DomainRuleViolation, std::move(message), std::move(details));
     }
 
+    /// @brief Create a deterministic resource-budget rejection.
+    [[nodiscard]] static Error resource_limit(std::string message) {
+        return Error(ErrorCode::ResourceLimitExceeded, std::move(message));
+    }
+
     /// @brief Create an infrastructure failure error
     [[nodiscard]] static Error infrastructure_failure(std::string message, std::string details = "") {
         return Error(ErrorCode::InfrastructureFailure, std::move(message), std::move(details));

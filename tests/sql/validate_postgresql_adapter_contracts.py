@@ -100,6 +100,12 @@ def main() -> int:
     operations = read(
         "src/infrastructure/persistence/postgres_operations_repository.cpp"
     )
+    exchange_rates = read(
+        "src/infrastructure/persistence/exchange_rate_repository_impl.cpp"
+    )
+    cash_flow_projection = read(
+        "src/infrastructure/persistence/postgres_cash_flow_projection.cpp"
+    )
     rate_provider = read(
         "src/infrastructure/external/exchange_rate_providers.cpp"
     )
@@ -618,6 +624,56 @@ def main() -> int:
         and "OperationalBoundedCount" in operations
         and "handled_at >= $1" in operations,
         "Operations counters must use bounded samples and a receipt window",
+        failures,
+    )
+    require(
+        "find_historical_at_points" in exchange_rates
+        and "jsonb_array_elements" in exchange_rates
+        and "WITH ORDINALITY" in exchange_rates
+        and "LEFT JOIN LATERAL" in exchange_rates
+        and "fetched_at <=" in exchange_rates
+        and "ORDER BY fetched_at DESC, id DESC" in exchange_rates
+        and "LIMIT 1" in exchange_rates,
+        "Historical report rates must use one ordered bounded as-of batch",
+        failures,
+    )
+    require(
+        "WITH source AS MATERIALIZED" in cash_flow_projection
+        and "timezone($4, entry.transaction_time)" in cash_flow_projection
+        and "date_trunc(" in cash_flow_projection
+        and "to_char(" in cash_flow_projection
+        and "entry.transaction_time >= $2" in cash_flow_projection
+        and "entry.transaction_time < $3" in cash_flow_projection
+        and "query.to - query.from > kMaximumProjectionSpan"
+        in cash_flow_projection
+        and "pg_column_size(entry)::bigint" in cash_flow_projection
+        and "LIMIT $6" in cash_flow_projection
+        and "source_meta AS MATERIALIZED" in cash_flow_projection
+        and "source_meta.source_row_count <= $7" in cash_flow_projection
+        and "source_meta.source_byte_count <= $8" in cash_flow_projection
+        and "source.type <> 'transfer'::transaction_type"
+        in cash_flow_projection
+        and "kMaximumAggregateReportRows + 1U" in cash_flow_projection
+        and "kMaximumReportInputBytes" in cash_flow_projection
+        and cash_flow_projection.count("LEFT JOIN LATERAL") == 4
+        and cash_flow_projection.count("ORDER BY fetched_at DESC, id DESC") == 4
+        and "(usd_target_rate_value /" in cash_flow_projection
+        and "usd_source_rate_value) *" in cash_flow_projection
+        and cash_flow_projection.count("10000000000::numeric") >= 4
+        and "mod(abs(trunc(cross_scaled_value)), 2) = 0"
+        in cash_flow_projection
+        and "rounded_cross_rate > 0" in cash_flow_projection
+        and "9999999999.9999999999::numeric" in cash_flow_projection
+        and "abs(amount) * cross_rate" in cash_flow_projection
+        and "raw_value * 10000000000::numeric" in cash_flow_projection
+        and "mod(abs(trunc(raw_scaled)), 2) = 0" in cash_flow_projection
+        and "GROUP BY period" in cash_flow_projection
+        and "LEFT JOIN monthly ON TRUE" in cash_flow_projection
+        and "pg::getOptionalString(row, 0)" in cash_flow_projection
+        and "if (rows.size() == 1U)" in cash_flow_projection,
+        "Cash-flow trend must use one admission-bounded, timezone-aware SQL "
+        "projection with Decimal-equivalent rounding and map transfer-only "
+        "ranges to an empty result",
         failures,
     )
     require(

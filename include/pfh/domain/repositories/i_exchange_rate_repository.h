@@ -12,9 +12,19 @@
 #include "pfh/domain/repositories/repository_error.h"
 #include "pfh/domain/typed_id.h"
 #include <chrono>
+#include <cstddef>
+#include <optional>
 #include <vector>
 
 namespace pfh::domain {
+
+inline constexpr std::size_t kMaximumHistoricalRatePointBatch = 1024;
+
+struct HistoricalRatePoint {
+    Currency base;
+    Currency target;
+    std::chrono::system_clock::time_point at{};
+};
 
 class IExchangeRateRepository {
 public:
@@ -47,6 +57,16 @@ public:
         const Currency& target,
         std::chrono::system_clock::time_point from,
         std::chrono::system_clock::time_point to) = 0;
+
+    /// @brief Resolve exact as-of rates in request order with one bounded read.
+    ///
+    /// A missing rate is represented by nullopt. Infrastructure failures abort
+    /// the whole batch. Report paths use this instead of materializing every
+    /// hourly snapshot in a long time window.
+    [[nodiscard]] virtual RepositoryResult<
+        std::vector<std::optional<ExchangeRate>>>
+    find_historical_at_points(
+        const std::vector<HistoricalRatePoint>& points) = 0;
 };
 
 } // namespace pfh::domain

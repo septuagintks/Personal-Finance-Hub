@@ -3,7 +3,9 @@
 #include "pfh/presentation/http/http_response_mapper.h"
 #include "pfh/presentation/http/auth_rate_limiter.h"
 #include "pfh/presentation/http/concurrency.h"
+#include "pfh/presentation/http/http_admission_metrics.h"
 #include "pfh/presentation/http/json_request_parser.h"
+#include "pfh/presentation/http/report_resource_metrics.h"
 #include "pfh/presentation/http/time_codec.h"
 
 #include <gtest/gtest.h>
@@ -128,6 +130,39 @@ TEST(HttpBoundaryTest, ResourceRejectionsUseStableHttpContracts) {
     auto limited_body = nlohmann::json::parse(limited.body);
     EXPECT_EQ(limited_body["error_code"], "RATE_LIMITED");
     EXPECT_TRUE(limited_body["retryable"].get<bool>());
+}
+
+TEST(HttpBoundaryTest, AdmissionMetricsExposeFixedCapacityAndMonotonicRejections) {
+    HttpAdmissionMetrics metrics(HttpAdmissionCapacity{
+        1024U, 8U, 32U, 4096U, 2U, 4U, 512U, 20U, 60U, 100U});
+    metrics.record_oversized_body_rejection();
+    metrics.record_auth_rate_limit_rejection();
+    metrics.record_request_queue_rejection();
+    metrics.record_request_queue_rejection();
+    metrics.record_auth_queue_rejection();
+
+    const auto snapshot = metrics.snapshot();
+    EXPECT_EQ(snapshot.capacity.request_queue_byte_capacity, 4096U);
+    EXPECT_EQ(snapshot.capacity.auth_worker_threads, 2U);
+    EXPECT_EQ(snapshot.oversized_body_rejections, 1U);
+    EXPECT_EQ(snapshot.auth_rate_limit_rejections, 1U);
+    EXPECT_EQ(snapshot.request_queue_rejections, 2U);
+    EXPECT_EQ(snapshot.auth_queue_rejections, 1U);
+}
+
+TEST(HttpBoundaryTest, ReportResourceMetricsExposeCapacityAndRejections) {
+    ReportResourceMetrics metrics(ReportResourceCapacity{
+        100'000U, 10'000U, 64U * 1024U * 1024U,
+        32U * 1024U * 1024U, 10'000U, 100'000U, 1024U, 120U, 366U});
+    metrics.record_report_query_rejection();
+    metrics.record_report_query_rejection();
+    metrics.record_csv_export_rejection();
+
+    const auto snapshot = metrics.snapshot();
+    EXPECT_EQ(snapshot.capacity.historical_rate_points, 1024U);
+    EXPECT_EQ(snapshot.capacity.csv_range_days, 366U);
+    EXPECT_EQ(snapshot.report_query_rejections, 2U);
+    EXPECT_EQ(snapshot.csv_export_rejections, 1U);
 }
 
 TEST(AuthRateLimiterTest, BoundsSourcesAndResetsExpiredWindows) {

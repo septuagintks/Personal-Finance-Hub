@@ -244,6 +244,28 @@ def main() -> int:
     operations_summary = schemas.get("OperationsSummary", {})
     if "windowStart" not in operations_summary.get("required", []):
         failures.append("OperationsSummary must publish its bounded count window")
+    for resource_summary in ("httpAdmission", "reportResources"):
+        if resource_summary not in operations_summary.get("required", []):
+            failures.append(
+                f"OperationsSummary must publish {resource_summary} capacity and rejections"
+            )
+    report_capacity = schemas.get("ReportResourceCapacity", {})
+    expected_report_capacity = {
+        "aggregateRows",
+        "detailedRows",
+        "inputBytes",
+        "csvOutputBytes",
+        "breakdownBuckets",
+        "breakdownExpansions",
+        "historicalRatePoints",
+        "cashFlowMonths",
+        "csvRangeDays",
+    }
+    if (
+        set(report_capacity.get("required", [])) != expected_report_capacity
+        or set(report_capacity.get("properties", {})) != expected_report_capacity
+    ):
+        failures.append("ReportResourceCapacity must publish every enforced report budget")
     decimal = schemas.get("DecimalString", {})
     positive = schemas.get("PositiveDecimalString", {})
     if decimal.get("type") != "string" or positive.get("type") != "string":

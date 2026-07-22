@@ -63,6 +63,8 @@ describe('transfer store', () => {
     await delay(10);
     store.clear();
     await expect(pending).resolves.toBe(false);
+    // The aborted Axios promise settles before MSW finishes its delayed response.
+    await delay(70);
     expect(store.selected).toBeNull();
     expect(store.detailState).toBe('idle');
   });

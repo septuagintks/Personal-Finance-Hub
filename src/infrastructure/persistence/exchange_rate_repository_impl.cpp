@@ -9,6 +9,7 @@
 #include "pfh/infrastructure/persistence/postgres_repository_support.h"
 #include "pfh/infrastructure/persistence/postgres_result_set.h"
 
+#include <nlohmann/json.hpp>
 #include <utility>
 #include <vector>
 
@@ -17,12 +18,13 @@ namespace pfh::infrastructure {
 namespace {
 
 domain::RepositoryResult<domain::ExchangeRate> map_exchange_rate_row(
-    const drogon::orm::Row& row) {
+    const drogon::orm::Row& row,
+    std::size_t offset = 0) {
     try {
-        const auto base = domain::Currency::create(pg::getString(row, 0));
-        const auto target = domain::Currency::create(pg::getString(row, 1));
+        const auto base = domain::Currency::create(pg::getString(row, offset));
+        const auto target = domain::Currency::create(pg::getString(row, offset + 1U));
         const auto rate = domain::Decimal::parse_numeric_20_10(
-            pg::getNumericAsString(row, 2));
+            pg::getNumericAsString(row, offset + 2U));
         if (!base.has_value() || !target.has_value() || !rate.has_value()) {
             return std::unexpected(domain::RepositoryError::database(
                 "Stored exchange-rate row is invalid"));
@@ -31,8 +33,8 @@ domain::RepositoryResult<domain::ExchangeRate> map_exchange_rate_row(
             *base,
             *target,
             *rate,
-            pg::getTimestamp(row, 4),
-            pg::getString(row, 3));
+            pg::getTimestamp(row, offset + 4U),
+            pg::getString(row, offset + 3U));
         if (!mapped.has_value()) {
             return std::unexpected(domain::RepositoryError::database(
                 "Stored exchange-rate row violates domain invariants"));
@@ -243,6 +245,85 @@ ExchangeRateRepositoryImpl::find_history_for_pair(
     } catch (const std::exception& error) {
         return std::unexpected(postgres::unexpected_error(
             "load exchange-rate history", error));
+    }
+}
+
+domain::RepositoryResult<
+    std::vector<std::optional<domain::ExchangeRate>>>
+ExchangeRateRepositoryImpl::find_historical_at_points(
+    const std::vector<domain::HistoricalRatePoint>& points) {
+    if (!db_) {
+        return std::unexpected(domain::RepositoryError::database(
+            "Exchange-rate database client is unavailable"));
+    }
+    if (points.size() > domain::kMaximumHistoricalRatePointBatch) {
+        return std::unexpected(domain::RepositoryError::resource_limit(
+            "Historical rate point batch exceeds 1024 items"));
+    }
+    if (points.empty()) {
+        return std::vector<std::optional<domain::ExchangeRate>>{};
+    }
+
+    try {
+        nlohmann::json requested = nlohmann::json::array();
+        for (const auto& point : points) {
+            requested.push_back({
+                {"base", point.base.code()},
+                {"target", point.target.code()},
+                {"at", pg::toDbTimestamp(point.at)}});
+        }
+        constexpr const char* kSql = R"SQL(
+            SELECT requested.position,
+                   rate.base_currency_code,
+                   rate.target_currency_code,
+                   rate.rate::text,
+                   rate.source,
+                   rate.fetched_at
+            FROM jsonb_array_elements($1::jsonb) WITH ORDINALITY
+                 AS requested(payload, position)
+            LEFT JOIN LATERAL (
+                SELECT base_currency_code, target_currency_code, rate,
+                       source, fetched_at
+                FROM exchange_rates
+                WHERE base_currency_code = requested.payload->>'base'
+                  AND target_currency_code = requested.payload->>'target'
+                  AND fetched_at <=
+                      (requested.payload->>'at')::timestamptz
+                ORDER BY fetched_at DESC, id DESC
+                LIMIT 1
+            ) AS rate ON TRUE
+            ORDER BY requested.position
+        )SQL";
+        const auto rows = db_->execSqlSync(kSql, requested.dump());
+        if (rows.size() != points.size()) {
+            return std::unexpected(domain::RepositoryError::database(
+                "Historical rate point batch returned an invalid row count"));
+        }
+        std::vector<std::optional<domain::ExchangeRate>> result;
+        result.reserve(rows.size());
+        for (std::size_t index = 0; index < rows.size(); ++index) {
+            if (pg::getBigInt(rows[index], 0) !=
+                static_cast<std::int64_t>(index + 1U)) {
+                return std::unexpected(domain::RepositoryError::database(
+                    "Historical rate point batch order is invalid"));
+            }
+            if (rows[index][1].isNull()) {
+                result.emplace_back(std::nullopt);
+                continue;
+            }
+            auto mapped = map_exchange_rate_row(rows[index], 1U);
+            if (!mapped) {
+                return std::unexpected(mapped.error());
+            }
+            result.emplace_back(std::move(*mapped));
+        }
+        return result;
+    } catch (const drogon::orm::DrogonDbException& error) {
+        return std::unexpected(postgres::database_error(
+            "load point-in-time exchange rates", error));
+    } catch (const std::exception& error) {
+        return std::unexpected(postgres::unexpected_error(
+            "load point-in-time exchange rates", error));
     }
 }
 

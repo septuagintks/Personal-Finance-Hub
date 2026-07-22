@@ -4563,6 +4563,111 @@
           }
         }
       },
+      "HttpAdmissionCapacity": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "maximumRequestBodyBytes",
+          "requestWorkerThreads",
+          "requestQueueTasks",
+          "requestQueueBytes",
+          "authWorkerThreads",
+          "authQueueTasks",
+          "authQueueBytes",
+          "authRateLimitAttempts",
+          "authRateLimitWindowSeconds",
+          "authRateLimitSources"
+        ],
+        "properties": {
+          "maximumRequestBodyBytes": {"type": "integer", "minimum": 1},
+          "requestWorkerThreads": {"type": "integer", "minimum": 1},
+          "requestQueueTasks": {"type": "integer", "minimum": 1},
+          "requestQueueBytes": {"type": "integer", "minimum": 1},
+          "authWorkerThreads": {"type": "integer", "minimum": 1},
+          "authQueueTasks": {"type": "integer", "minimum": 1},
+          "authQueueBytes": {"type": "integer", "minimum": 1},
+          "authRateLimitAttempts": {"type": "integer", "minimum": 1},
+          "authRateLimitWindowSeconds": {"type": "integer", "minimum": 1},
+          "authRateLimitSources": {"type": "integer", "minimum": 1}
+        }
+      },
+      "HttpAdmissionRejections": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "oversizedBody",
+          "authRateLimit",
+          "requestQueue",
+          "authQueue"
+        ],
+        "properties": {
+          "oversizedBody": {"type": "integer", "minimum": 0},
+          "authRateLimit": {"type": "integer", "minimum": 0},
+          "requestQueue": {"type": "integer", "minimum": 0},
+          "authQueue": {"type": "integer", "minimum": 0}
+        }
+      },
+      "HttpAdmissionSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["capacity", "rejections"],
+        "properties": {
+          "capacity": {
+            "$ref": "#/components/schemas/HttpAdmissionCapacity"
+          },
+          "rejections": {
+            "$ref": "#/components/schemas/HttpAdmissionRejections"
+          }
+        }
+      },
+      "ReportResourceCapacity": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "aggregateRows",
+          "detailedRows",
+          "inputBytes",
+          "csvOutputBytes",
+          "breakdownBuckets",
+          "breakdownExpansions",
+          "historicalRatePoints",
+          "cashFlowMonths",
+          "csvRangeDays"
+        ],
+        "properties": {
+          "aggregateRows": {"type": "integer", "minimum": 1},
+          "detailedRows": {"type": "integer", "minimum": 1},
+          "inputBytes": {"type": "integer", "minimum": 1},
+          "csvOutputBytes": {"type": "integer", "minimum": 1},
+          "breakdownBuckets": {"type": "integer", "minimum": 1},
+          "breakdownExpansions": {"type": "integer", "minimum": 1},
+          "historicalRatePoints": {"type": "integer", "minimum": 1},
+          "cashFlowMonths": {"type": "integer", "minimum": 1},
+          "csvRangeDays": {"type": "integer", "minimum": 1}
+        }
+      },
+      "ReportResourceRejections": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["reportQuery", "csvExport"],
+        "properties": {
+          "reportQuery": {"type": "integer", "minimum": 0},
+          "csvExport": {"type": "integer", "minimum": 0}
+        }
+      },
+      "ReportResourceSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["capacity", "rejections"],
+        "properties": {
+          "capacity": {
+            "$ref": "#/components/schemas/ReportResourceCapacity"
+          },
+          "rejections": {
+            "$ref": "#/components/schemas/ReportResourceRejections"
+          }
+        }
+      },
       "OperationsSummary": {
         "type": "object",
         "additionalProperties": false,
@@ -4572,6 +4677,8 @@
           "outbox",
           "handlerReceipts",
           "expiredIdempotency",
+          "httpAdmission",
+          "reportResources",
           "leases",
           "jobs"
         ],
@@ -4592,6 +4699,12 @@
           },
           "expiredIdempotency": {
             "$ref": "#/components/schemas/BoundedCount"
+          },
+          "httpAdmission": {
+            "$ref": "#/components/schemas/HttpAdmissionSummary"
+          },
+          "reportResources": {
+            "$ref": "#/components/schemas/ReportResourceSummary"
           },
           "leases": {
             "type": "array",

@@ -178,6 +178,7 @@ set(PFH_POSTGRESQL_SOURCES
     src/infrastructure/persistence/user_repository_impl.cpp
     src/infrastructure/persistence/user_preference_repository_impl.cpp
     src/infrastructure/persistence/exchange_rate_repository_impl.cpp
+    src/infrastructure/persistence/postgres_cash_flow_projection.cpp
     src/infrastructure/persistence/postgres_result_set.cpp
     src/infrastructure/persistence/rls_session.cpp
     src/infrastructure/persistence/auth_session_repository_impl.cpp
@@ -277,6 +278,7 @@ add_library(pfh_presentation STATIC ${PFH_PRESENTATION_SOURCES})
 target_include_directories(pfh_presentation PUBLIC ${PFH_INCLUDE_DIR})
 target_link_libraries(pfh_presentation PUBLIC
     pfh_application
+    spdlog::spdlog
     nlohmann_json::nlohmann_json
 )
 if(PFH_BUILD_POSTGRESQL)

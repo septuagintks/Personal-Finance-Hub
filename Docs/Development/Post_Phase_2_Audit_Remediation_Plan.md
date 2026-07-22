@@ -1,8 +1,8 @@
 # Personal Finance Hub Phase 2 后审计整改计划
 
-Version: 1.1
+Version: 1.2
 Baseline: `main@43d06fb79bd0c1faa41f4f3fffb0c15c05673fc2`
-Status: Ready for implementation
+Status: In progress (`R01`-`R09` implemented; `R10`-`R12` pending)
 Suggested Branch: `fix/post-phase2-audit-remediation`
 
 ---
@@ -285,6 +285,8 @@ OpenAPI 预计增加或修改：
 
 验收：最大合法请求的峰值 RSS 在确定预算内；超限请求稳定返回 `413`、`422` 或 `429` 类错误且服务保持可用；认证洪泛不能占满普通业务 worker；队列累计 body 不超过配置预算。
 
+实现状态（2026-07-22）：已完成报表行数、输入字节、CSV 输出与展开量上限，认证独立 worker/限流和 HTTP 任务/字节准入；现金流使用 PostgreSQL 时区自然月投影，历史汇率按业务时间点有界批取；Operations 已公开固定容量与分类拒绝计数。CSV 在现有 32 MiB 输出边界内采用有界同步响应，不提高容量。真实 PostgreSQL `EXPLAIN`、饱和压力与峰值 RSS 仍按 `R11` 在目标环境验收。
+
 ### 4.9 R09 查询放大与数据生命周期
 
 开发内容：
@@ -298,6 +300,8 @@ OpenAPI 预计增加或修改：
 7. 文件日志改为大小和文件数受限的 rotating sink，保留 stderr 默认行为。
 
 验收：转账页、Dashboard、净值和历史报表的 SQL 次数不随页面项数、账户数或月份数线性增长；清理任务不删除未发布/未完成记录且可幂等重跑；磁盘占用有确定上限。
+
+实现状态（2026-07-22）：已完成历史余额与跨账户余额批量投影、转账组批取、分类树索引化、用户资源配额、后台记录保留任务及文件日志轮转；生产现金流投影与点时汇率批取补齐长期报表路径。真实数据规模下的查询计划、索引命中与固定 SQL 次数仍按 `R11` 复核。
 
 ### 4.10 R10 前端长期会话资源治理
 

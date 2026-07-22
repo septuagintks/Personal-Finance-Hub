@@ -88,6 +88,114 @@ require_identity(const HttpRequest& request) {
         {"jobs", std::move(jobs)}};
 }
 
+[[nodiscard]] Json http_admission_json(
+    const HttpAdmissionSnapshot& snapshot) {
+    const auto& capacity = snapshot.capacity;
+    return Json{
+        {"capacity", Json{
+            {"maximumRequestBodyBytes", capacity.maximum_request_body_bytes},
+            {"requestWorkerThreads", capacity.request_worker_threads},
+            {"requestQueueTasks", capacity.request_queue_capacity},
+            {"requestQueueBytes", capacity.request_queue_byte_capacity},
+            {"authWorkerThreads", capacity.auth_worker_threads},
+            {"authQueueTasks", capacity.auth_queue_capacity},
+            {"authQueueBytes", capacity.auth_queue_byte_capacity},
+            {"authRateLimitAttempts", capacity.auth_rate_limit_attempts},
+            {"authRateLimitWindowSeconds",
+             capacity.auth_rate_limit_window_seconds},
+            {"authRateLimitSources", capacity.auth_rate_limit_sources}}},
+        {"rejections", Json{
+            {"oversizedBody", snapshot.oversized_body_rejections},
+            {"authRateLimit", snapshot.auth_rate_limit_rejections},
+            {"requestQueue", snapshot.request_queue_rejections},
+            {"authQueue", snapshot.auth_queue_rejections}}}};
+}
+
+void append_http_admission_metrics(
+    std::ostringstream& output,
+    const HttpAdmissionSnapshot& snapshot) {
+    const auto& capacity = snapshot.capacity;
+    output << "# TYPE pfh_http_admission_capacity gauge\n"
+           << "pfh_http_admission_capacity{resource=\"maximum_request_body_bytes\"} "
+           << capacity.maximum_request_body_bytes << '\n'
+           << "pfh_http_admission_capacity{resource=\"request_worker_threads\"} "
+           << capacity.request_worker_threads << '\n'
+           << "pfh_http_admission_capacity{resource=\"request_queue_tasks\"} "
+           << capacity.request_queue_capacity << '\n'
+           << "pfh_http_admission_capacity{resource=\"request_queue_bytes\"} "
+           << capacity.request_queue_byte_capacity << '\n'
+           << "pfh_http_admission_capacity{resource=\"auth_worker_threads\"} "
+           << capacity.auth_worker_threads << '\n'
+           << "pfh_http_admission_capacity{resource=\"auth_queue_tasks\"} "
+           << capacity.auth_queue_capacity << '\n'
+           << "pfh_http_admission_capacity{resource=\"auth_queue_bytes\"} "
+           << capacity.auth_queue_byte_capacity << '\n'
+           << "pfh_http_admission_capacity{resource=\"auth_rate_limit_attempts\"} "
+           << capacity.auth_rate_limit_attempts << '\n'
+           << "pfh_http_admission_capacity{resource=\"auth_rate_limit_window_seconds\"} "
+           << capacity.auth_rate_limit_window_seconds << '\n'
+           << "pfh_http_admission_capacity{resource=\"auth_rate_limit_sources\"} "
+           << capacity.auth_rate_limit_sources << '\n'
+           << "# TYPE pfh_http_admission_rejections_total counter\n"
+           << "pfh_http_admission_rejections_total{reason=\"oversized_body\"} "
+           << snapshot.oversized_body_rejections << '\n'
+           << "pfh_http_admission_rejections_total{reason=\"auth_rate_limit\"} "
+           << snapshot.auth_rate_limit_rejections << '\n'
+           << "pfh_http_admission_rejections_total{reason=\"request_queue\"} "
+           << snapshot.request_queue_rejections << '\n'
+           << "pfh_http_admission_rejections_total{reason=\"auth_queue\"} "
+           << snapshot.auth_queue_rejections << '\n';
+}
+
+[[nodiscard]] Json report_resources_json(
+    const ReportResourceSnapshot& snapshot) {
+    const auto& capacity = snapshot.capacity;
+    return Json{
+        {"capacity", Json{
+            {"aggregateRows", capacity.aggregate_rows},
+            {"detailedRows", capacity.detailed_rows},
+            {"inputBytes", capacity.input_bytes},
+            {"csvOutputBytes", capacity.csv_output_bytes},
+            {"breakdownBuckets", capacity.breakdown_buckets},
+            {"breakdownExpansions", capacity.breakdown_expansions},
+            {"historicalRatePoints", capacity.historical_rate_points},
+            {"cashFlowMonths", capacity.cash_flow_months},
+            {"csvRangeDays", capacity.csv_range_days}}},
+        {"rejections", Json{
+            {"reportQuery", snapshot.report_query_rejections},
+            {"csvExport", snapshot.csv_export_rejections}}}};
+}
+
+void append_report_resource_metrics(
+    std::ostringstream& output,
+    const ReportResourceSnapshot& snapshot) {
+    const auto& capacity = snapshot.capacity;
+    output << "# TYPE pfh_report_resource_capacity gauge\n"
+           << "pfh_report_resource_capacity{resource=\"aggregate_rows\"} "
+           << capacity.aggregate_rows << '\n'
+           << "pfh_report_resource_capacity{resource=\"detailed_rows\"} "
+           << capacity.detailed_rows << '\n'
+           << "pfh_report_resource_capacity{resource=\"input_bytes\"} "
+           << capacity.input_bytes << '\n'
+           << "pfh_report_resource_capacity{resource=\"csv_output_bytes\"} "
+           << capacity.csv_output_bytes << '\n'
+           << "pfh_report_resource_capacity{resource=\"breakdown_buckets\"} "
+           << capacity.breakdown_buckets << '\n'
+           << "pfh_report_resource_capacity{resource=\"breakdown_expansions\"} "
+           << capacity.breakdown_expansions << '\n'
+           << "pfh_report_resource_capacity{resource=\"historical_rate_points\"} "
+           << capacity.historical_rate_points << '\n'
+           << "pfh_report_resource_capacity{resource=\"cash_flow_months\"} "
+           << capacity.cash_flow_months << '\n'
+           << "pfh_report_resource_capacity{resource=\"csv_range_days\"} "
+           << capacity.csv_range_days << '\n'
+           << "# TYPE pfh_report_resource_rejections_total counter\n"
+           << "pfh_report_resource_rejections_total{surface=\"report_query\"} "
+           << snapshot.report_query_rejections << '\n'
+           << "pfh_report_resource_rejections_total{surface=\"csv_export\"} "
+           << snapshot.csv_export_rejections << '\n';
+}
+
 [[nodiscard]] application::Result<std::size_t> page_size(
     const HttpRequest& request) {
     const auto found = request.query.find("pageSize");
@@ -136,9 +244,15 @@ HttpResponse OperationsController::summary(const HttpRequest& request) {
         return HttpResponseMapper::error(identity.error(), request.trace_id);
     }
     auto result = service_.overview(*identity);
-    return result
-        ? HttpResponseMapper::json(200, overview_json(*result))
-        : HttpResponseMapper::error(result.error(), request.trace_id);
+    if (!result) {
+        return HttpResponseMapper::error(result.error(), request.trace_id);
+    }
+    auto body = overview_json(*result);
+    body["httpAdmission"] = http_admission_json(
+        admission_metrics_.snapshot());
+    body["reportResources"] = report_resources_json(
+        report_resource_metrics_.snapshot());
+    return HttpResponseMapper::json(200, body);
 }
 
 HttpResponse OperationsController::metrics(const HttpRequest& request) {
@@ -176,6 +290,8 @@ HttpResponse OperationsController::metrics(const HttpRequest& request) {
         output << "pfh_background_job_running{job=\"" << job.name << "\"} "
                << (job.running ? 1 : 0) << '\n';
     }
+    append_http_admission_metrics(output, admission_metrics_.snapshot());
+    append_report_resource_metrics(output, report_resource_metrics_.snapshot());
     HttpResponse response;
     response.status = 200;
     response.headers.emplace(

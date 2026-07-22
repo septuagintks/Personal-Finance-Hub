@@ -21,9 +21,6 @@ namespace pfh::application {
 
 namespace {
 
-constexpr int kMaximumReportMonths = 120;
-constexpr auto kMaximumExportRange = std::chrono::days(366);
-
 struct BreakdownTotals {
     std::string key;
     std::string label;
@@ -147,12 +144,13 @@ Result<ReportAnalysisDto> ReportQueryService::analysis(
     if (!start.ok() || !end.ok() || start > end) {
         return err(Error::validation("Report month range is invalid"));
     }
-    const auto start_serial = query.start_year * 12 +
-        static_cast<int>(query.start_month) - 1;
-    const auto end_serial = query.end_year * 12 +
-        static_cast<int>(query.end_month) - 1;
-    if (end_serial - start_serial >= kMaximumReportMonths) {
-        return err(Error::validation(
+    const auto start_serial = static_cast<std::int64_t>(query.start_year) * 12 +
+        static_cast<std::int64_t>(query.start_month) - 1;
+    const auto end_serial = static_cast<std::int64_t>(query.end_year) * 12 +
+        static_cast<std::int64_t>(query.end_month) - 1;
+    if (end_serial - start_serial >=
+        static_cast<std::int64_t>(kMaximumReportMonths)) {
+        return err(Error::resource_limit(
             "Report month range cannot exceed 120 months"));
     }
 
@@ -233,6 +231,13 @@ Result<ReportAnalysisDto> ReportQueryService::analysis(
     for (std::size_t index = 0; index < windows.size(); ++index) {
         const auto valued_at = valuation_points[index];
         rates.reset_evidence();
+        if (auto prepared = rates.prepare_balances(
+                (*balance_projections)[index].balances,
+                preference->base_currency(),
+                valued_at);
+            !prepared) {
+            return err(prepared.error());
+        }
         std::vector<AccountValue> values;
         values.reserve((*balance_projections)[index].balances.size());
         for (const auto& balance : (*balance_projections)[index].balances) {
@@ -273,7 +278,7 @@ Result<ReportAnalysisDto> ReportQueryService::analysis(
         bool inserted = false;
         if (position == totals.end()) {
             if (totals.size() >= kMaximumBreakdownBuckets) {
-                return err(Error::validation(
+                return err(Error::resource_limit(
                     "Report breakdown bucket limit exceeded"));
             }
             position = totals.emplace(
@@ -297,6 +302,10 @@ Result<ReportAnalysisDto> ReportQueryService::analysis(
         row_query,
         kMaximumDetailedReportRows,
         kMaximumReportInputBytes,
+        [&](const std::vector<domain::TransactionReadModel>& rows) {
+            return rates.prepare_transactions(
+                rows, preference->base_currency());
+        },
         [&](const domain::TransactionReadModel& row) -> VoidResult {
         const auto& transaction = row.transaction;
         if (transaction.type() == domain::TransactionType::Transfer) return ok();
@@ -330,7 +339,7 @@ Result<ReportAnalysisDto> ReportQueryService::analysis(
             if (breakdown_expansions > kMaximumBreakdownExpansions ||
                 expansion_count >
                     kMaximumBreakdownExpansions - breakdown_expansions) {
-                return err(Error::validation(
+                return err(Error::resource_limit(
                     "Report tag expansion limit exceeded"));
             }
             breakdown_expansions += expansion_count;
@@ -436,8 +445,9 @@ Result<CsvExportDto> ReportQueryService::export_transactions_csv(
     if (*query.occurred_from > *query.occurred_to) {
         return err(Error::validation("from cannot be later than to"));
     }
-    if (*query.occurred_to - *query.occurred_from > kMaximumExportRange) {
-        return err(Error::validation(
+    if (*query.occurred_to - *query.occurred_from >
+        std::chrono::days(kMaximumCsvRangeDays)) {
+        return err(Error::resource_limit(
             "Report transaction range cannot exceed 366 days"));
     }
     auto preference = preferences_.find_by_user(query.user_id);
@@ -483,12 +493,12 @@ Result<CsvExportDto> ReportQueryService::export_transactions_csv(
             group};
         for (std::size_t index = 0; index < cells.size(); ++index) {
             if (!append_csv_cell(csv, cells[index], index != 0)) {
-                return err(Error::validation(
+                return err(Error::resource_limit(
                     "CSV output byte limit exceeded; narrow the requested range"));
             }
         }
         if (csv.size() > kMaximumCsvOutputBytes - 2U) {
-            return err(Error::validation(
+            return err(Error::resource_limit(
                 "CSV output byte limit exceeded; narrow the requested range"));
         }
         csv += "\r\n";

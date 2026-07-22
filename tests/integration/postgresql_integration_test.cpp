@@ -1,6 +1,7 @@
 #include "pfh/application/security/auth_models.h"
 #include "pfh/application/events/outbox_publisher.h"
 #include "pfh/application/events/supplemental_audit_handler.h"
+#include "pfh/domain/currency_conversion_service.h"
 #include "pfh/domain/events/simple_domain_event.h"
 #include "pfh/domain/transfer_domain_service.h"
 #include "pfh/infrastructure/persistence/account_repository_impl.h"
@@ -9,6 +10,7 @@
 #include "pfh/infrastructure/persistence/category_repository_impl.h"
 #include "pfh/infrastructure/persistence/drogon_unit_of_work.h"
 #include "pfh/infrastructure/persistence/exchange_rate_repository_impl.h"
+#include "pfh/infrastructure/persistence/postgres_cash_flow_projection.h"
 #include "pfh/infrastructure/persistence/postgres_job_lease_repository.h"
 #include "pfh/infrastructure/persistence/postgres_outbox_repository.h"
 #include "pfh/infrastructure/persistence/postgres_session_cleanup_repository.h"
@@ -795,6 +797,20 @@ TEST_F(PostgreSQLIntegrationTest, NumericBoundariesAndHistoricalRatesRoundTripEx
     ASSERT_EQ(history->size(), 2U);
     EXPECT_EQ((*history)[0].rate().to_string(), "0.0000000001");
     EXPECT_EQ((*history)[1].rate().to_string(), "7.123456789");
+    auto point_rates = rates.find_historical_at_points({
+        HistoricalRatePoint{ccy("USD"), ccy("CNY"), time_at(500)},
+        HistoricalRatePoint{ccy("USD"), ccy("CNY"), time_at(2500)},
+        HistoricalRatePoint{ccy("USD"), ccy("CNY"), time_at(1500)},
+        HistoricalRatePoint{ccy("USD"), ccy("CNY"), time_at(2500)}});
+    ASSERT_TRUE(point_rates.has_value()) << point_rates.error().message;
+    ASSERT_EQ(point_rates->size(), 4U);
+    EXPECT_FALSE((*point_rates)[0].has_value());
+    ASSERT_TRUE((*point_rates)[1].has_value());
+    ASSERT_TRUE((*point_rates)[2].has_value());
+    ASSERT_TRUE((*point_rates)[3].has_value());
+    EXPECT_EQ((*point_rates)[1]->rate().to_string(), "7.123456789");
+    EXPECT_EQ((*point_rates)[2]->rate().to_string(), "0.0000000001");
+    EXPECT_EQ((*point_rates)[3]->rate().to_string(), "7.123456789");
 
     bool append_only_guard = false;
     try {
@@ -803,6 +819,160 @@ TEST_F(PostgreSQLIntegrationTest, NumericBoundariesAndHistoricalRatesRoundTripEx
         append_only_guard = true;
     }
     EXPECT_TRUE(append_only_guard);
+}
+
+TEST_F(PostgreSQLIntegrationTest,
+       CashFlowProjectionMatchesDecimalTriangulationRounding) {
+    const auto ids = seed_user("cash-flow-projection");
+    AccountRepositoryImpl accounts(database->request, ids.user);
+    TransactionRepositoryImpl transactions(database->request, ids.user);
+    ExchangeRateRepositoryImpl rates(database->request);
+    DrogonUnitOfWork uow(database->request, ids.user);
+
+    AccountId eur_account;
+    auto seeded = uow.execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            auto account = accounts.save(
+                tx,
+                Account(
+                    AccountId{}, ids.user, "EUR Wallet",
+                    AccountType::DigitalWallet, "wallet", ccy("EUR")));
+            if (!account) return std::unexpected(account.error());
+            eur_account = *account;
+
+            auto saved = transactions.save_single(
+                tx,
+                Transaction(
+                    TransactionId{}, ids.user, eur_account,
+                    money("1.44272510", "EUR"), TransactionType::Income,
+                    sample_time()));
+            if (!saved) return std::unexpected(saved.error());
+
+            for (const auto& value : {
+                     rate("USD", "EUR", "4.566009042"),
+                     rate("USD", "CNY", "4.801424266")}) {
+                auto appended = rates.append(tx, value);
+                if (!appended) return std::unexpected(appended.error());
+            }
+            return {};
+        });
+    ASSERT_TRUE(seeded.has_value()) << seeded.error().message;
+
+    auto cross = CurrencyConversionService::cross_rate(
+        rate("USD", "EUR", "4.566009042"),
+        rate("USD", "CNY", "4.801424266"));
+    ASSERT_TRUE(cross.has_value()) << cross.error().message;
+    auto expected = CurrencyConversionService::convert(
+        money("1.44272510", "EUR"), *cross);
+    ASSERT_TRUE(expected.has_value()) << expected.error().message;
+    EXPECT_EQ(cross->rate().to_string(), "1.0515582036");
+    EXPECT_EQ(expected->amount().to_string(), "1.5171094144");
+
+    PostgresCashFlowProjection projection(database->request, ids.user);
+    auto result = projection.aggregate_monthly(
+        pfh::application::CashFlowProjectionQuery{
+            ids.user,
+            sample_time() - 1h,
+            sample_time() + 1h,
+            ccy("CNY"),
+            "Asia/Shanghai"});
+
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    ASSERT_EQ(result->size(), 1U);
+    EXPECT_EQ(result->front().period, "2024-06");
+    EXPECT_EQ(result->front().income, expected->amount());
+    EXPECT_EQ(result->front().expense.to_string(), "0");
+    EXPECT_FALSE(result->front().missing_exchange_rate);
+
+    auto empty = projection.aggregate_monthly(
+        pfh::application::CashFlowProjectionQuery{
+            ids.user,
+            sample_time() - 3h,
+            sample_time() - 2h,
+            ccy("CNY"),
+            "Asia/Shanghai"});
+    ASSERT_TRUE(empty.has_value()) << empty.error().message;
+    EXPECT_TRUE(empty->empty());
+
+    const auto invalid_at = sample_time() + 2h;
+    auto usd_to_eur = ExchangeRate::create(
+        ccy("USD"), ccy("EUR"), dec("9999999999.9999999999"),
+        invalid_at, "fixture");
+    auto usd_to_cny = ExchangeRate::create(
+        ccy("USD"), ccy("CNY"), dec("0.0000000001"),
+        invalid_at, "fixture");
+    ASSERT_TRUE(usd_to_eur.has_value()) << usd_to_eur.error().message;
+    ASSERT_TRUE(usd_to_cny.has_value()) << usd_to_cny.error().message;
+    auto invalid_cross = CurrencyConversionService::cross_rate(
+        *usd_to_eur, *usd_to_cny);
+    ASSERT_FALSE(invalid_cross.has_value());
+    EXPECT_EQ(invalid_cross.error().code, DomainErrorCode::InvalidExchangeRate);
+
+    DrogonUnitOfWork invalid_uow(database->request, ids.user);
+    auto invalid_seed = invalid_uow.execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            auto saved = transactions.save_single(
+                tx,
+                Transaction(
+                    TransactionId{}, ids.user, eur_account,
+                    money("1", "EUR"), TransactionType::Income,
+                    invalid_at));
+            if (!saved) return std::unexpected(saved.error());
+            for (const auto& value : {*usd_to_eur, *usd_to_cny}) {
+                auto appended = rates.append(tx, value);
+                if (!appended) return std::unexpected(appended.error());
+            }
+            return {};
+        });
+    ASSERT_TRUE(invalid_seed.has_value()) << invalid_seed.error().message;
+
+    auto invalid_projection = projection.aggregate_monthly(
+        pfh::application::CashFlowProjectionQuery{
+            ids.user,
+            invalid_at - 1h,
+            invalid_at + 1h,
+            ccy("CNY"),
+            "Asia/Shanghai"});
+    ASSERT_TRUE(invalid_projection.has_value())
+        << invalid_projection.error().message;
+    ASSERT_EQ(invalid_projection->size(), 1U);
+    EXPECT_TRUE(invalid_projection->front().missing_exchange_rate);
+}
+
+TEST_F(PostgreSQLIntegrationTest,
+       CashFlowProjectionTreatsTransferOnlyRangeAsEmpty) {
+    const auto ids = seed_user("cash-flow-transfer-only");
+    TransactionRepositoryImpl transactions(database->request, ids.user);
+    DrogonUnitOfWork uow(database->request, ids.user);
+
+    auto write = uow.execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            auto aggregate = TransferDomainService::build_from_both_amounts(
+                money("25", "USD"), money("25", "USD"), ids.cash,
+                ids.savings, ids.user, sample_time(), "internal transfer",
+                TransferGroupId{});
+            if (!aggregate) {
+                return std::unexpected(RepositoryError::validation(
+                    aggregate.error().message));
+            }
+            auto saved = transactions.save_transfer(tx, *aggregate);
+            return saved
+                ? RepositoryVoidResult{}
+                : RepositoryVoidResult(std::unexpected(saved.error()));
+        });
+    ASSERT_TRUE(write.has_value()) << write.error().message;
+
+    PostgresCashFlowProjection projection(database->request, ids.user);
+    auto result = projection.aggregate_monthly(
+        pfh::application::CashFlowProjectionQuery{
+            ids.user,
+            sample_time() - 1h,
+            sample_time() + 1h,
+            ccy("USD"),
+            "Asia/Shanghai"});
+
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_TRUE(result->empty());
 }
 
 TEST_F(PostgreSQLIntegrationTest, ConcurrentOutboxClaimsAreDisjoint) {

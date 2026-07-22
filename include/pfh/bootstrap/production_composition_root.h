@@ -67,6 +67,8 @@ class CategoryController;
 class CurrencyController;
 class TimeZoneController;
 class DrogonHttpAdapter;
+class HttpAdmissionMetrics;
+class ReportResourceMetrics;
 class JwtFilter;
 class PreferenceController;
 class TagController;
@@ -167,6 +169,10 @@ private:
         operations_repository_;
     std::unique_ptr<application::OperationsApplicationService>
         operations_service_;
+    std::unique_ptr<presentation::HttpAdmissionMetrics>
+        http_admission_metrics_;
+    std::unique_ptr<presentation::ReportResourceMetrics>
+        report_resource_metrics_;
     std::unique_ptr<presentation::AuthController> auth_controller_;
     std::unique_ptr<presentation::AccountController> account_controller_;
     std::unique_ptr<presentation::CategoryController> category_controller_;
