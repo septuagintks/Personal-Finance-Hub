@@ -506,6 +506,8 @@ application::VoidResult ProductionCompositionRoot::initialize() {
         *finance_service_);
     currency_controller_ = std::make_unique<presentation::CurrencyController>(
         *finance_service_);
+    timezone_controller_ = std::make_unique<presentation::TimeZoneController>(
+        *finance_service_);
     transaction_controller_ =
         std::make_unique<presentation::TransactionController>(*finance_service_);
     transfer_controller_ =
@@ -527,6 +529,7 @@ application::VoidResult ProductionCompositionRoot::initialize() {
         *tag_controller_,
         *preference_controller_,
         *currency_controller_,
+        *timezone_controller_,
         *transaction_controller_,
         *transfer_controller_,
         *report_controller_,

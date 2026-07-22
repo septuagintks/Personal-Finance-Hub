@@ -1,5 +1,6 @@
 import axios, { type AxiosError } from 'axios';
 import type { components } from '../generated/api-types';
+import { translate, type MessageKey } from '../i18n';
 
 export type ErrorResponse = components['schemas']['ErrorResponse'];
 
@@ -12,27 +13,84 @@ export interface ApiErrorShape {
   retryable: boolean;
 }
 
+const errorMessages: Record<string, MessageKey> = {
+  VALIDATION_ERROR: 'error.validation',
+  INVALID_INPUT: 'error.invalidInput',
+  MISSING_REQUIRED_FIELD: 'error.missingField',
+  INVALID_FORMAT: 'error.invalidFormat',
+  UNAUTHORIZED: 'error.unauthorized',
+  INVALID_TOKEN: 'error.unauthorized',
+  EXPIRED_TOKEN: 'error.unauthorized',
+  FORBIDDEN: 'error.forbidden',
+  INSUFFICIENT_PERMISSIONS: 'error.forbidden',
+  NOT_FOUND: 'error.notFound',
+  USER_NOT_FOUND: 'error.notFound',
+  ACCOUNT_NOT_FOUND: 'error.notFound',
+  TRANSACTION_NOT_FOUND: 'error.notFound',
+  CATEGORY_NOT_FOUND: 'error.notFound',
+  CONFLICT: 'error.conflict',
+  DUPLICATE_RESOURCE: 'error.conflict',
+  VERSION_MISMATCH: 'error.versionConflict',
+  OPTIMISTIC_LOCK_FAILURE: 'error.versionConflict',
+  DOMAIN_RULE_VIOLATION: 'error.domainRule',
+  INVALID_CURRENCY_OPERATION: 'error.invalidCurrency',
+  INSUFFICIENT_BALANCE: 'error.insufficientBalance',
+  TRANSFER_AMOUNT_MISMATCH: 'error.transferMismatch',
+  INVALID_EXCHANGE_RATE: 'error.invalidRate',
+  CROSS_CURRENCY_WITHOUT_RATE: 'error.rateRequired',
+  CATEGORY_BOARD_MISMATCH: 'error.categoryBoard',
+  ARCHIVED_ACCOUNT_OPERATION: 'error.archivedAccount',
+  RESOURCE_LIMIT_EXCEEDED: 'error.resourceLimit',
+  EXTERNAL_SERVICE_ERROR: 'error.externalService',
+  INFRASTRUCTURE_FAILURE: 'error.internal',
+  DATABASE_ERROR: 'error.internal',
+  DATABASE_CONNECTION_FAILED: 'error.internal',
+  TRANSACTION_FAILED: 'error.internal',
+  CONFIGURATION_ERROR: 'error.internal',
+  INTERNAL_ERROR: 'error.internal',
+  UNEXPECTED_ERROR: 'error.internal',
+  SERVICE_UNAVAILABLE: 'error.serviceUnavailable',
+  PAYLOAD_TOO_LARGE: 'error.payloadTooLarge',
+  RATE_LIMITED: 'error.rateLimited',
+  NETWORK_ERROR: 'error.network',
+};
+
+const fieldErrorMessages: Record<string, MessageKey> = {
+  invalid_version_etag: 'error.invalidVersionEtag',
+};
+
+function localizedMessage(errorCode: string, fallback?: string): string {
+  const key = errorMessages[errorCode];
+  return key ? translate(key) : fallback || translate('common.serviceUnavailable');
+}
+
 function projectAxiosError(error: AxiosError, payload?: Partial<ErrorResponse>): ApiErrorShape {
   const status = error.response?.status ?? 0;
+  const errorCode =
+    typeof payload?.error_code === 'string'
+      ? payload.error_code
+      : status === 0
+        ? 'NETWORK_ERROR'
+        : 'UNKNOWN_ERROR';
   const fields = Array.isArray(payload?.field_errors) ? payload.field_errors : [];
   const fieldErrors = Object.fromEntries(
     fields
       .filter((field) => typeof field?.field === 'string' && typeof field.message === 'string')
-      .map((field) => [field.field, field.message]),
+      .map((field) => [
+        field.field,
+        typeof field.code === 'string' && fieldErrorMessages[field.code]
+          ? translate(fieldErrorMessages[field.code])
+          : field.message,
+      ]),
   );
   const responseTraceId = error.response?.headers['x-trace-id'];
   return {
     status,
-    errorCode:
-      typeof payload?.error_code === 'string'
-        ? payload.error_code
-        : status === 0
-          ? 'NETWORK_ERROR'
-          : 'UNKNOWN_ERROR',
-    message:
-      typeof payload?.message === 'string'
-        ? payload.message
-        : 'The service is unavailable right now.',
+    errorCode,
+    message: localizedMessage(
+      errorCode,
+      typeof payload?.message === 'string' ? payload.message : undefined,
+    ),
     traceId:
       typeof payload?.trace_id === 'string'
         ? payload.trace_id
@@ -68,7 +126,7 @@ export function toApiError(error: unknown): ApiErrorShape {
   return {
     status: 0,
     errorCode: 'UNKNOWN_ERROR',
-    message: 'Something unexpected happened.',
+    message: translate('common.unexpectedError'),
     traceId: '',
     fieldErrors: {},
     retryable: false,

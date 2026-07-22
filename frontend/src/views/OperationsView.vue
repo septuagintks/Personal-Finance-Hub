@@ -13,6 +13,7 @@ import {
 import { formatInstant } from '../services/presentation';
 import { createIntentKeyTracker } from '../services/idempotency';
 import { useUserContextStore } from '../stores/user-context';
+import { translate } from '../i18n';
 
 const userContext = useUserContextStore();
 const summary = ref<OperationsSummary | null>(null);
@@ -43,11 +44,23 @@ function boundedCount(value: { count: number; saturated: boolean } | undefined):
 const statusMetrics = computed(() => {
   const outbox = summary.value?.outbox;
   return [
-    { label: 'Pending', value: boundedCount(outbox?.pending), tone: 'neutral' },
-    { label: 'Retrying', value: boundedCount(outbox?.failed), tone: 'warning' },
-    { label: 'Dead letter', value: boundedCount(outbox?.deadLetter), tone: 'danger' },
     {
-      label: 'Expired idempotency',
+      label: translate('operations.pending'),
+      value: boundedCount(outbox?.pending),
+      tone: 'neutral',
+    },
+    {
+      label: translate('operations.retrying'),
+      value: boundedCount(outbox?.failed),
+      tone: 'warning',
+    },
+    {
+      label: translate('operations.deadLetter'),
+      value: boundedCount(outbox?.deadLetter),
+      tone: 'danger',
+    },
+    {
+      label: translate('operations.expiredIdempotency'),
       value: boundedCount(summary.value?.expiredIdempotency),
       tone: 'teal',
     },
@@ -70,7 +83,7 @@ function showError(reason: unknown, fallback: string): void {
 }
 
 function displayTime(value: string | null): string {
-  return value ? formatInstant(value, presentationLocale.value) : 'Never';
+  return value ? formatInstant(value, presentationLocale.value) : translate('operations.never');
 }
 
 async function load(): Promise<void> {
@@ -94,7 +107,7 @@ async function load(): Promise<void> {
     nextCursor.value = page.nextCursor;
   } catch (reason) {
     if (generation === requestGeneration && !controller.signal.aborted) {
-      showError(reason, 'Operational status could not be loaded.');
+      showError(reason, translate('operations.loadFailed'));
     }
   } finally {
     if (requestController === controller) {
@@ -120,7 +133,7 @@ async function loadMore(): Promise<void> {
     nextCursor.value = page.nextCursor;
   } catch (reason) {
     if (generation === requestGeneration && !controller.signal.aborted) {
-      showError(reason, 'More dead letters could not be loaded.');
+      showError(reason, translate('operations.loadMoreFailed'));
     }
   } finally {
     if (loadMoreController === controller) {
@@ -145,7 +158,7 @@ async function retry(item: DeadLetterItem): Promise<void> {
       await load();
     }
   } catch (reason) {
-    if (!controller.signal.aborted) showError(reason, 'The dead letter could not be retried.');
+    if (!controller.signal.aborted) showError(reason, translate('operations.retryFailed'));
   } finally {
     if (retryController === controller) {
       retryController = null;
@@ -168,24 +181,30 @@ onBeforeUnmount(() => {
   <AppShell>
     <div class="content-header operations-header">
       <div>
-        <p class="eyebrow">Runtime / Operator</p>
-        <h1>Operations</h1>
+        <p class="eyebrow">{{ translate('operations.eyebrow') }}</p>
+        <h1>{{ translate('operations.title') }}</h1>
       </div>
       <button class="button button--quiet" type="button" :disabled="loading" @click="load">
-        <RefreshCw :size="16" :class="{ spin: loading }" /> Refresh
+        <RefreshCw :size="16" :class="{ spin: loading }" /> {{ translate('common.refresh') }}
       </button>
     </div>
 
     <div v-if="error" class="page-alert" role="alert">
       <CircleAlert :size="19" />
       <div>
-        <strong>Operations request failed</strong>
+        <strong>{{ translate('operations.requestFailed') }}</strong>
         <p>{{ error }}</p>
-        <small v-if="errorTraceId">Trace {{ errorTraceId }}</small>
+        <small v-if="errorTraceId">{{
+          translate('maintenance.traceValue', { traceId: errorTraceId })
+        }}</small>
       </div>
     </div>
 
-    <section class="operations-metrics" aria-label="Operational summary" :aria-busy="loading">
+    <section
+      class="operations-metrics"
+      :aria-label="translate('operations.summary')"
+      :aria-busy="loading"
+    >
       <article
         v-for="metric in statusMetrics"
         :key="metric.label"
@@ -200,25 +219,34 @@ onBeforeUnmount(() => {
       <section class="operations-panel" aria-labelledby="jobs-heading">
         <div class="section-heading">
           <div>
-            <p class="section-kicker">Scheduler</p>
-            <h2 id="jobs-heading">Jobs</h2>
+            <p class="section-kicker">{{ translate('operations.scheduler') }}</p>
+            <h2 id="jobs-heading">{{ translate('operations.jobs') }}</h2>
           </div>
           <Activity :size="21" aria-hidden="true" />
         </div>
         <div class="operations-table operations-table--jobs" tabindex="0">
           <div class="operations-table__head" aria-hidden="true">
-            <span>Job</span><span>State</span><span>Last result</span><span>Duration</span>
+            <span>{{ translate('operations.job') }}</span
+            ><span>{{ translate('operations.state') }}</span
+            ><span>{{ translate('operations.lastResult') }}</span
+            ><span>{{ translate('operations.duration') }}</span>
           </div>
           <div v-for="job in summary?.jobs ?? []" :key="job.name" class="operations-table__row">
             <strong>{{ job.name }}</strong>
             <span :class="['runtime-state', { 'runtime-state--running': job.running }]">{{
-              job.running ? 'Running' : job.schedulerStarted ? 'Ready' : 'Stopped'
+              translate(
+                job.running
+                  ? 'operations.running'
+                  : job.schedulerStarted
+                    ? 'operations.ready'
+                    : 'operations.stopped',
+              )
             }}</span>
             <span>{{ job.lastResult }} · {{ displayTime(job.lastFinishedAt) }}</span>
-            <code>{{ job.lastDurationMs }} ms</code>
+            <code>{{ translate('operations.durationMs', { value: job.lastDurationMs }) }}</code>
           </div>
           <div v-if="summary && !summary.jobs.length" class="empty-state">
-            <p>No scheduler jobs</p>
+            <p>{{ translate('operations.noJobs') }}</p>
           </div>
         </div>
       </section>
@@ -226,8 +254,8 @@ onBeforeUnmount(() => {
       <section class="operations-panel" aria-labelledby="leases-heading">
         <div class="section-heading">
           <div>
-            <p class="section-kicker">Coordination</p>
-            <h2 id="leases-heading">Leases</h2>
+            <p class="section-kicker">{{ translate('operations.coordination') }}</p>
+            <h2 id="leases-heading">{{ translate('operations.leases') }}</h2>
           </div>
           <ServerCog :size="21" aria-hidden="true" />
         </div>
@@ -235,29 +263,29 @@ onBeforeUnmount(() => {
           <div v-for="lease in summary?.leases ?? []" :key="lease.jobName" class="lease-list__row">
             <strong>{{ lease.jobName }}</strong>
             <span :class="['status-badge', { 'status-badge--archived': !lease.active }]">{{
-              lease.active ? 'Active' : 'Expired'
+              translate(lease.active ? 'operations.active' : 'operations.expired')
             }}</span>
             <time :datetime="lease.leaseUntil">{{ displayTime(lease.leaseUntil) }}</time>
           </div>
           <div v-if="summary && !summary.leases.length" class="empty-state">
-            <p>No active leases</p>
+            <p>{{ translate('operations.noLeases') }}</p>
           </div>
         </div>
         <dl v-if="summary" class="operations-facts">
           <div>
-            <dt>Handler receipts</dt>
+            <dt>{{ translate('operations.handlerReceipts') }}</dt>
             <dd>{{ boundedCount(summary.handlerReceipts) }}</dd>
           </div>
           <div>
-            <dt>Latest receipt</dt>
+            <dt>{{ translate('operations.latestReceipt') }}</dt>
             <dd>{{ displayTime(summary.handlerReceipts.latestAt) }}</dd>
           </div>
           <div>
-            <dt>Window start</dt>
+            <dt>{{ translate('operations.windowStart') }}</dt>
             <dd>{{ displayTime(summary.windowStart) }}</dd>
           </div>
           <div>
-            <dt>Generated</dt>
+            <dt>{{ translate('operations.generated') }}</dt>
             <dd>{{ displayTime(summary.generatedAt) }}</dd>
           </div>
         </dl>
@@ -267,14 +295,17 @@ onBeforeUnmount(() => {
     <section class="dead-letter-section" aria-labelledby="dead-letter-heading">
       <div class="section-heading">
         <div>
-          <p class="section-kicker">Outbox</p>
-          <h2 id="dead-letter-heading">Dead letters</h2>
+          <p class="section-kicker">{{ translate('operations.outbox') }}</p>
+          <h2 id="dead-letter-heading">{{ translate('operations.deadLetters') }}</h2>
         </div>
       </div>
       <div class="dead-letter-list" :aria-busy="loading">
         <div class="dead-letter-list__head" aria-hidden="true">
-          <span>Event</span><span>Aggregate</span><span>Attempts</span><span>Last failure</span
-          ><span>Action</span>
+          <span>{{ translate('operations.event') }}</span
+          ><span>{{ translate('operations.aggregate') }}</span
+          ><span>{{ translate('operations.attempts') }}</span
+          ><span>{{ translate('operations.lastFailure') }}</span
+          ><span>{{ translate('maintenance.action') }}</span>
         </div>
         <div v-for="item in deadLetters" :key="item.id" class="dead-letter-list__row">
           <div>
@@ -282,13 +313,15 @@ onBeforeUnmount(() => {
             ><code>{{ item.id }}</code>
           </div>
           <span
-            >{{ item.aggregateType ?? 'Unscoped'
-            }}<small>{{ item.aggregateId ?? 'No aggregate ID' }}</small></span
+            >{{ item.aggregateType ?? translate('operations.unscoped')
+            }}<small>{{ item.aggregateId ?? translate('operations.noAggregateId') }}</small></span
           >
           <code>{{ item.retryCount }} / {{ item.maxRetryCount }}</code>
           <span
             >{{ displayTime(item.lastFailedAt)
-            }}<small>{{ item.lastFailedHandler ?? 'Unknown handler' }}</small></span
+            }}<small>{{
+              item.lastFailedHandler ?? translate('operations.unknownHandler')
+            }}</small></span
           >
           <button
             class="button button--quiet button--small"
@@ -296,12 +329,13 @@ onBeforeUnmount(() => {
             :disabled="Boolean(retryingId)"
             @click="retry(item)"
           >
-            <RotateCcw :size="15" /> {{ retryingId === item.id ? 'Scheduling' : 'Retry' }}
+            <RotateCcw :size="15" />
+            {{ translate(retryingId === item.id ? 'operations.scheduling' : 'common.retry') }}
           </button>
         </div>
         <div v-if="!loading && !deadLetters.length" class="empty-state">
-          <p>No dead letters</p>
-          <span>The outbox has no terminal failures.</span>
+          <p>{{ translate('operations.noDeadLetters') }}</p>
+          <span>{{ translate('operations.noDeadLettersDetail') }}</span>
         </div>
       </div>
       <div v-if="nextCursor" class="ledger-load-more">
@@ -311,7 +345,7 @@ onBeforeUnmount(() => {
           :disabled="loadingMore"
           @click="loadMore"
         >
-          Load more
+          {{ translate('ledger.loadMore') }}
         </button>
       </div>
     </section>

@@ -23,6 +23,7 @@ EXPECTED = {
     "/api/v1/web/auth/refresh": {"post"},
     "/api/v1/web/auth/logout": {"post"},
     "/api/v1/currencies": {"get"},
+    "/api/v1/timezones": {"get"},
     "/api/v1/accounts": {"get", "post"},
     "/api/v1/accounts/{accountId}/balance": {"get"},
     "/api/v1/accounts/{accountId}/archive": {"post"},

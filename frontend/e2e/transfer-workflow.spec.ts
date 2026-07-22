@@ -35,6 +35,8 @@ const preference = {
   theme: 'system',
   defaultHomePage: 'dashboard',
   defaultReportPeriod: 'current_month',
+  customReportStartMonth: null,
+  customReportEndMonth: null,
 };
 
 const accounts = [

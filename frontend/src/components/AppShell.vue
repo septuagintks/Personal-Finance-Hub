@@ -16,28 +16,26 @@ import {
 } from '@lucide/vue';
 import BrandMark from './BrandMark.vue';
 import { useSessionStore } from '../stores/session';
-import { useUserContextStore } from '../stores/user-context';
-import { translate, type MessageKey } from '../i18n/messages';
+import { translate, type MessageKey } from '../i18n';
 
 const route = useRoute();
 const router = useRouter();
 const session = useSessionStore();
-const userContext = useUserContextStore();
 const menuOpen = ref(false);
 
 const navigation = computed(() =>
   [
-    { key: 'overview', to: '/dashboard', icon: LayoutDashboard },
-    { key: 'accounts', to: '/accounts', icon: WalletCards },
-    { key: 'transactions', to: '/transactions', icon: ReceiptText },
-    { key: 'transfers', to: '/transfers', icon: ArrowRightLeft },
-    { key: 'reports', to: '/reports', icon: ChartNoAxesCombined },
-    { key: 'settings', to: '/settings', icon: Settings2 },
-    { key: 'maintenance', to: '/maintenance', icon: Wrench },
-    ...(session.isOperator ? [{ key: 'operations', to: '/operations', icon: Activity }] : []),
+    { key: 'nav.overview', to: '/dashboard', icon: LayoutDashboard },
+    { key: 'nav.accounts', to: '/accounts', icon: WalletCards },
+    { key: 'nav.transactions', to: '/transactions', icon: ReceiptText },
+    { key: 'nav.transfers', to: '/transfers', icon: ArrowRightLeft },
+    { key: 'nav.reports', to: '/reports', icon: ChartNoAxesCombined },
+    { key: 'nav.settings', to: '/settings', icon: Settings2 },
+    { key: 'nav.maintenance', to: '/maintenance', icon: Wrench },
+    ...(session.isOperator ? [{ key: 'nav.operations', to: '/operations', icon: Activity }] : []),
   ].map((item) => ({
     ...item,
-    label: translate(userContext.preference?.locale, item.key as MessageKey),
+    label: translate(item.key as MessageKey),
   })),
 );
 
@@ -49,9 +47,9 @@ async function logout(): Promise<void> {
 
 <template>
   <div class="app-frame">
-    <aside class="app-sidebar" aria-label="Primary navigation">
+    <aside class="app-sidebar" :aria-label="translate('nav.primary')">
       <div class="app-sidebar__brand"><BrandMark /></div>
-      <p class="nav-label">{{ translate(userContext.preference?.locale, 'workspace') }}</p>
+      <p class="nav-label">{{ translate('nav.workspace') }}</p>
       <nav class="app-nav">
         <RouterLink
           v-for="item in navigation"
@@ -68,11 +66,10 @@ async function logout(): Promise<void> {
       </nav>
       <div class="sidebar-foot">
         <div class="privacy-note">
-          <span class="privacy-dot"></span
-          ><span>{{ translate(userContext.preference?.locale, 'privateWorkspace') }}</span>
+          <span class="privacy-dot"></span><span>{{ translate('nav.privateWorkspace') }}</span>
         </div>
         <button class="button button--quiet button--full" type="button" @click="logout">
-          <LogOut :size="16" /> {{ translate(userContext.preference?.locale, 'signOut') }}
+          <LogOut :size="16" /> {{ translate('nav.signOut') }}
         </button>
       </div>
     </aside>
@@ -83,21 +80,21 @@ async function logout(): Promise<void> {
         <button
           class="icon-button"
           type="button"
-          aria-label="Open navigation"
-          title="Open navigation"
+          :aria-label="translate('nav.open')"
+          :title="translate('nav.open')"
           @click="menuOpen = true"
         >
           <Menu :size="20" />
         </button>
       </header>
       <div v-if="menuOpen" class="mobile-nav-backdrop" @click="menuOpen = false">
-        <aside class="mobile-nav" aria-label="Mobile navigation" @click.stop>
+        <aside class="mobile-nav" :aria-label="translate('nav.mobile')" @click.stop>
           <div class="mobile-nav__top">
             <BrandMark compact /><button
               class="icon-button"
               type="button"
-              aria-label="Close navigation"
-              title="Close navigation"
+              :aria-label="translate('nav.close')"
+              :title="translate('nav.close')"
               @click="menuOpen = false"
             >
               <X :size="20" />
@@ -119,7 +116,7 @@ async function logout(): Promise<void> {
             </RouterLink>
           </nav>
           <button class="button button--quiet button--full" type="button" @click="logout">
-            <LogOut :size="16" /> {{ translate(userContext.preference?.locale, 'signOut') }}
+            <LogOut :size="16" /> {{ translate('nav.signOut') }}
           </button>
         </aside>
       </div>

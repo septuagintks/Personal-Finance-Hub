@@ -16,6 +16,7 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -1520,6 +1521,28 @@ Result<std::vector<CurrencyMetadataDto>> ListCurrenciesUseCase::execute() const 
             metadata.is_crypto});
     }
     return result;
+}
+
+Result<std::vector<TimeZoneMetadataDto>> ListTimeZonesUseCase::execute() const {
+    try {
+        const auto& database = std::chrono::get_tzdb();
+        std::vector<TimeZoneMetadataDto> result;
+        result.reserve(database.zones.size() + database.links.size());
+        for (const auto& zone : database.zones) {
+            const auto name = std::string(zone.name());
+            result.push_back(TimeZoneMetadataDto{name, name, false});
+        }
+        for (const auto& link : database.links) {
+            const auto id = std::string(link.name());
+            const auto canonical = std::string(database.locate_zone(id)->name());
+            result.push_back(TimeZoneMetadataDto{id, canonical, true});
+        }
+        std::ranges::sort(result, {}, &TimeZoneMetadataDto::id);
+        return result;
+    } catch (const std::runtime_error&) {
+        return err(Error::infrastructure_failure(
+            "IANA timezone database is unavailable"));
+    }
 }
 
 } // namespace pfh::application

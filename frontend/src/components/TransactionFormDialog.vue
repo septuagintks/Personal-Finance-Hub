@@ -9,6 +9,8 @@ import type {
   TransactionType,
 } from '../services/transaction-api';
 import ModalDialog from './ModalDialog.vue';
+import { translate, type MessageKey } from '../i18n';
+import { instantToLocalDateTime, localDateTimeToInstant } from '../services/zoned-date-time';
 
 const props = withDefaults(
   defineProps<{
@@ -17,6 +19,7 @@ const props = withDefaults(
     accounts: Account[];
     categories: CategoryTree[];
     tags: Tag[];
+    timeZone: string;
     transaction?: Transaction | null;
     pending?: boolean;
     error?: string;
@@ -42,16 +45,17 @@ const form = reactive({
   tagIds: [] as number[],
 });
 
+const transactionTypes: Array<{
+  value: Exclude<TransactionType, 'transfer'>;
+  label: MessageKey;
+}> = [
+  { value: 'income', label: 'ledger.type.income' },
+  { value: 'expense', label: 'ledger.type.expense' },
+  { value: 'adjustment', label: 'ledger.type.adjustment' },
+];
+
 function flattenCategories(items: CategoryTree[]): CategoryTree[] {
   return items.flatMap((item) => [item, ...flattenCategories(item.children)]);
-}
-
-function toLocalInput(value: string | undefined): string {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 16);
 }
 
 const account = computed(() => props.accounts.find(({ id }) => id === form.accountId));
@@ -63,11 +67,11 @@ const categoryOptions = computed(() =>
 );
 const activeTags = computed(() => props.tags.filter(({ isDeleted }) => !isDeleted));
 const title = computed(() =>
-  props.mode === 'create' ? 'Record transaction' : 'Correct transaction',
+  translate(props.mode === 'create' ? 'transactions.record' : 'transactionForm.correctTitle'),
 );
 
 watch(
-  () => [props.open, props.mode, props.transaction, props.accounts] as const,
+  () => [props.open, props.mode, props.transaction, props.accounts, props.timeZone] as const,
   ([open]) => {
     if (!open) return;
     localError.value = '';
@@ -77,7 +81,13 @@ watch(
     form.amount = source?.amount ?? '';
     form.categoryId = source?.categoryId ?? '';
     form.description = source?.description ?? '';
-    form.occurredAt = toLocalInput(source?.occurredAt);
+    try {
+      form.occurredAt = source?.occurredAt
+        ? instantToLocalDateTime(source.occurredAt, props.timeZone)
+        : '';
+    } catch {
+      form.occurredAt = '';
+    }
     form.tagIds = source?.tags.filter(({ isDeleted }) => !isDeleted).map(({ id }) => id) ?? [];
   },
   { immediate: true },
@@ -97,18 +107,24 @@ function submit(): void {
   localError.value = '';
   const amount = form.amount.trim();
   if (!form.accountId || !amount || !account.value) {
-    localError.value = 'Complete all required fields.';
+    localError.value = translate('transactionForm.required');
     return;
   }
   if (!/^-?[0-9]+(?:\.[0-9]+)?$/.test(amount)) {
-    localError.value = 'Amount must be a plain decimal value.';
+    localError.value = translate('transactionForm.invalidDecimal');
     return;
   }
   if (form.type !== 'adjustment' && amount.startsWith('-')) {
-    localError.value = 'Income and expense amounts must be positive.';
+    localError.value = translate('transactionForm.positiveRequired');
     return;
   }
-  const occurredAt = form.occurredAt ? new Date(form.occurredAt).toISOString() : null;
+  let occurredAt: string | null;
+  try {
+    occurredAt = form.occurredAt ? localDateTimeToInstant(form.occurredAt, props.timeZone) : null;
+  } catch {
+    localError.value = translate('ledger.invalidLocalTime');
+    return;
+  }
   emit('submit', {
     accountId: form.accountId,
     type: form.type,
@@ -133,13 +149,9 @@ function submit(): void {
       <div v-if="error || localError" class="form-alert" role="alert">
         {{ error || localError }}
       </div>
-      <div class="transaction-form__types" aria-label="Transaction type">
+      <div class="transaction-form__types" :aria-label="translate('transactionForm.typeLabel')">
         <button
-          v-for="item in [
-            { value: 'income', label: 'Income' },
-            { value: 'expense', label: 'Expense' },
-            { value: 'adjustment', label: 'Adjustment' },
-          ] as const"
+          v-for="item in transactionTypes"
           :key="item.value"
           type="button"
           :class="{ 'is-active': form.type === item.value }"
@@ -147,12 +159,12 @@ function submit(): void {
           :disabled="pending"
           @click="form.type = item.value"
         >
-          {{ item.label }}
+          {{ translate(item.label) }}
         </button>
       </div>
       <div class="transaction-form__grid">
         <label class="field">
-          <span>Account</span>
+          <span>{{ translate('ledger.account') }}</span>
           <select v-model="form.accountId" :disabled="pending" name="transaction-account">
             <option v-for="item in accounts" :key="item.id" :value="item.id">
               {{ item.name }} · {{ item.currencyCode }}
@@ -163,7 +175,9 @@ function submit(): void {
           }}</small>
         </label>
         <label class="field">
-          <span>{{ form.type === 'adjustment' ? 'Signed amount' : 'Amount' }}</span>
+          <span>{{
+            translate(form.type === 'adjustment' ? 'ledger.signedAmount' : 'ledger.amount')
+          }}</span>
           <input
             v-model="form.amount"
             name="transaction-amount"
@@ -175,9 +189,9 @@ function submit(): void {
           <small v-if="fieldErrors.amount" class="field-error">{{ fieldErrors.amount }}</small>
         </label>
         <label class="field">
-          <span>Category</span>
+          <span>{{ translate('ledger.category') }}</span>
           <select v-model="form.categoryId" :disabled="pending" name="transaction-category">
-            <option value="">Uncategorized</option>
+            <option value="">{{ translate('ledger.uncategorized') }}</option>
             <option v-for="item in categoryOptions" :key="item.id" :value="item.id">
               {{ item.name }}
             </option>
@@ -187,7 +201,7 @@ function submit(): void {
           }}</small>
         </label>
         <label class="field">
-          <span>Occurred at</span>
+          <span>{{ translate('ledger.occurredAt') }}</span>
           <input
             v-model="form.occurredAt"
             name="transaction-time"
@@ -199,7 +213,7 @@ function submit(): void {
           }}</small>
         </label>
         <label class="field transaction-form__description">
-          <span>Description</span>
+          <span>{{ translate('ledger.description') }}</span>
           <textarea
             v-model="form.description"
             name="transaction-description"
@@ -209,7 +223,7 @@ function submit(): void {
           ></textarea>
         </label>
         <fieldset v-if="activeTags.length" class="transaction-tags-fieldset">
-          <legend>Tags</legend>
+          <legend>{{ translate('ledger.tags') }}</legend>
           <label v-for="tag in activeTags" :key="tag.id">
             <input
               type="checkbox"
@@ -228,13 +242,21 @@ function submit(): void {
           :disabled="pending"
           @click="emit('close')"
         >
-          Cancel
+          {{ translate('common.cancel') }}
         </button>
         <button class="button" type="submit" :disabled="pending || !accounts.length">
           <LoaderCircle v-if="pending" class="spin" :size="17" />
           <Save v-else-if="mode === 'correct'" :size="17" />
           <ReceiptText v-else :size="17" />
-          {{ pending ? 'Saving' : mode === 'create' ? 'Record' : 'Create correction' }}
+          {{
+            translate(
+              pending
+                ? 'common.saving'
+                : mode === 'create'
+                  ? 'transactionForm.record'
+                  : 'ledger.createCorrection',
+            )
+          }}
         </button>
       </footer>
     </form>

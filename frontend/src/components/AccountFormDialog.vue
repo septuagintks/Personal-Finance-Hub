@@ -4,6 +4,7 @@ import { LoaderCircle, Save, WalletCards } from '@lucide/vue';
 import type { Account, CreateAccountRequest, UpdateAccountRequest } from '../services/account-api';
 import type { CurrencyMetadata } from '../services/user-context-api';
 import ModalDialog from './ModalDialog.vue';
+import { translate, type MessageKey } from '../i18n';
 
 export type AccountFormValue = Omit<UpdateAccountRequest, 'category'> & {
   category: UpdateAccountRequest['category'] | null;
@@ -40,17 +41,19 @@ const form = reactive<AccountFormValue>({
   description: '',
 });
 
-const accountTypes: Array<{ value: CreateAccountRequest['type']; label: string }> = [
-  { value: 'cash', label: 'Cash' },
-  { value: 'savings', label: 'Savings' },
-  { value: 'credit', label: 'Credit' },
-  { value: 'digital_wallet', label: 'Digital wallet' },
-  { value: 'investment', label: 'Investment' },
-  { value: 'crypto', label: 'Crypto' },
-  { value: 'other', label: 'Other' },
+const accountTypes: Array<{ value: CreateAccountRequest['type']; label: MessageKey }> = [
+  { value: 'cash', label: 'accountForm.cash' },
+  { value: 'savings', label: 'accountForm.savings' },
+  { value: 'credit', label: 'accountForm.credit' },
+  { value: 'digital_wallet', label: 'accountForm.digitalWallet' },
+  { value: 'investment', label: 'accountForm.investment' },
+  { value: 'crypto', label: 'accountForm.crypto' },
+  { value: 'other', label: 'accountForm.other' },
 ];
 
-const title = computed(() => (props.mode === 'create' ? 'Create account' : 'Edit account'));
+const title = computed(() =>
+  translate(props.mode === 'create' ? 'accountForm.createTitle' : 'accountForm.editTitle'),
+);
 
 watch(
   () => [props.open, props.mode, props.account, props.currencies, props.defaultCurrency] as const,
@@ -73,7 +76,7 @@ watch(
 function submit(): void {
   localError.value = '';
   if (!form.name.trim() || !form.subtype.trim() || !form.currencyCode) {
-    localError.value = 'Complete all required fields.';
+    localError.value = translate('auth.register.required');
     return;
   }
   emit('submit', {
@@ -91,7 +94,7 @@ function submit(): void {
   <ModalDialog
     :open="open"
     :title="title"
-    :description="mode === 'create' ? 'Add a place where money is held or owed.' : undefined"
+    :description="mode === 'create' ? translate('accountForm.createDescription') : undefined"
     width="wide"
     @close="pending ? undefined : emit('close')"
   >
@@ -101,7 +104,7 @@ function submit(): void {
       </div>
       <div class="account-form__grid">
         <label class="field">
-          <span>Name</span>
+          <span>{{ translate('accountForm.name') }}</span>
           <input
             v-model="form.name"
             name="account-name"
@@ -112,16 +115,16 @@ function submit(): void {
           <small v-if="fieldErrors.name" class="field-error">{{ fieldErrors.name }}</small>
         </label>
         <label class="field">
-          <span>Type</span>
+          <span>{{ translate('accountForm.type') }}</span>
           <select v-model="form.type" name="account-type" :disabled="pending">
             <option v-for="item in accountTypes" :key="item.value" :value="item.value">
-              {{ item.label }}
+              {{ translate(item.label) }}
             </option>
           </select>
           <small v-if="fieldErrors.type" class="field-error">{{ fieldErrors.type }}</small>
         </label>
         <label class="field">
-          <span>Subtype</span>
+          <span>{{ translate('accountForm.subtype') }}</span>
           <input
             v-model="form.subtype"
             name="account-subtype"
@@ -132,16 +135,18 @@ function submit(): void {
           <small v-if="fieldErrors.subtype" class="field-error">{{ fieldErrors.subtype }}</small>
         </label>
         <label class="field">
-          <span>Classification</span>
+          <span>{{ translate('accountForm.classification') }}</span>
           <select v-model="form.category" name="account-category" :disabled="pending">
-            <option v-if="mode === 'create'" :value="null">Automatic</option>
-            <option value="asset">Asset</option>
-            <option value="liability">Liability</option>
+            <option v-if="mode === 'create'" :value="null">
+              {{ translate('accountForm.automatic') }}
+            </option>
+            <option value="asset">{{ translate('accountForm.asset') }}</option>
+            <option value="liability">{{ translate('accountForm.liability') }}</option>
           </select>
           <small v-if="fieldErrors.category" class="field-error">{{ fieldErrors.category }}</small>
         </label>
         <label class="field">
-          <span>Currency</span>
+          <span>{{ translate('accountForm.currency') }}</span>
           <select v-model="form.currencyCode" name="account-currency" :disabled="pending">
             <option v-for="currency in currencies" :key="currency.code" :value="currency.code">
               {{ currency.code }} · {{ currency.displayName }}
@@ -152,7 +157,7 @@ function submit(): void {
           }}</small>
         </label>
         <label class="field account-form__description">
-          <span>Description</span>
+          <span>{{ translate('accountForm.description') }}</span>
           <textarea
             v-model="form.description"
             name="account-description"
@@ -172,13 +177,17 @@ function submit(): void {
           :disabled="pending"
           @click="emit('close')"
         >
-          Cancel
+          {{ translate('common.cancel') }}
         </button>
         <button class="button" type="submit" :disabled="pending">
           <LoaderCircle v-if="pending" class="spin" :size="17" />
           <Save v-else-if="mode === 'edit'" :size="17" />
           <WalletCards v-else :size="17" />
-          {{ pending ? 'Saving' : mode === 'create' ? 'Create account' : 'Save changes' }}
+          {{
+            pending
+              ? translate('common.saving')
+              : translate(mode === 'create' ? 'accountForm.createTitle' : 'accountForm.saveChanges')
+          }}
         </button>
       </footer>
     </form>

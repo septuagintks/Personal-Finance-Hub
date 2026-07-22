@@ -65,6 +65,7 @@ class ApiApplication;
 class AuthController;
 class CategoryController;
 class CurrencyController;
+class TimeZoneController;
 class DrogonHttpAdapter;
 class JwtFilter;
 class PreferenceController;
@@ -172,6 +173,7 @@ private:
     std::unique_ptr<presentation::TagController> tag_controller_;
     std::unique_ptr<presentation::PreferenceController> preference_controller_;
     std::unique_ptr<presentation::CurrencyController> currency_controller_;
+    std::unique_ptr<presentation::TimeZoneController> timezone_controller_;
     std::unique_ptr<presentation::TransactionController> transaction_controller_;
     std::unique_ptr<presentation::TransferController> transfer_controller_;
     std::unique_ptr<presentation::ReportController> report_controller_;

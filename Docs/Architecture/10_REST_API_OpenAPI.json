@@ -199,6 +199,49 @@
         "operationId": "listCurrencies"
       }
     },
+    "/api/v1/timezones": {
+      "get": {
+        "security": [],
+        "parameters": [
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "IANA timezone catalog supported by the service",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TimeZoneMetadata"
+                  }
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Catalog unchanged"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "operationId": "listTimeZones"
+      }
+    },
     "/api/v1/accounts": {
       "get": {
         "parameters": [
@@ -2767,6 +2810,30 @@
             "type": "string"
           },
           "isCrypto": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TimeZoneMetadata": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "canonicalId",
+          "isAlias"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "canonicalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "isAlias": {
             "type": "boolean"
           }
         }

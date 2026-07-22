@@ -79,6 +79,7 @@ public:
         const UpdateUserPreferenceCommand& command);
 
     [[nodiscard]] Result<std::vector<CurrencyMetadataDto>> list_currencies() const;
+    [[nodiscard]] Result<std::vector<TimeZoneMetadataDto>> list_timezones() const;
 
     [[nodiscard]] Result<TransactionDto> create_transaction(
         const CreateTransactionCommand& command);

@@ -47,7 +47,7 @@ describe('DashboardView', () => {
       mockHttp.get(endpoint, () =>
         HttpResponse.json(
           {
-            error_code: 'VALIDATION_ERROR',
+            error_code: 'INVALID_EXCHANGE_RATE',
             message: 'A required exchange rate is unavailable.',
             trace_id: 'dashboard-refresh-failed',
             retryable: false,
@@ -62,7 +62,7 @@ describe('DashboardView', () => {
     await refresh!.trigger('click');
     await flushPromises();
 
-    expect(wrapper.text()).toContain('A required exchange rate is unavailable.');
+    expect(wrapper.text()).toContain('A valid exchange rate is not available.');
     expect(wrapper.text()).not.toContain('987,654.32');
   });
 });

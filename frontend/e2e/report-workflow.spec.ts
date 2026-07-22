@@ -10,6 +10,8 @@ const preference = {
   theme: 'system',
   defaultHomePage: 'reports',
   defaultReportPeriod: 'last_3_months',
+  customReportStartMonth: null,
+  customReportEndMonth: null,
 };
 
 async function json(route: Route, body: unknown, status = 200): Promise<void> {

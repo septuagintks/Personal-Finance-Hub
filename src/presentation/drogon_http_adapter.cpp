@@ -198,6 +198,7 @@ void DrogonHttpAdapter::configure() {
     register_static("/api/v1/web/auth/refresh", HttpMethod::Post, drogon::Post);
     register_static("/api/v1/web/auth/logout", HttpMethod::Post, drogon::Post);
     register_static("/api/v1/currencies", HttpMethod::Get, drogon::Get);
+    register_static("/api/v1/timezones", HttpMethod::Get, drogon::Get);
     register_static("/api/v1/accounts", HttpMethod::Get, drogon::Get);
     register_static("/api/v1/accounts", HttpMethod::Post, drogon::Post);
     register_dynamic(

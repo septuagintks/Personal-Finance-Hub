@@ -10,6 +10,8 @@ import type { CreateTransferRequest, TransferFilters } from '../services/transfe
 import { useAccountStore } from '../stores/accounts';
 import { useTransferStore } from '../stores/transfers';
 import { useUserContextStore } from '../stores/user-context';
+import { translate } from '../i18n';
+import { naturalDayWindow } from '../services/zoned-date-time';
 
 const route = useRoute();
 const router = useRouter();
@@ -34,9 +36,12 @@ function positiveId(value: string): number | undefined {
 
 function dateBoundary(value: string, end: boolean): string | undefined {
   if (!value) return undefined;
-  const date = new Date(`${value}T00:00:00`);
-  if (end) date.setDate(date.getDate() + 1);
-  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+  try {
+    const window = naturalDayWindow(value, userContext.preference?.timezone ?? 'UTC');
+    return end ? window.end : window.start;
+  } catch {
+    return undefined;
+  }
 }
 
 function filtersFromRoute(): TransferFilters {
@@ -59,7 +64,7 @@ function mapError(error: unknown): ApiErrorShape {
   return {
     status: 0,
     errorCode: 'UNKNOWN_ERROR',
-    message: 'Transfers could not be loaded.',
+    message: translate('transfers.loadFailed'),
     traceId: '',
     fieldErrors: {},
     retryable: true,
@@ -85,11 +90,19 @@ async function clearFilters(): Promise<void> {
 }
 
 function accountName(accountId: number): string {
-  return accounts.items.find(({ id }) => id === accountId)?.name ?? `Account ${accountId}`;
+  return (
+    accounts.items.find(({ id }) => id === accountId)?.name ??
+    translate('ledger.accountNumber', { id: accountId })
+  );
 }
 
 function amount(value: string): string {
-  return formatDecimalString(value, userContext.preference?.locale ?? 'en-US');
+  return formatDecimalString(
+    value,
+    userContext.preference?.locale ?? 'en-US',
+    8,
+    userContext.preference?.numberFormat,
+  );
 }
 
 function occurred(value: string): string {
@@ -136,9 +149,9 @@ onMounted(async () => {
   <AppShell>
     <div class="content-header">
       <div>
-        <p class="eyebrow">Ledger / Transfers</p>
-        <h1>Transfers</h1>
-        <p class="content-header__copy">Account-to-account movements and their fees.</p>
+        <p class="eyebrow">{{ translate('transfers.eyebrow') }}</p>
+        <h1>{{ translate('transfers.title') }}</h1>
+        <p class="content-header__copy">{{ translate('transfers.description') }}</p>
       </div>
       <button
         class="button"
@@ -146,45 +159,51 @@ onMounted(async () => {
         :disabled="accounts.items.length < 2"
         @click="createOpen = true"
       >
-        <Plus :size="17" /> Record transfer
+        <Plus :size="17" /> {{ translate('transfers.record') }}
       </button>
     </div>
 
     <form
       class="ledger-filters transfer-filters"
-      aria-label="Transfer filters"
+      :aria-label="translate('transfers.filters')"
       @submit.prevent="applyFilters"
     >
       <Filter :size="17" aria-hidden="true" />
       <label>
-        <span>Account</span>
+        <span>{{ translate('ledger.account') }}</span>
         <select v-model="draft.accountId">
-          <option value="">All accounts</option>
+          <option value="">{{ translate('ledger.allAccounts') }}</option>
           <option v-for="account in accounts.items" :key="account.id" :value="String(account.id)">
             {{ account.name }}
           </option>
         </select>
       </label>
-      <label><span>From</span><input v-model="draft.from" type="date" /></label>
-      <label><span>To</span><input v-model="draft.to" type="date" /></label>
+      <label
+        ><span>{{ translate('ledger.from') }}</span
+        ><input v-model="draft.from" type="date"
+      /></label>
+      <label
+        ><span>{{ translate('ledger.to') }}</span
+        ><input v-model="draft.to" type="date"
+      /></label>
       <div class="ledger-filters__actions">
         <button
           class="icon-button"
           type="button"
-          title="Clear filters"
-          aria-label="Clear filters"
+          :title="translate('ledger.clearFilters')"
+          :aria-label="translate('ledger.clearFilters')"
           @click="clearFilters"
         >
           <RotateCcw :size="17" />
         </button>
-        <button class="button button--small" type="submit">Apply</button>
+        <button class="button button--small" type="submit">{{ translate('ledger.apply') }}</button>
       </div>
     </form>
 
     <div v-if="pageError" class="page-alert" role="alert">
       <CircleAlert :size="19" />
       <div>
-        <strong>Transfers unavailable</strong>
+        <strong>{{ translate('transfers.unavailable') }}</strong>
         <p>{{ pageError.message }}</p>
       </div>
       <button
@@ -193,7 +212,7 @@ onMounted(async () => {
         type="button"
         @click="load"
       >
-        Try again
+        {{ translate('ledger.tryAgain') }}
       </button>
     </div>
 
@@ -203,7 +222,11 @@ onMounted(async () => {
       :aria-busy="transfers.listState === 'loading'"
     >
       <div class="transfer-list__head" aria-hidden="true">
-        <span>When</span><span>Route</span><span>Sent</span><span>Received</span><span>Fee</span>
+        <span>{{ translate('ledger.when') }}</span
+        ><span>{{ translate('transfers.route') }}</span
+        ><span>{{ translate('transfers.sent') }}</span
+        ><span>{{ translate('transfers.received') }}</span
+        ><span>{{ translate('transfers.fee') }}</span>
       </div>
       <div v-if="transfers.listState === 'loading'" class="account-list__loading">
         <span v-for="index in 5" :key="index"></span>
@@ -220,7 +243,10 @@ onMounted(async () => {
             <strong>{{ accountName(transfer.sourceAccountId) }}</strong>
             <ArrowRightLeft :size="15" />
             <strong>{{ accountName(transfer.targetAccountId) }}</strong>
-            <small>{{ transfer.description || `Transfer ${transfer.transferGroupId}` }}</small>
+            <small>{{
+              transfer.description ||
+              translate('transfers.number', { id: transfer.transferGroupId })
+            }}</small>
           </span>
           <strong
             >{{ amount(transfer.outgoingAmount) }}
@@ -236,7 +262,7 @@ onMounted(async () => {
         </RouterLink>
       </template>
       <div v-else class="account-empty">
-        <ArrowRightLeft :size="28" /><strong>No transfers match this view.</strong>
+        <ArrowRightLeft :size="28" /><strong>{{ translate('transfers.noMatch') }}</strong>
       </div>
     </section>
     <div v-if="transfers.nextCursor" class="ledger-load-more">
@@ -246,8 +272,8 @@ onMounted(async () => {
         :disabled="transfers.listState === 'loading-more'"
         @click="transfers.loadMore()"
       >
-        <LoaderCircle v-if="transfers.listState === 'loading-more'" class="spin" :size="17" /> Load
-        more
+        <LoaderCircle v-if="transfers.listState === 'loading-more'" class="spin" :size="17" />
+        {{ translate('ledger.loadMore') }}
       </button>
     </div>
 
@@ -255,6 +281,7 @@ onMounted(async () => {
       :open="createOpen"
       mode="create"
       :accounts="accounts.items"
+      :time-zone="userContext.preference?.timezone ?? 'UTC'"
       :pending="createPending"
       :error="createError"
       @close="createOpen = false"

@@ -30,6 +30,7 @@ public:
         TagController& tags,
         PreferenceController& preferences,
         CurrencyController& currencies,
+        TimeZoneController& timezones,
         TransactionController& transactions,
         TransferController& transfers,
         ReportController& reports,
@@ -42,6 +43,7 @@ public:
           tags_(&tags),
           preferences_(&preferences),
           currencies_(&currencies),
+          timezones_(&timezones),
           transactions_(&transactions),
           transfers_(&transfers),
           reports_(&reports),
@@ -59,6 +61,7 @@ private:
     TagController* tags_ = nullptr;
     PreferenceController* preferences_ = nullptr;
     CurrencyController* currencies_ = nullptr;
+    TimeZoneController* timezones_ = nullptr;
     TransactionController* transactions_ = nullptr;
     TransferController* transfers_ = nullptr;
     ReportController* reports_ = nullptr;

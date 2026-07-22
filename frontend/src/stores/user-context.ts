@@ -7,6 +7,7 @@ import {
   type CurrencyMetadata,
   type UserPreference,
 } from '../services/user-context-api';
+import { resolvePublicLocale, setApplicationLocale } from '../i18n';
 
 export const useUserContextStore = defineStore('user-context', () => {
   const preference = ref<UserPreference | null>(null);
@@ -18,13 +19,13 @@ export const useUserContextStore = defineStore('user-context', () => {
   let preferenceRequest = 0;
   let preferenceController: AbortController | null = null;
 
-  function applyPresentation(value: UserPreference | null): void {
-    document.documentElement.lang = value?.locale ?? 'en-US';
+  async function applyPresentation(value: UserPreference | null): Promise<void> {
     if (!value || value.theme === 'system') {
       delete document.documentElement.dataset.theme;
     } else {
       document.documentElement.dataset.theme = value.theme;
     }
+    await setApplicationLocale(value?.locale ?? resolvePublicLocale());
   }
 
   async function load(): Promise<boolean> {
@@ -45,7 +46,8 @@ export const useUserContextStore = defineStore('user-context', () => {
 
       preference.value = nextPreference;
       currencies.value = nextCurrencies;
-      applyPresentation(nextPreference);
+      await applyPresentation(nextPreference);
+      if (requestGeneration !== generation || controller.signal.aborted) return false;
       status.value = 'ready';
       return true;
     } catch (error) {
@@ -75,9 +77,16 @@ export const useUserContextStore = defineStore('user-context', () => {
       ) {
         throw new DOMException('Preference request is no longer current.', 'AbortError');
       }
+      await applyPresentation(result);
+      if (
+        requestGeneration !== generation ||
+        request !== preferenceRequest ||
+        controller.signal.aborted
+      ) {
+        throw new DOMException('Preference request is no longer current.', 'AbortError');
+      }
       preference.value = result;
       aggregationRevision.value += 1;
-      applyPresentation(result);
       return result;
     } finally {
       if (preferenceController === controller) preferenceController = null;
@@ -95,7 +104,7 @@ export const useUserContextStore = defineStore('user-context', () => {
     currencies.value = [];
     status.value = 'idle';
     aggregationRevision.value = 0;
-    applyPresentation(null);
+    void applyPresentation(null);
   }
 
   function invalidateAggregates(): void {

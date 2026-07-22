@@ -24,7 +24,8 @@ bool JwtFilter::is_public_route(
          path == "/api/v1/web/auth/refresh")) {
         return true;
     }
-    return method == HttpMethod::Get && path == "/api/v1/currencies";
+    return method == HttpMethod::Get &&
+           (path == "/api/v1/currencies" || path == "/api/v1/timezones");
 }
 
 application::Result<RequestIdentity> JwtFilter::authenticate(

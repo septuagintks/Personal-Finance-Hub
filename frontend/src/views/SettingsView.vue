@@ -14,11 +14,14 @@ import {
 } from '@lucide/vue';
 import AppShell from '../components/AppShell.vue';
 import ModalDialog from '../components/ModalDialog.vue';
+import TimeZoneCombobox from '../components/TimeZoneCombobox.vue';
+import { translate } from '../i18n';
 import { ApiError } from '../services/api-error';
 import type { Category, CategoryBoard, CategoryTree } from '../services/metadata-api';
 import type { UserPreference } from '../services/user-context-api';
 import { useMetadataStore } from '../stores/metadata';
 import { useUserContextStore } from '../stores/user-context';
+import { monthInTimeZone, shiftReportMonth } from '../services/zoned-date-time';
 
 type Tab = 'categories' | 'tags' | 'preferences';
 type CategoryRow = Category & { depth: number };
@@ -29,6 +32,7 @@ const tab = ref<Tab>('categories');
 const board = ref<CategoryBoard>('expense');
 const showDeleted = ref(false);
 const pageError = ref('');
+const preferenceValidationError = ref('');
 const pending = ref(false);
 
 const categoryDialogOpen = ref(false);
@@ -51,29 +55,6 @@ const preferenceForm = reactive<UserPreference>({
   customReportEndMonth: null,
 });
 
-const zh = computed(() => userContext.preference?.locale === 'zh-CN');
-const copy = computed(() =>
-  zh.value
-    ? {
-        title: '设置',
-        subtitle: '管理记账分类、标签与显示偏好。',
-        categories: '分类',
-        tags: '标签',
-        preferences: '偏好',
-        active: '启用中',
-        deleted: '已删除',
-      }
-    : {
-        title: 'Settings',
-        subtitle: 'Manage ledger categories, tags, and presentation preferences.',
-        categories: 'Categories',
-        tags: 'Tags',
-        preferences: 'Preferences',
-        active: 'Active',
-        deleted: 'Deleted',
-      },
-);
-
 function flatten(nodes: CategoryTree[], depth = 0): CategoryRow[] {
   return nodes.flatMap((node) => [{ ...node, depth }, ...flatten(node.children, depth + 1)]);
 }
@@ -95,7 +76,7 @@ const visibleTags = computed(() =>
 );
 
 function errorMessage(error: unknown): string {
-  return error instanceof ApiError ? error.details.message : 'The request could not be completed.';
+  return error instanceof ApiError ? error.details.message : translate('settings.requestFailed');
 }
 
 async function loadMetadata(): Promise<void> {
@@ -211,10 +192,38 @@ async function restoreTag(id: number): Promise<void> {
 }
 
 async function savePreferences(): Promise<void> {
+  preferenceValidationError.value = '';
+  if (preferenceForm.defaultReportPeriod === 'custom') {
+    if (!preferenceForm.customReportStartMonth || !preferenceForm.customReportEndMonth) {
+      preferenceValidationError.value = translate('settings.customPeriodRequired');
+      return;
+    }
+    if (preferenceForm.customReportStartMonth > preferenceForm.customReportEndMonth) {
+      preferenceValidationError.value = translate('settings.customPeriodOrder');
+      return;
+    }
+    if (
+      preferenceForm.customReportEndMonth >
+      shiftReportMonth(preferenceForm.customReportStartMonth, 119)
+    ) {
+      preferenceValidationError.value = translate('settings.customPeriodTooLong');
+      return;
+    }
+  }
   pending.value = true;
   pageError.value = '';
   try {
-    await userContext.update({ ...preferenceForm });
+    await userContext.update({
+      ...preferenceForm,
+      customReportStartMonth:
+        preferenceForm.defaultReportPeriod === 'custom'
+          ? preferenceForm.customReportStartMonth
+          : null,
+      customReportEndMonth:
+        preferenceForm.defaultReportPeriod === 'custom'
+          ? preferenceForm.customReportEndMonth
+          : null,
+    });
   } catch (error) {
     pageError.value = errorMessage(error);
   } finally {
@@ -230,6 +239,18 @@ watch(
   { immediate: true },
 );
 
+watch(
+  () => preferenceForm.defaultReportPeriod,
+  (period) => {
+    preferenceValidationError.value = '';
+    if (period === 'custom') {
+      const month = monthInTimeZone(preferenceForm.timezone);
+      preferenceForm.customReportStartMonth ??= month;
+      preferenceForm.customReportEndMonth ??= month;
+    }
+  },
+);
+
 onMounted(loadMetadata);
 onBeforeUnmount(() => {
   categoryDialogOpen.value = false;
@@ -241,24 +262,24 @@ onBeforeUnmount(() => {
   <AppShell>
     <div class="content-header">
       <div>
-        <p class="eyebrow">Ledger / Settings</p>
-        <h1>{{ copy.title }}</h1>
-        <p class="content-header__copy">{{ copy.subtitle }}</p>
+        <p class="eyebrow">{{ translate('settings.eyebrow') }}</p>
+        <h1>{{ translate('settings.title') }}</h1>
+        <p class="content-header__copy">{{ translate('settings.subtitle') }}</p>
       </div>
       <button class="button button--quiet" type="button" @click="loadMetadata">
-        <RefreshCw :size="16" /> {{ zh ? '刷新' : 'Refresh' }}
+        <RefreshCw :size="16" /> {{ translate('common.refresh') }}
       </button>
     </div>
 
     <div v-if="pageError" class="page-alert" role="alert">
       <CircleAlert :size="19" />
       <div>
-        <strong>{{ zh ? '操作未完成' : 'Request not completed' }}</strong>
+        <strong>{{ translate('common.requestNotCompleted') }}</strong>
         <p>{{ pageError }}</p>
       </div>
     </div>
 
-    <div class="settings-tabs" role="tablist" :aria-label="zh ? '设置页面' : 'Settings section'">
+    <div class="settings-tabs" role="tablist" :aria-label="translate('settings.sectionLabel')">
       <button
         id="settings-tab-categories"
         role="tab"
@@ -268,7 +289,7 @@ onBeforeUnmount(() => {
         aria-controls="settings-panel-categories"
         @click="tab = 'categories'"
       >
-        <Workflow :size="16" /> {{ copy.categories }}
+        <Workflow :size="16" /> {{ translate('settings.categories') }}
       </button>
       <button
         id="settings-tab-tags"
@@ -279,7 +300,7 @@ onBeforeUnmount(() => {
         aria-controls="settings-panel-tags"
         @click="tab = 'tags'"
       >
-        <Tags :size="16" /> {{ copy.tags }}
+        <Tags :size="16" /> {{ translate('settings.tags') }}
       </button>
       <button
         id="settings-tab-preferences"
@@ -290,7 +311,7 @@ onBeforeUnmount(() => {
         aria-controls="settings-panel-preferences"
         @click="tab = 'preferences'"
       >
-        <Languages :size="16" /> {{ copy.preferences }}
+        <Languages :size="16" /> {{ translate('settings.preferences') }}
       </button>
     </div>
 
@@ -302,33 +323,33 @@ onBeforeUnmount(() => {
       aria-labelledby="settings-tab-categories"
     >
       <div class="settings-toolbar">
-        <div class="segmented-control" :aria-label="zh ? '分类类型' : 'Category board'">
+        <div class="segmented-control" :aria-label="translate('settings.categoryBoard')">
           <button
             type="button"
             :class="{ 'is-active': board === 'expense' }"
             @click="board = 'expense'"
           >
-            {{ zh ? '支出' : 'Expense' }}
+            {{ translate('settings.expense') }}
           </button>
           <button
             type="button"
             :class="{ 'is-active': board === 'income' }"
             @click="board = 'income'"
           >
-            {{ zh ? '收入' : 'Income' }}
+            {{ translate('settings.income') }}
           </button>
         </div>
         <label class="settings-toggle">
           <input v-model="showDeleted" type="checkbox" />
-          <span>{{ zh ? '显示已删除' : 'Show deleted' }}</span>
+          <span>{{ translate('settings.showDeleted') }}</span>
         </label>
         <button class="button button--small" type="button" @click="openCategoryCreate">
-          <Plus :size="15" /> {{ zh ? '新建分类' : 'New category' }}
+          <Plus :size="15" /> {{ translate('settings.newCategory') }}
         </button>
       </div>
       <div class="settings-list" :aria-busy="metadata.categoryState === 'loading'">
         <div v-if="metadata.categoryState === 'loading'" class="account-detail-loading">
-          <RefreshCw :size="17" class="spin" /> {{ zh ? '载入分类' : 'Loading categories' }}
+          <RefreshCw :size="17" class="spin" /> {{ translate('settings.loadingCategories') }}
         </div>
         <div
           v-for="item in categoryRows"
@@ -340,18 +361,24 @@ onBeforeUnmount(() => {
           <div class="settings-row__name" :style="{ paddingInlineStart: `${item.depth * 22}px` }">
             <strong>{{ item.name }}</strong>
             <small
-              >{{ item.source === 'system' ? 'System' : 'Custom' }} · {{ item.sortOrder }}</small
+              >{{
+                translate(
+                  item.source === 'system' ? 'settings.systemSource' : 'settings.customSource',
+                )
+              }}
+              · {{ item.sortOrder }}</small
             >
           </div>
           <span class="status-badge" :class="{ 'status-badge--archived': item.isDeleted }">
-            {{ item.isDeleted ? copy.deleted : copy.active }}
+            {{ translate(item.isDeleted ? 'settings.deleted' : 'settings.active') }}
           </span>
           <div class="settings-row__actions">
             <button
               v-if="!item.isDeleted"
               class="icon-button"
               type="button"
-              :title="zh ? '编辑' : 'Edit'"
+              :title="translate('common.edit')"
+              :aria-label="translate('common.edit')"
               @click="openCategoryEdit(item)"
             >
               <Pencil :size="16" />
@@ -360,7 +387,8 @@ onBeforeUnmount(() => {
               v-if="!item.isDeleted"
               class="icon-button icon-button--danger"
               type="button"
-              :title="zh ? '删除' : 'Delete'"
+              :title="translate('common.delete')"
+              :aria-label="translate('common.delete')"
               @click="removeCategory(item)"
             >
               <Trash2 :size="16" />
@@ -369,7 +397,8 @@ onBeforeUnmount(() => {
               v-else
               class="icon-button"
               type="button"
-              :title="zh ? '恢复' : 'Restore'"
+              :title="translate('common.restore')"
+              :aria-label="translate('common.restore')"
               @click="restoreCategory(item)"
             >
               <RotateCcw :size="16" />
@@ -380,9 +409,7 @@ onBeforeUnmount(() => {
           v-if="metadata.categoryState !== 'loading' && !categoryRows.length"
           class="account-empty"
         >
-          <Workflow :size="26" /><strong>{{
-            zh ? '没有匹配的分类' : 'No matching categories'
-          }}</strong>
+          <Workflow :size="26" /><strong>{{ translate('settings.noCategories') }}</strong>
         </div>
       </div>
     </section>
@@ -397,10 +424,10 @@ onBeforeUnmount(() => {
       <div class="settings-toolbar">
         <label class="settings-toggle">
           <input v-model="showDeleted" type="checkbox" />
-          <span>{{ zh ? '显示已删除' : 'Show deleted' }}</span>
+          <span>{{ translate('settings.showDeleted') }}</span>
         </label>
         <button class="button button--small" type="button" @click="openTagCreate">
-          <Plus :size="15" /> {{ zh ? '新建标签' : 'New tag' }}
+          <Plus :size="15" /> {{ translate('settings.newTag') }}
         </button>
       </div>
       <div class="settings-list" :aria-busy="metadata.tagState === 'loading'">
@@ -415,14 +442,15 @@ onBeforeUnmount(() => {
             ><small>#{{ item.id }}</small>
           </div>
           <span class="status-badge" :class="{ 'status-badge--archived': item.isDeleted }">
-            {{ item.isDeleted ? copy.deleted : copy.active }}
+            {{ translate(item.isDeleted ? 'settings.deleted' : 'settings.active') }}
           </span>
           <div class="settings-row__actions">
             <button
               v-if="!item.isDeleted"
               class="icon-button"
               type="button"
-              :title="zh ? '重命名' : 'Rename'"
+              :title="translate('common.rename')"
+              :aria-label="translate('common.rename')"
               @click="openTagEdit(item.id, item.name)"
             >
               <Pencil :size="16" />
@@ -431,7 +459,8 @@ onBeforeUnmount(() => {
               v-if="!item.isDeleted"
               class="icon-button icon-button--danger"
               type="button"
-              :title="zh ? '删除' : 'Delete'"
+              :title="translate('common.delete')"
+              :aria-label="translate('common.delete')"
               @click="removeTag(item.id)"
             >
               <Trash2 :size="16" />
@@ -440,7 +469,8 @@ onBeforeUnmount(() => {
               v-else
               class="icon-button"
               type="button"
-              :title="zh ? '恢复' : 'Restore'"
+              :title="translate('common.restore')"
+              :aria-label="translate('common.restore')"
               @click="restoreTag(item.id)"
             >
               <RotateCcw :size="16" />
@@ -448,7 +478,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div v-if="metadata.tagState !== 'loading' && !visibleTags.length" class="account-empty">
-          <Tags :size="26" /><strong>{{ zh ? '还没有标签' : 'No tags yet' }}</strong>
+          <Tags :size="26" /><strong>{{ translate('settings.noTags') }}</strong>
         </div>
       </div>
     </section>
@@ -461,9 +491,9 @@ onBeforeUnmount(() => {
       aria-labelledby="settings-tab-preferences"
     >
       <form class="preference-form" @submit.prevent="savePreferences">
-        <label class="field"
-          ><span>{{ zh ? '基准币种' : 'Base currency' }}</span
-          ><select v-model="preferenceForm.baseCurrency">
+        <label class="field">
+          <span>{{ translate('settings.baseCurrency') }}</span>
+          <select v-model="preferenceForm.baseCurrency" :disabled="pending">
             <option
               v-for="currency in userContext.currencies"
               :key="currency.code"
@@ -471,71 +501,90 @@ onBeforeUnmount(() => {
             >
               {{ currency.code }} · {{ currency.displayName }}
             </option>
-          </select></label
-        >
-        <label class="field"
-          ><span>{{ zh ? '语言' : 'Language' }}</span
-          ><select v-model="preferenceForm.locale">
-            <option value="zh-CN">简体中文</option>
-            <option value="en-US">English (US)</option>
-          </select></label
-        >
-        <label class="field"
-          ><span>{{ zh ? '时区' : 'Timezone' }}</span
-          ><select v-model="preferenceForm.timezone">
-            <option value="Asia/Shanghai">Asia/Shanghai</option>
-            <option value="UTC">UTC</option>
-            <option value="America/New_York">America/New_York</option>
-            <option value="Europe/London">Europe/London</option>
-            <option value="Asia/Tokyo">Asia/Tokyo</option>
-          </select></label
-        >
-        <label class="field"
-          ><span>{{ zh ? '日期格式' : 'Date format' }}</span
-          ><select v-model="preferenceForm.dateFormat">
+          </select>
+        </label>
+        <label class="field">
+          <span>{{ translate('common.language') }}</span>
+          <select v-model="preferenceForm.locale" :disabled="pending">
+            <option value="zh-CN">{{ translate('common.simplifiedChinese') }}</option>
+            <option value="en-US">{{ translate('common.englishUS') }}</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>{{ translate('settings.timezone') }}</span>
+          <TimeZoneCombobox v-model="preferenceForm.timezone" :disabled="pending" />
+        </label>
+        <label class="field">
+          <span>{{ translate('settings.dateFormat') }}</span>
+          <select v-model="preferenceForm.dateFormat" :disabled="pending">
             <option value="YYYY-MM-DD">YYYY-MM-DD</option>
             <option value="DD/MM/YYYY">DD/MM/YYYY</option>
             <option value="MM/DD/YYYY">MM/DD/YYYY</option>
-          </select></label
-        >
-        <label class="field"
-          ><span>{{ zh ? '数字格式' : 'Number format' }}</span
-          ><select v-model="preferenceForm.numberFormat">
+          </select>
+        </label>
+        <label class="field">
+          <span>{{ translate('settings.numberFormat') }}</span>
+          <select v-model="preferenceForm.numberFormat" :disabled="pending">
             <option value="1,234.56">1,234.56</option>
             <option value="1.234,56">1.234,56</option>
             <option value="1 234,56">1 234,56</option>
-          </select></label
-        >
-        <label class="field"
-          ><span>{{ zh ? '主题' : 'Theme' }}</span
-          ><select v-model="preferenceForm.theme">
-            <option value="system">{{ zh ? '跟随系统' : 'System' }}</option>
-            <option value="light">{{ zh ? '浅色' : 'Light' }}</option>
-            <option value="dark">{{ zh ? '深色' : 'Dark' }}</option>
-          </select></label
-        >
-        <label class="field"
-          ><span>{{ zh ? '默认首页' : 'Default home page' }}</span
-          ><select v-model="preferenceForm.defaultHomePage">
-            <option value="dashboard">{{ zh ? '概览' : 'Overview' }}</option>
-            <option value="accounts">{{ zh ? '账户' : 'Accounts' }}</option>
-            <option value="transactions">{{ zh ? '流水' : 'Transactions' }}</option>
-            <option value="reports">{{ zh ? '报表' : 'Reports' }}</option>
-          </select></label
-        >
-        <label class="field"
-          ><span>{{ zh ? '默认报表周期' : 'Default report period' }}</span
-          ><select v-model="preferenceForm.defaultReportPeriod">
-            <option value="current_month">{{ zh ? '本月' : 'Current month' }}</option>
-            <option value="last_month">{{ zh ? '上月' : 'Last month' }}</option>
-            <option value="last_3_months">{{ zh ? '最近三个月' : 'Last 3 months' }}</option>
-            <option value="current_year">{{ zh ? '本年' : 'Current year' }}</option>
-            <option value="custom">{{ zh ? '自定义' : 'Custom' }}</option>
-          </select></label
-        >
+          </select>
+        </label>
+        <label class="field">
+          <span>{{ translate('settings.theme') }}</span>
+          <select v-model="preferenceForm.theme" :disabled="pending">
+            <option value="system">{{ translate('settings.theme.system') }}</option>
+            <option value="light">{{ translate('settings.theme.light') }}</option>
+            <option value="dark">{{ translate('settings.theme.dark') }}</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>{{ translate('settings.defaultHomePage') }}</span>
+          <select v-model="preferenceForm.defaultHomePage" :disabled="pending">
+            <option value="dashboard">{{ translate('nav.overview') }}</option>
+            <option value="accounts">{{ translate('nav.accounts') }}</option>
+            <option value="transactions">{{ translate('nav.transactions') }}</option>
+            <option value="reports">{{ translate('nav.reports') }}</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>{{ translate('settings.defaultReportPeriod') }}</span>
+          <select v-model="preferenceForm.defaultReportPeriod" :disabled="pending">
+            <option value="current_month">{{ translate('settings.period.currentMonth') }}</option>
+            <option value="last_month">{{ translate('settings.period.lastMonth') }}</option>
+            <option value="last_3_months">{{ translate('settings.period.last3Months') }}</option>
+            <option value="current_year">{{ translate('settings.period.currentYear') }}</option>
+            <option value="custom">{{ translate('settings.period.custom') }}</option>
+          </select>
+        </label>
+        <template v-if="preferenceForm.defaultReportPeriod === 'custom'">
+          <label class="field">
+            <span>{{ translate('settings.customReportStart') }}</span>
+            <input
+              v-model="preferenceForm.customReportStartMonth"
+              type="month"
+              :max="preferenceForm.customReportEndMonth ?? undefined"
+              :disabled="pending"
+              required
+            />
+          </label>
+          <label class="field">
+            <span>{{ translate('settings.customReportEnd') }}</span>
+            <input
+              v-model="preferenceForm.customReportEndMonth"
+              type="month"
+              :min="preferenceForm.customReportStartMonth ?? undefined"
+              :disabled="pending"
+              required
+            />
+          </label>
+        </template>
+        <p v-if="preferenceValidationError" class="form-alert preference-form__error" role="alert">
+          {{ preferenceValidationError }}
+        </p>
         <div class="preference-actions">
           <button class="button" type="submit" :disabled="pending">
-            <Save :size="16" /> {{ zh ? '保存偏好' : 'Save preferences' }}
+            <Save :size="16" /> {{ translate('settings.savePreferences') }}
           </button>
         </div>
       </form>
@@ -543,34 +592,32 @@ onBeforeUnmount(() => {
 
     <ModalDialog
       :open="categoryDialogOpen"
-      :title="
-        editingCategory ? (zh ? '编辑分类' : 'Edit category') : zh ? '新建分类' : 'New category'
-      "
+      :title="translate(editingCategory ? 'settings.editCategory' : 'settings.newCategory')"
       @close="categoryDialogOpen = false"
     >
       <form class="settings-dialog-form" @submit.prevent="submitCategory">
-        <label class="field"
-          ><span>{{ zh ? '名称' : 'Name' }}</span
-          ><input v-model.trim="categoryForm.name" required maxlength="128"
-        /></label>
-        <label v-if="!editingCategory" class="field"
-          ><span>{{ zh ? '上级分类' : 'Parent category' }}</span
-          ><select v-model="categoryForm.parentId">
-            <option value="">{{ zh ? '无（一级分类）' : 'None (root)' }}</option>
+        <label class="field">
+          <span>{{ translate('settings.name') }}</span>
+          <input v-model.trim="categoryForm.name" required maxlength="128" />
+        </label>
+        <label v-if="!editingCategory" class="field">
+          <span>{{ translate('settings.parentCategory') }}</span>
+          <select v-model="categoryForm.parentId">
+            <option value="">{{ translate('settings.noParent') }}</option>
             <option v-for="item in parentOptions" :key="item.id" :value="item.id">
               {{ '· '.repeat(item.depth) }}{{ item.name }}
             </option>
-          </select></label
-        >
-        <label v-if="editingCategory" class="field"
-          ><span>{{ zh ? '排序' : 'Sort order' }}</span
-          ><input v-model.number="categoryForm.sortOrder" type="number" required
-        /></label>
+          </select>
+        </label>
+        <label v-if="editingCategory" class="field">
+          <span>{{ translate('settings.sortOrder') }}</span>
+          <input v-model.number="categoryForm.sortOrder" type="number" required />
+        </label>
         <div class="modal-actions">
           <button class="button button--quiet" type="button" @click="categoryDialogOpen = false">
-            {{ zh ? '取消' : 'Cancel' }}</button
+            {{ translate('common.cancel') }}</button
           ><button class="button" type="submit" :disabled="pending">
-            <Save :size="16" /> {{ zh ? '保存' : 'Save' }}
+            <Save :size="16" /> {{ translate('common.save') }}
           </button>
         </div>
       </form>
@@ -578,19 +625,19 @@ onBeforeUnmount(() => {
 
     <ModalDialog
       :open="tagDialogOpen"
-      :title="editingTagId ? (zh ? '重命名标签' : 'Rename tag') : zh ? '新建标签' : 'New tag'"
+      :title="translate(editingTagId ? 'settings.renameTag' : 'settings.newTag')"
       @close="tagDialogOpen = false"
     >
       <form class="settings-dialog-form" @submit.prevent="submitTag">
-        <label class="field"
-          ><span>{{ zh ? '名称' : 'Name' }}</span
-          ><input v-model.trim="tagName" required maxlength="64"
-        /></label>
+        <label class="field">
+          <span>{{ translate('settings.name') }}</span>
+          <input v-model.trim="tagName" required maxlength="64" />
+        </label>
         <div class="modal-actions">
           <button class="button button--quiet" type="button" @click="tagDialogOpen = false">
-            {{ zh ? '取消' : 'Cancel' }}</button
+            {{ translate('common.cancel') }}</button
           ><button class="button" type="submit" :disabled="pending">
-            <Save :size="16" /> {{ zh ? '保存' : 'Save' }}
+            <Save :size="16" /> {{ translate('common.save') }}
           </button>
         </div>
       </form>

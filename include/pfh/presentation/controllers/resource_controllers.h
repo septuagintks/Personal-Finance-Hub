@@ -94,4 +94,15 @@ private:
     application::FinanceApplicationService& service_;
 };
 
+class TimeZoneController {
+public:
+    explicit TimeZoneController(application::FinanceApplicationService& service)
+        : service_(service) {}
+
+    [[nodiscard]] HttpResponse list(const HttpRequest& request);
+
+private:
+    application::FinanceApplicationService& service_;
+};
+
 } // namespace pfh::presentation

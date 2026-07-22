@@ -130,6 +130,7 @@ protected:
           tag_controller_(finance_),
           preference_controller_(finance_),
           currency_controller_(finance_),
+          timezone_controller_(finance_),
           transaction_controller_(finance_),
           transfer_controller_(finance_),
           report_controller_(finance_),
@@ -139,7 +140,7 @@ protected:
           app_(
               auth_controller_, jwt_filter_, account_controller_,
               category_controller_, tag_controller_, preference_controller_,
-              currency_controller_, transaction_controller_, transfer_controller_,
+              currency_controller_, timezone_controller_, transaction_controller_, transfer_controller_,
               report_controller_, &maintenance_controller_,
               &operations_controller_) {}
 
@@ -220,6 +221,7 @@ protected:
     TagController tag_controller_;
     PreferenceController preference_controller_;
     CurrencyController currency_controller_;
+    TimeZoneController timezone_controller_;
     TransactionController transaction_controller_;
     TransferController transfer_controller_;
     ReportController report_controller_;
@@ -727,6 +729,34 @@ TEST_F(ResourceApiTest, CurrencyCatalogIsPublicAndComplete) {
     HttpRequest cached;
     cached.method = HttpMethod::Get;
     cached.path = "/api/v1/currencies";
+    cached.headers.emplace("If-None-Match", response.headers.at("ETag"));
+    const auto not_modified = app_.handle(std::move(cached));
+    EXPECT_EQ(not_modified.status, 304);
+    EXPECT_TRUE(not_modified.body.empty());
+}
+
+TEST_F(ResourceApiTest, TimeZoneCatalogIsPublicSortedAndCacheable) {
+    const auto response = request(HttpMethod::Get, "/api/v1/timezones");
+    ASSERT_EQ(response.status, 200) << response.body;
+    const auto body = nlohmann::json::parse(response.body);
+    ASSERT_TRUE(body.is_array());
+    ASSERT_GT(body.size(), 100U);
+    EXPECT_TRUE(std::ranges::is_sorted(body, {}, [](const auto& timezone) {
+        return timezone["id"].template get<std::string>();
+    }));
+    EXPECT_TRUE(std::ranges::any_of(body, [](const auto& timezone) {
+        return timezone["id"] == "UTC" &&
+               timezone["canonicalId"].is_string();
+    }));
+    EXPECT_TRUE(std::ranges::all_of(body, [](const auto& timezone) {
+        return timezone.size() == 3U && timezone.contains("id") &&
+               timezone.contains("canonicalId") && timezone.contains("isAlias");
+    }));
+    ASSERT_TRUE(response.headers.contains("ETag"));
+
+    HttpRequest cached;
+    cached.method = HttpMethod::Get;
+    cached.path = "/api/v1/timezones";
     cached.headers.emplace("If-None-Match", response.headers.at("ETag"));
     const auto not_modified = app_.handle(std::move(cached));
     EXPECT_EQ(not_modified.status, 304);

@@ -5,15 +5,19 @@ import { ArrowRightLeft, LoaderCircle, Save } from '@lucide/vue';
 import type { Account } from '../services/account-api';
 import type { CreateTransferRequest, Transfer } from '../services/transfer-api';
 import ModalDialog from './ModalDialog.vue';
+import { translate, type MessageKey } from '../i18n';
+import { instantToLocalDateTime, localDateTimeToInstant } from '../services/zoned-date-time';
 
 type TransferMode = CreateTransferRequest['mode'];
 type FeeSource = NonNullable<CreateTransferRequest['feeSource']>;
+type TransferPreview = { label: MessageKey; value: string; currency: string };
 
 const props = withDefaults(
   defineProps<{
     open: boolean;
     mode: 'create' | 'correct';
     accounts: Account[];
+    timeZone: string;
     transfer?: Transfer | null;
     pending?: boolean;
     error?: string;
@@ -36,6 +40,12 @@ const form = reactive({
   description: '',
   occurredAt: '',
 });
+
+const transferModes: Array<{ value: TransferMode; label: MessageKey }> = [
+  { value: 'OutgoingAndRate', label: 'transferForm.sendRate' },
+  { value: 'BothAmounts', label: 'transferForm.bothAmounts' },
+  { value: 'IncomingAndRate', label: 'transferForm.receiveRate' },
+];
 
 const activeAccounts = computed(() => {
   const historicalIds = new Set(
@@ -67,18 +77,12 @@ const feeAccount = computed(() => {
   }
   return undefined;
 });
-const title = computed(() => (props.mode === 'create' ? 'Record transfer' : 'Correct transfer'));
-
-function toLocalInput(value: string | undefined): string {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 16);
-}
+const title = computed(() =>
+  translate(props.mode === 'create' ? 'transfers.record' : 'transferForm.correctTitle'),
+);
 
 watch(
-  () => [props.open, props.mode, props.transfer, props.accounts] as const,
+  () => [props.open, props.mode, props.transfer, props.accounts, props.timeZone] as const,
   ([open]) => {
     if (!open) return;
     localError.value = '';
@@ -96,7 +100,13 @@ watch(
     form.feeAmount = existing?.feeAmount ?? '';
     form.feeAccountId = existing?.feeAccountId ?? 0;
     form.description = existing?.description ?? '';
-    form.occurredAt = toLocalInput(existing?.occurredAt);
+    try {
+      form.occurredAt = existing?.occurredAt
+        ? instantToLocalDateTime(existing.occurredAt, props.timeZone)
+        : '';
+    } catch {
+      form.occurredAt = '';
+    }
   },
   { immediate: true },
 );
@@ -134,28 +144,28 @@ function decimal(text: string): Decimal | null {
   }
 }
 
-const preview = computed(() => {
+const preview = computed<TransferPreview | null>(() => {
   const outgoing = decimal(form.outgoingAmount);
   const incoming = decimal(form.incomingAmount);
   const rate = decimal(form.rate);
   try {
     if (form.mode === 'OutgoingAndRate' && outgoing && rate) {
       return {
-        label: 'Estimated incoming',
+        label: 'transferForm.estimatedIncoming',
         value: outgoing.mul(rate).toDecimalPlaces(8, Decimal.ROUND_HALF_EVEN).toString(),
         currency: target.value?.currencyCode ?? '',
       };
     }
     if (form.mode === 'IncomingAndRate' && incoming && rate) {
       return {
-        label: 'Estimated outgoing',
+        label: 'transferForm.estimatedOutgoing',
         value: incoming.div(rate).toDecimalPlaces(8, Decimal.ROUND_HALF_EVEN).toString(),
         currency: source.value?.currencyCode ?? '',
       };
     }
     if (form.mode === 'BothAmounts' && outgoing && incoming && !sameCurrency.value) {
       return {
-        label: 'Derived rate',
+        label: 'transferForm.derivedRate',
         value: incoming.div(outgoing).toDecimalPlaces(10, Decimal.ROUND_HALF_EVEN).toString(),
         currency: `${target.value?.currencyCode ?? ''}/${source.value?.currencyCode ?? ''}`,
       };
@@ -174,7 +184,7 @@ function setMode(mode: TransferMode): void {
 function submit(): void {
   localError.value = '';
   if (!source.value || !target.value || source.value.id === target.value.id) {
-    localError.value = 'Choose two different accounts.';
+    localError.value = translate('transferForm.chooseAccounts');
     return;
   }
   const outgoing = decimal(form.outgoingAmount);
@@ -185,20 +195,27 @@ function submit(): void {
     (form.mode === 'BothAmounts' && (!outgoing || !incoming)) ||
     (form.mode === 'IncomingAndRate' && (!incoming || !rate))
   ) {
-    localError.value = 'Enter valid positive decimal values.';
+    localError.value = translate('transferForm.invalidValues');
     return;
   }
   if (sameCurrency.value && (!outgoing || !incoming || !outgoing.eq(incoming))) {
-    localError.value = 'Same-currency transfer amounts must match.';
+    localError.value = translate('transferForm.sameCurrencyMismatch');
     return;
   }
   const fee = form.feeSource ? decimal(form.feeAmount) : null;
   if (form.feeSource && !fee) {
-    localError.value = 'Enter a valid positive fee.';
+    localError.value = translate('transferForm.invalidFee');
     return;
   }
   if (form.feeSource === 'ThirdParty' && !feeAccount.value) {
-    localError.value = 'Choose a fee account.';
+    localError.value = translate('transferForm.chooseFeeAccount');
+    return;
+  }
+  let occurredAt: string | null;
+  try {
+    occurredAt = form.occurredAt ? localDateTimeToInstant(form.occurredAt, props.timeZone) : null;
+  } catch {
+    localError.value = translate('ledger.invalidLocalTime');
     return;
   }
   emit('submit', {
@@ -218,7 +235,7 @@ function submit(): void {
     feeSource: form.feeSource || null,
     feeAccountId: form.feeSource === 'ThirdParty' ? form.feeAccountId : null,
     description: form.description.trim() || null,
-    occurredAt: form.occurredAt ? new Date(form.occurredAt).toISOString() : null,
+    occurredAt,
   });
 }
 </script>
@@ -234,13 +251,9 @@ function submit(): void {
       <div v-if="error || localError" class="form-alert" role="alert">
         {{ error || localError }}
       </div>
-      <div class="transfer-mode" aria-label="Transfer input mode">
+      <div class="transfer-mode" :aria-label="translate('transferForm.modeLabel')">
         <button
-          v-for="option in [
-            { value: 'OutgoingAndRate', label: 'Send + rate' },
-            { value: 'BothAmounts', label: 'Both amounts' },
-            { value: 'IncomingAndRate', label: 'Receive + rate' },
-          ] as const"
+          v-for="option in transferModes"
           :key="option.value"
           type="button"
           :class="{ 'is-active': form.mode === option.value }"
@@ -248,13 +261,13 @@ function submit(): void {
           :disabled="pending || (sameCurrency && option.value !== 'BothAmounts')"
           @click="setMode(option.value)"
         >
-          {{ option.label }}
+          {{ translate(option.label) }}
         </button>
       </div>
 
       <div class="transfer-form__grid">
         <label class="field">
-          <span>From account</span>
+          <span>{{ translate('transferForm.fromAccount') }}</span>
           <select v-model="form.sourceAccountId" :disabled="pending">
             <option v-for="account in activeAccounts" :key="account.id" :value="account.id">
               {{ account.name }} · {{ account.currencyCode }}
@@ -262,7 +275,7 @@ function submit(): void {
           </select>
         </label>
         <label class="field">
-          <span>To account</span>
+          <span>{{ translate('transferForm.toAccount') }}</span>
           <select v-model="form.targetAccountId" :disabled="pending">
             <option
               v-for="account in activeAccounts.filter(({ id }) => id !== form.sourceAccountId)"
@@ -274,7 +287,9 @@ function submit(): void {
           </select>
         </label>
         <label v-if="form.mode !== 'IncomingAndRate'" class="field">
-          <span>Outgoing amount · {{ source?.currencyCode }}</span>
+          <span>{{
+            translate('transferForm.outgoingAmount', { currency: source?.currencyCode ?? '' })
+          }}</span>
           <input
             v-model="form.outgoingAmount"
             inputmode="decimal"
@@ -283,7 +298,9 @@ function submit(): void {
           />
         </label>
         <label v-if="form.mode !== 'OutgoingAndRate'" class="field">
-          <span>Incoming amount · {{ target?.currencyCode }}</span>
+          <span>{{
+            translate('transferForm.incomingAmount', { currency: target?.currencyCode ?? '' })
+          }}</span>
           <input
             v-model="form.incomingAmount"
             inputmode="decimal"
@@ -292,26 +309,26 @@ function submit(): void {
           />
         </label>
         <label v-if="form.mode !== 'BothAmounts'" class="field">
-          <span>Exchange rate</span>
+          <span>{{ translate('transferForm.exchangeRate') }}</span>
           <input v-model="form.rate" inputmode="decimal" maxlength="128" :disabled="pending" />
         </label>
         <div v-if="preview" class="transfer-preview" aria-live="polite">
-          <span>{{ preview.label }}</span>
+          <span>{{ translate(preview.label) }}</span>
           <strong>{{ preview.value }} {{ preview.currency }}</strong>
         </div>
         <label class="field">
-          <span>Fee source</span>
+          <span>{{ translate('transferForm.feeSource') }}</span>
           <select v-model="form.feeSource" :disabled="pending">
-            <option value="">No fee</option>
-            <option value="SourceAccount">From account</option>
-            <option value="TargetAccount">To account</option>
+            <option value="">{{ translate('transferForm.noFee') }}</option>
+            <option value="SourceAccount">{{ translate('transferForm.fromAccount') }}</option>
+            <option value="TargetAccount">{{ translate('transferForm.toAccount') }}</option>
             <option value="ThirdParty" :disabled="!thirdPartyAccounts.length">
-              Another account
+              {{ translate('transferForm.anotherAccount') }}
             </option>
           </select>
         </label>
         <label v-if="form.feeSource === 'ThirdParty'" class="field">
-          <span>Fee account</span>
+          <span>{{ translate('transferForm.feeAccount') }}</span>
           <select v-model="form.feeAccountId" name="transfer-fee-account" :disabled="pending">
             <option v-for="account in thirdPartyAccounts" :key="account.id" :value="account.id">
               {{ account.name }} · {{ account.currencyCode }}
@@ -319,15 +336,17 @@ function submit(): void {
           </select>
         </label>
         <label v-if="form.feeSource" class="field">
-          <span>Fee amount · {{ feeAccount?.currencyCode }}</span>
+          <span>{{
+            translate('transferForm.feeAmount', { currency: feeAccount?.currencyCode ?? '' })
+          }}</span>
           <input v-model="form.feeAmount" inputmode="decimal" maxlength="128" :disabled="pending" />
         </label>
         <label class="field">
-          <span>Occurred at</span>
+          <span>{{ translate('ledger.occurredAt') }}</span>
           <input v-model="form.occurredAt" type="datetime-local" :disabled="pending" />
         </label>
         <label class="field transfer-form__description">
-          <span>Description</span>
+          <span>{{ translate('ledger.description') }}</span>
           <textarea
             v-model="form.description"
             rows="3"
@@ -343,13 +362,21 @@ function submit(): void {
           :disabled="pending"
           @click="emit('close')"
         >
-          Cancel
+          {{ translate('common.cancel') }}
         </button>
         <button class="button" type="submit" :disabled="pending || activeAccounts.length < 2">
           <LoaderCircle v-if="pending" class="spin" :size="17" />
           <Save v-else-if="mode === 'correct'" :size="17" />
           <ArrowRightLeft v-else :size="17" />
-          {{ pending ? 'Saving' : mode === 'create' ? 'Record transfer' : 'Create correction' }}
+          {{
+            translate(
+              pending
+                ? 'common.saving'
+                : mode === 'create'
+                  ? 'transfers.record'
+                  : 'ledger.createCorrection',
+            )
+          }}
         </button>
       </footer>
     </form>

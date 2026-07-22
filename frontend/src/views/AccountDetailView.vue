@@ -20,6 +20,7 @@ import { ApiError, type ApiErrorShape } from '../services/api-error';
 import { formatDecimalString, formatInstant } from '../services/presentation';
 import { useAccountStore } from '../stores/accounts';
 import { useUserContextStore } from '../stores/user-context';
+import { translate, type MessageKey } from '../i18n';
 
 const route = useRoute();
 const router = useRouter();
@@ -42,14 +43,14 @@ const accountId = computed(() => {
 const account = computed(() => accounts.selected);
 const balance = computed(() => accounts.selectedBalance);
 
-const accountTypeLabels: Record<string, string> = {
-  cash: 'Cash',
-  savings: 'Savings',
-  credit: 'Credit',
-  digital_wallet: 'Digital wallet',
-  investment: 'Investment',
-  crypto: 'Crypto',
-  other: 'Other',
+const accountTypeLabels: Record<string, MessageKey> = {
+  cash: 'accountForm.cash',
+  savings: 'accountForm.savings',
+  credit: 'accountForm.credit',
+  digital_wallet: 'accountForm.digitalWallet',
+  investment: 'accountForm.investment',
+  crypto: 'accountForm.crypto',
+  other: 'accountForm.other',
 };
 
 function mapError(error: unknown, fallback: string): ApiErrorShape {
@@ -74,19 +75,24 @@ function formatDate(value: string | null | undefined): string {
 }
 
 function formatAmount(value: string): string {
-  return formatDecimalString(value, userContext.preference?.locale ?? 'en-US');
+  return formatDecimalString(
+    value,
+    userContext.preference?.locale ?? 'en-US',
+    8,
+    userContext.preference?.numberFormat,
+  );
 }
 
 async function load(): Promise<void> {
   pageError.value = null;
   if (!Number.isSafeInteger(accountId.value) || accountId.value <= 0) {
-    pageError.value = mapError(null, 'This account identifier is invalid.');
+    pageError.value = mapError(null, translate('accountDetail.invalidId'));
     return;
   }
   try {
     await accounts.loadDetail(accountId.value);
   } catch (error) {
-    pageError.value = mapError(error, 'Account details could not be loaded.');
+    pageError.value = mapError(error, translate('accountDetail.loadFailed'));
   }
 }
 
@@ -102,15 +108,13 @@ async function submitEdit(value: AccountFormValue): Promise<void> {
   editError.value = '';
   editFieldErrors.value = {};
   try {
-    if (!value.category) throw new Error('Account classification is required.');
+    if (!value.category) throw new Error(translate('accountDetail.classificationRequired'));
     await accounts.updateSelected({ ...value, category: value.category });
     editOpen.value = false;
   } catch (error) {
-    const mapped = mapError(error, 'The account could not be updated.');
+    const mapped = mapError(error, translate('accountDetail.updateFailed'));
     editError.value =
-      mapped.status === 409
-        ? 'This account changed elsewhere. Reload it before saving again.'
-        : mapped.message;
+      mapped.status === 409 ? translate('accountDetail.changedReload') : mapped.message;
     editFieldErrors.value = mapped.fieldErrors;
   } finally {
     actionPending.value = false;
@@ -130,10 +134,10 @@ async function applyLifecycle(): Promise<void> {
     }
     confirmation.value = null;
   } catch (error) {
-    const mapped = mapError(error, 'The account state could not be changed.');
+    const mapped = mapError(error, translate('accountDetail.stateFailed'));
     actionError.value =
       mapped.status === 409
-        ? { ...mapped, message: 'This account changed elsewhere. Reload before trying again.' }
+        ? { ...mapped, message: translate('accountDetail.changedRetry') }
         : mapped;
     confirmation.value = null;
   } finally {
@@ -149,7 +153,7 @@ async function permanentlyDelete(): Promise<void> {
     deleteOpen.value = false;
     await router.replace({ name: 'accounts' });
   } catch (error) {
-    actionError.value = mapError(error, 'The account could not be deleted.');
+    actionError.value = mapError(error, translate('accountDetail.deleteFailed'));
   } finally {
     actionPending.value = false;
   }
@@ -162,15 +166,17 @@ onMounted(load);
 <template>
   <AppShell>
     <RouterLink class="back-link account-back" :to="{ name: 'accounts' }">
-      <ArrowLeft :size="16" /> Accounts
+      <ArrowLeft :size="16" /> {{ translate('accounts.title') }}
     </RouterLink>
 
     <div v-if="pageError" class="page-alert account-page-alert" role="alert">
       <CircleAlert :size="19" />
       <div>
-        <strong>Account unavailable</strong>
+        <strong>{{ translate('accountDetail.unavailable') }}</strong>
         <p>{{ pageError.message }}</p>
-        <small v-if="pageError.traceId">Trace {{ pageError.traceId }}</small>
+        <small v-if="pageError.traceId">{{
+          translate('accounts.trace', { traceId: pageError.traceId })
+        }}</small>
       </div>
       <button
         v-if="pageError.retryable"
@@ -178,13 +184,13 @@ onMounted(load);
         type="button"
         @click="load"
       >
-        <RefreshCw :size="15" /> Try again
+        <RefreshCw :size="15" /> {{ translate('accounts.tryAgain') }}
       </button>
     </div>
 
     <div v-else-if="accounts.detailState === 'loading'" class="account-detail-loading">
       <LoaderCircle class="spin" :size="24" />
-      <span>Loading account</span>
+      <span>{{ translate('accountDetail.loading') }}</span>
     </div>
 
     <template v-else-if="account">
@@ -193,7 +199,9 @@ onMounted(load);
           <div class="account-title-line">
             <span class="account-symbol account-symbol--large"><WalletCards :size="22" /></span>
             <div>
-              <p class="eyebrow">Account / {{ account.currencyCode }}</p>
+              <p class="eyebrow">
+                {{ translate('accountDetail.eyebrow', { currency: account.currencyCode }) }}
+              </p>
               <h1>{{ account.name }}</h1>
             </div>
           </div>
@@ -201,7 +209,7 @@ onMounted(load);
         </div>
         <div class="account-header-actions">
           <button class="button button--quiet" type="button" @click="openEdit">
-            <Edit3 :size="16" /> Edit
+            <Edit3 :size="16" /> {{ translate('accountDetail.edit') }}
           </button>
           <button
             v-if="account.isArchived"
@@ -209,7 +217,7 @@ onMounted(load);
             type="button"
             @click="confirmation = 'restore'"
           >
-            <RotateCcw :size="16" /> Restore
+            <RotateCcw :size="16" /> {{ translate('accountDetail.restore') }}
           </button>
           <button
             v-else
@@ -217,7 +225,7 @@ onMounted(load);
             type="button"
             @click="confirmation = 'archive'"
           >
-            <Archive :size="16" /> Archive
+            <Archive :size="16" /> {{ translate('accountDetail.archive') }}
           </button>
         </div>
       </div>
@@ -225,9 +233,11 @@ onMounted(load);
       <div v-if="actionError" class="page-alert" role="alert">
         <CircleAlert :size="19" />
         <div>
-          <strong>Action not completed</strong>
+          <strong>{{ translate('accountDetail.actionNotCompleted') }}</strong>
           <p>{{ actionError.message }}</p>
-          <small v-if="actionError.traceId">Trace {{ actionError.traceId }}</small>
+          <small v-if="actionError.traceId">{{
+            translate('accounts.trace', { traceId: actionError.traceId })
+          }}</small>
         </div>
         <button
           v-if="actionError.status === 409 || actionError.retryable"
@@ -235,67 +245,77 @@ onMounted(load);
           type="button"
           @click="load"
         >
-          <RefreshCw :size="15" /> Reload
+          <RefreshCw :size="15" /> {{ translate('accountDetail.reload') }}
         </button>
       </div>
 
       <div v-if="account.isArchived" class="account-archive-notice">
         <Archive :size="18" />
-        <span
-          >Archived accounts remain in history but cannot receive transactions or transfers.</span
-        >
+        <span>{{ translate('accountDetail.archivedNotice') }}</span>
       </div>
 
-      <section class="account-balance-band" aria-label="Account balance">
+      <section class="account-balance-band" :aria-label="translate('accountDetail.balanceLabel')">
         <div>
-          <p>Current balance</p>
+          <p>{{ translate('accountDetail.currentBalance') }}</p>
           <strong>{{ balance ? formatAmount(balance.balance) : '—' }}</strong>
           <span>{{ balance?.currencyCode ?? account.currencyCode }}</span>
         </div>
         <dl>
           <div>
-            <dt>Balance updated</dt>
+            <dt>{{ translate('accountDetail.balanceUpdated') }}</dt>
             <dd>{{ formatDate(balance?.updatedAt) }}</dd>
           </div>
           <div>
-            <dt>Last transaction</dt>
-            <dd>{{ balance?.lastTransactionId ?? 'None' }}</dd>
+            <dt>{{ translate('accountDetail.lastTransaction') }}</dt>
+            <dd>{{ balance?.lastTransactionId ?? translate('accountDetail.none') }}</dd>
           </div>
         </dl>
       </section>
 
       <section class="account-detail-section">
         <div class="section-heading">
-          <p class="section-kicker">Profile</p>
-          <h2>Account details</h2>
+          <p class="section-kicker">{{ translate('accountDetail.profile') }}</p>
+          <h2>{{ translate('accountDetail.details') }}</h2>
         </div>
         <dl class="account-detail-grid">
           <div>
-            <dt>Type</dt>
-            <dd>{{ accountTypeLabels[account.type] ?? account.type }}</dd>
+            <dt>{{ translate('accounts.type') }}</dt>
+            <dd>
+              {{
+                accountTypeLabels[account.type]
+                  ? translate(accountTypeLabels[account.type])
+                  : account.type
+              }}
+            </dd>
           </div>
           <div>
-            <dt>Classification</dt>
-            <dd>{{ account.category === 'asset' ? 'Asset' : 'Liability' }}</dd>
+            <dt>{{ translate('accountDetail.classification') }}</dt>
+            <dd>
+              {{
+                translate(
+                  account.category === 'asset' ? 'accountForm.asset' : 'accountForm.liability',
+                )
+              }}
+            </dd>
           </div>
           <div>
-            <dt>Currency</dt>
+            <dt>{{ translate('accounts.currency') }}</dt>
             <dd class="mono-value">{{ account.currencyCode }}</dd>
           </div>
           <div>
-            <dt>Status</dt>
-            <dd>{{ account.isArchived ? 'Archived' : 'Active' }}</dd>
+            <dt>{{ translate('accounts.status') }}</dt>
+            <dd>{{ translate(account.isArchived ? 'accounts.archived' : 'accounts.active') }}</dd>
           </div>
           <div>
-            <dt>Created</dt>
+            <dt>{{ translate('accountDetail.created') }}</dt>
             <dd>{{ formatDate(account.createdAt) }}</dd>
           </div>
           <div>
-            <dt>Last changed</dt>
+            <dt>{{ translate('accountDetail.lastChanged') }}</dt>
             <dd>{{ formatDate(account.updatedAt) }}</dd>
           </div>
           <div class="account-detail-grid__wide">
-            <dt>Description</dt>
+            <dt>{{ translate('accountDetail.description') }}</dt>
             <dd>{{ account.description || '—' }}</dd>
           </div>
         </dl>
@@ -303,12 +323,12 @@ onMounted(load);
 
       <section class="danger-zone">
         <div>
-          <p class="section-kicker">Danger zone</p>
-          <h2>Permanent removal</h2>
-          <p>Deleting this account also removes its dependent ledger records.</p>
+          <p class="section-kicker">{{ translate('accountDetail.dangerZone') }}</p>
+          <h2>{{ translate('accountDetail.permanentRemoval') }}</h2>
+          <p>{{ translate('accountDetail.permanentRemovalDescription') }}</p>
         </div>
         <button class="button button--danger-quiet" type="button" @click="deleteOpen = true">
-          <Trash2 :size="16" /> Delete account
+          <Trash2 :size="16" /> {{ translate('accountDetail.delete') }}
         </button>
       </section>
 
@@ -327,13 +347,25 @@ onMounted(load);
 
       <ConfirmDialog
         :open="confirmation !== null"
-        :title="confirmation === 'archive' ? 'Archive account' : 'Restore account'"
+        :title="
+          translate(
+            confirmation === 'archive'
+              ? 'accountDetail.archiveTitle'
+              : 'accountDetail.restoreTitle',
+          )
+        "
         :description="
           confirmation === 'archive'
-            ? 'New transactions and transfers will be blocked while this account is archived.'
-            : 'This account will return to active account lists and can be used again.'
+            ? translate('accountDetail.archiveDescription')
+            : translate('accountDetail.restoreDescription')
         "
-        :confirm-label="confirmation === 'archive' ? 'Archive account' : 'Restore account'"
+        :confirm-label="
+          translate(
+            confirmation === 'archive'
+              ? 'accountDetail.archiveTitle'
+              : 'accountDetail.restoreTitle',
+          )
+        "
         :action="confirmation === 'restore' ? 'restore' : 'archive'"
         :pending="actionPending"
         @close="confirmation = null"

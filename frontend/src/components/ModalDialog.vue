@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, ref, useId, watch } from 'vue';
 import { X } from '@lucide/vue';
+import { translate } from '../i18n';
 
 const props = defineProps<{
   open: boolean;
@@ -57,8 +58,8 @@ onBeforeUnmount(() => {
         <button
           class="icon-button"
           type="button"
-          aria-label="Close dialog"
-          title="Close dialog"
+          :aria-label="translate('common.closeDialog')"
+          :title="translate('common.closeDialog')"
           @click="emit('close')"
         >
           <X :size="19" />

@@ -20,11 +20,13 @@ const preference = {
   baseCurrency: 'CNY',
   locale: 'en-US',
   timezone: 'Asia/Shanghai',
-  dateFormat: 'yyyy-MM-dd',
-  numberFormat: 'standard',
+  dateFormat: 'YYYY-MM-DD',
+  numberFormat: '1,234.56',
   theme: 'system',
   defaultHomePage: 'accounts',
   defaultReportPeriod: 'current_month',
+  customReportStartMonth: null,
+  customReportEndMonth: null,
 };
 
 const currencies = [

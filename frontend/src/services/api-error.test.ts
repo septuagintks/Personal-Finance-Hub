@@ -21,7 +21,7 @@ describe('API error projection', () => {
     expect(projected).toEqual({
       status: 409,
       errorCode: 'CONFLICT',
-      message: 'The request conflicts with a newer fact.',
+      message: 'This resource changed or already exists.',
       traceId: 'trace-409',
       fieldErrors: { amount: 'Invalid amount.' },
       retryable: false,
@@ -65,7 +65,7 @@ describe('API error projection', () => {
     expect(projected).toMatchObject({
       status: 400,
       errorCode: 'VALIDATION_ERROR',
-      message: 'Narrow the export range.',
+      message: 'Some request fields are invalid.',
       traceId: 'trace-export',
       retryable: false,
     });

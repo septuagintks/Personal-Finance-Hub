@@ -84,6 +84,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/timezones": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listTimeZones"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/accounts": {
         parameters: {
             query?: never;
@@ -744,6 +760,11 @@ export interface components {
             displayName: string;
             isCrypto: boolean;
         };
+        TimeZoneMetadata: {
+            id: string;
+            canonicalId: string;
+            isAlias: boolean;
+        };
         CreateAccountRequest: {
             name: string;
             /** @enum {string} */
@@ -1378,6 +1399,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CurrencyMetadata"][];
+                };
+            };
+            /** @description Catalog unchanged */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listTimeZones: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-None-Match"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description IANA timezone catalog supported by the service */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TimeZoneMetadata"][];
                 };
             };
             /** @description Catalog unchanged */

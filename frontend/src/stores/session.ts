@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
+import { translate } from '../i18n';
 import type { components } from '../generated/api-types';
 import {
   installRefreshHandler,
@@ -203,7 +204,7 @@ export const useSessionStore = defineStore('session', () => {
 
   function errorMessage(error: unknown): string {
     if (error instanceof ApiError) return error.details.message;
-    return 'Something unexpected happened.';
+    return translate('common.unexpectedError');
   }
 
   startChannel();

@@ -11,6 +11,8 @@ import { useAccountStore } from '../stores/accounts';
 import { useMetadataStore } from '../stores/metadata';
 import { useTransactionStore } from '../stores/transactions';
 import { useUserContextStore } from '../stores/user-context';
+import { translate, type MessageKey } from '../i18n';
+import { naturalDayWindow } from '../services/zoned-date-time';
 
 const route = useRoute();
 const router = useRouter();
@@ -32,11 +34,11 @@ const draft = reactive({
   to: '',
 });
 
-const typeLabels: Record<string, string> = {
-  income: 'Income',
-  expense: 'Expense',
-  transfer: 'Transfer',
-  adjustment: 'Adjustment',
+const typeLabels: Record<string, MessageKey> = {
+  income: 'ledger.type.income',
+  expense: 'ledger.type.expense',
+  transfer: 'ledger.type.transfer',
+  adjustment: 'ledger.type.adjustment',
 };
 
 function queryString(name: string): string {
@@ -51,9 +53,12 @@ function positiveId(value: string): number | undefined {
 
 function dateBoundary(value: string, end: boolean): string | undefined {
   if (!value) return undefined;
-  const date = new Date(`${value}T00:00:00`);
-  if (end) date.setDate(date.getDate() + 1);
-  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+  try {
+    const window = naturalDayWindow(value, userContext.preference?.timezone ?? 'UTC');
+    return end ? window.end : window.start;
+  } catch {
+    return undefined;
+  }
 }
 
 function filtersFromRoute(): TransactionFilters {
@@ -87,7 +92,7 @@ function mapError(error: unknown): ApiErrorShape {
   return {
     status: 0,
     errorCode: 'UNKNOWN_ERROR',
-    message: 'Transactions could not be loaded.',
+    message: translate('transactions.loadFailed'),
     traceId: '',
     fieldErrors: {},
     retryable: true,
@@ -122,11 +127,19 @@ async function loadMore(): Promise<void> {
 }
 
 function accountName(accountId: number): string {
-  return accounts.items.find(({ id }) => id === accountId)?.name ?? `Account ${accountId}`;
+  return (
+    accounts.items.find(({ id }) => id === accountId)?.name ??
+    translate('ledger.accountNumber', { id: accountId })
+  );
 }
 
 function amountText(amount: string): string {
-  return formatDecimalString(amount, userContext.preference?.locale ?? 'en-US');
+  return formatDecimalString(
+    amount,
+    userContext.preference?.locale ?? 'en-US',
+    8,
+    userContext.preference?.numberFormat,
+  );
 }
 
 function occurredText(value: string): string {
@@ -183,9 +196,9 @@ onMounted(async () => {
   <AppShell>
     <div class="content-header">
       <div>
-        <p class="eyebrow">Ledger / Transactions</p>
-        <h1>Transactions</h1>
-        <p class="content-header__copy">The ordered financial record across your accounts.</p>
+        <p class="eyebrow">{{ translate('transactions.eyebrow') }}</p>
+        <h1>{{ translate('transactions.title') }}</h1>
+        <p class="content-header__copy">{{ translate('transactions.description') }}</p>
       </div>
       <button
         class="button"
@@ -193,34 +206,38 @@ onMounted(async () => {
         :disabled="!accounts.items.length"
         @click="createOpen = true"
       >
-        <Plus :size="17" /> Record transaction
+        <Plus :size="17" /> {{ translate('transactions.record') }}
       </button>
     </div>
 
-    <form class="ledger-filters" aria-label="Transaction filters" @submit.prevent="applyFilters">
+    <form
+      class="ledger-filters"
+      :aria-label="translate('transactions.filters')"
+      @submit.prevent="applyFilters"
+    >
       <Filter :size="17" aria-hidden="true" />
       <label>
-        <span>Account</span>
+        <span>{{ translate('ledger.account') }}</span>
         <select v-model="draft.accountId">
-          <option value="">All accounts</option>
+          <option value="">{{ translate('ledger.allAccounts') }}</option>
           <option v-for="account in accounts.items" :key="account.id" :value="String(account.id)">
             {{ account.name }}
           </option>
         </select>
       </label>
       <label>
-        <span>Type</span>
+        <span>{{ translate('ledger.type') }}</span>
         <select v-model="draft.type">
-          <option value="">All types</option>
+          <option value="">{{ translate('ledger.allTypes') }}</option>
           <option v-for="(label, value) in typeLabels" :key="value" :value="value">
-            {{ label }}
+            {{ translate(label) }}
           </option>
         </select>
       </label>
       <label>
-        <span>Category</span>
+        <span>{{ translate('ledger.category') }}</span>
         <select v-model="draft.categoryId">
-          <option value="">All categories</option>
+          <option value="">{{ translate('ledger.allCategories') }}</option>
           <template v-for="root in metadata.categories" :key="root.id">
             <option :value="String(root.id)">{{ root.name }}</option>
             <option v-for="child in root.children" :key="child.id" :value="String(child.id)">
@@ -230,44 +247,44 @@ onMounted(async () => {
         </select>
       </label>
       <label>
-        <span>Tag</span>
+        <span>{{ translate('ledger.tag') }}</span>
         <select v-model="draft.tagId">
-          <option value="">All tags</option>
+          <option value="">{{ translate('ledger.allTags') }}</option>
           <option v-for="tag in metadata.tags" :key="tag.id" :value="String(tag.id)">
             {{ tag.name }}
           </option>
         </select>
       </label>
       <label class="ledger-filters__search">
-        <span>Search</span>
+        <span>{{ translate('ledger.search') }}</span>
         <input v-model="draft.keyword" maxlength="128" type="search" />
       </label>
       <label>
-        <span>From</span>
+        <span>{{ translate('ledger.from') }}</span>
         <input v-model="draft.from" type="date" />
       </label>
       <label>
-        <span>To</span>
+        <span>{{ translate('ledger.to') }}</span>
         <input v-model="draft.to" type="date" />
       </label>
       <div class="ledger-filters__actions">
         <button
           class="icon-button"
           type="button"
-          title="Clear filters"
-          aria-label="Clear filters"
+          :title="translate('ledger.clearFilters')"
+          :aria-label="translate('ledger.clearFilters')"
           @click="clearFilters"
         >
           <RotateCcw :size="17" />
         </button>
-        <button class="button button--small" type="submit">Apply</button>
+        <button class="button button--small" type="submit">{{ translate('ledger.apply') }}</button>
       </div>
     </form>
 
     <div v-if="pageError" class="page-alert" role="alert">
       <CircleAlert :size="19" />
       <div>
-        <strong>Ledger unavailable</strong>
+        <strong>{{ translate('transactions.unavailable') }}</strong>
         <p>{{ pageError.message }}</p>
       </div>
       <button
@@ -276,22 +293,25 @@ onMounted(async () => {
         type="button"
         @click="load"
       >
-        Try again
+        {{ translate('ledger.tryAgain') }}
       </button>
     </div>
 
     <section
       class="ledger-list"
       role="region"
-      aria-label="Transaction results"
+      :aria-label="translate('transactions.results')"
       aria-live="polite"
       :aria-busy="transactions.listState === 'loading'"
       tabindex="0"
       @keydown="handleLedgerKeydown"
     >
       <div class="ledger-list__head" aria-hidden="true">
-        <span>When</span><span>Entry</span><span>Account</span><span>Classification</span
-        ><span>Amount</span>
+        <span>{{ translate('ledger.when') }}</span
+        ><span>{{ translate('transactions.entry') }}</span
+        ><span>{{ translate('ledger.account') }}</span
+        ><span>{{ translate('transactions.classification') }}</span
+        ><span>{{ translate('ledger.amount') }}</span>
       </div>
       <div v-if="transactions.listState === 'loading'" class="account-list__loading">
         <span v-for="index in 5" :key="index"></span>
@@ -305,15 +325,19 @@ onMounted(async () => {
         >
           <time :datetime="transaction.occurredAt">{{ occurredText(transaction.occurredAt) }}</time>
           <span class="ledger-entry">
-            <strong>{{ transaction.description || typeLabels[transaction.type] }}</strong>
+            <strong>{{
+              transaction.description || translate(typeLabels[transaction.type])
+            }}</strong>
             <span class="ledger-tags">
               <small v-for="tag in transaction.tags" :key="tag.id">{{ tag.name }}</small>
             </span>
           </span>
-          <span data-label="Account">{{ accountName(transaction.accountId) }}</span>
-          <span data-label="Classification">
+          <span :data-label="translate('ledger.account')">{{
+            accountName(transaction.accountId)
+          }}</span>
+          <span :data-label="translate('transactions.classification')">
             <span class="transaction-type" :class="`transaction-type--${transaction.type}`">{{
-              typeLabels[transaction.type]
+              translate(typeLabels[transaction.type])
             }}</span>
             <small v-if="transaction.categoryName">{{ transaction.categoryName }}</small>
           </span>
@@ -324,7 +348,7 @@ onMounted(async () => {
       </template>
       <div v-else class="account-empty">
         <ReceiptText :size="28" />
-        <strong>No transactions match this view.</strong>
+        <strong>{{ translate('transactions.noMatch') }}</strong>
       </div>
     </section>
     <div v-if="transactions.nextCursor" class="ledger-load-more">
@@ -335,7 +359,7 @@ onMounted(async () => {
         @click="loadMore"
       >
         <LoaderCircle v-if="transactions.listState === 'loading-more'" class="spin" :size="17" />
-        Load more
+        {{ translate('ledger.loadMore') }}
       </button>
     </div>
 
@@ -345,6 +369,7 @@ onMounted(async () => {
       :accounts="accounts.items"
       :categories="metadata.categories"
       :tags="metadata.tags"
+      :time-zone="userContext.preference?.timezone ?? 'UTC'"
       :pending="createPending"
       :error="createError"
       @close="createOpen = false"

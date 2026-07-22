@@ -6,6 +6,7 @@ import { getDashboardSummary, type DashboardSummary } from '../services/dashboar
 import { ApiError, type ApiErrorShape } from '../services/api-error';
 import { formatDecimalString, toChartRatios } from '../services/presentation';
 import { useUserContextStore } from '../stores/user-context';
+import { translate } from '../i18n';
 
 const userContext = useUserContextStore();
 const summary = ref<DashboardSummary | null>(null);
@@ -18,13 +19,13 @@ const movementBars = computed(() => {
   const ratios = toChartRatios(values);
   return [
     {
-      label: 'Income',
+      label: translate('dashboard.income'),
       value: values[0],
       height: ratios[0] * 100,
       tone: 'teal',
     },
     {
-      label: 'Expenses',
+      label: translate('dashboard.expenses'),
       value: values[1],
       height: ratios[1] * 100,
       tone: 'coral',
@@ -46,7 +47,12 @@ const categoryRows = computed(() => {
 
 function formatNumber(value: string | undefined): string {
   if (!value) return '—';
-  return formatDecimalString(value, userContext.preference?.locale ?? 'en-US');
+  return formatDecimalString(
+    value,
+    userContext.preference?.locale ?? 'en-US',
+    8,
+    userContext.preference?.numberFormat,
+  );
 }
 
 async function load(): Promise<void> {
@@ -66,7 +72,7 @@ async function load(): Promise<void> {
         : {
             status: 0,
             errorCode: 'UNKNOWN_ERROR',
-            message: 'The dashboard could not be loaded.',
+            message: translate('dashboard.loadFailed'),
             traceId: '',
             fieldErrors: {},
             retryable: true,
@@ -88,23 +94,25 @@ onBeforeUnmount(() => requestController?.abort());
   <AppShell>
     <div class="content-header">
       <div>
-        <p class="eyebrow">Overview / Current month</p>
-        <h1>Good morning.</h1>
+        <p class="eyebrow">{{ translate('dashboard.eyebrow') }}</p>
+        <h1>{{ translate('dashboard.greeting') }}</h1>
         <p class="content-header__copy">
-          A concise view of what changed and where your attention can go next.
+          {{ translate('dashboard.description') }}
         </p>
       </div>
       <button class="button button--quiet" type="button" :disabled="loading" @click="load">
-        <RefreshCw :size="16" :class="{ spin: loading }" /> Refresh
+        <RefreshCw :size="16" :class="{ spin: loading }" /> {{ translate('common.refresh') }}
       </button>
     </div>
 
     <div v-if="error" class="page-alert" role="alert">
       <CircleAlert :size="19" />
       <div>
-        <strong>Dashboard unavailable</strong>
+        <strong>{{ translate('dashboard.unavailable') }}</strong>
         <p>{{ error.message }}</p>
-        <small v-if="error.traceId">Trace {{ error.traceId }}</small>
+        <small v-if="error.traceId">{{
+          translate('accounts.trace', { traceId: error.traceId })
+        }}</small>
       </div>
       <button
         v-if="error.retryable"
@@ -112,37 +120,44 @@ onBeforeUnmount(() => requestController?.abort());
         type="button"
         @click="load"
       >
-        Try again
+        {{ translate('ledger.tryAgain') }}
       </button>
     </div>
 
-    <section class="metric-grid" aria-label="Financial summary">
+    <section class="metric-grid" :aria-label="translate('dashboard.financialSummary')">
       <article class="metric-card metric-card--primary">
-        <div class="metric-card__top"><span>Net position</span><WalletCards :size="18" /></div>
+        <div class="metric-card__top">
+          <span>{{ translate('dashboard.netPosition') }}</span
+          ><WalletCards :size="18" />
+        </div>
         <strong>{{ formatNumber(summary?.netWorth?.netWorth) }}</strong
-        ><small>{{ summary?.baseCurrency ?? 'Awaiting ledger data' }}</small>
+        ><small>{{ summary?.baseCurrency ?? translate('dashboard.awaitingData') }}</small>
       </article>
       <article class="metric-card">
         <div class="metric-card__top">
-          <span>Income</span><ArrowUpRight :size="18" class="icon-teal" />
+          <span>{{ translate('dashboard.income') }}</span
+          ><ArrowUpRight :size="18" class="icon-teal" />
         </div>
         <strong>{{ formatNumber(summary?.monthlyIncome) }}</strong
-        ><small>Current month</small>
+        ><small>{{ translate('dashboard.currentMonth') }}</small>
       </article>
       <article class="metric-card">
         <div class="metric-card__top">
-          <span>Expenses</span><ArrowDownRight :size="18" class="icon-coral" />
+          <span>{{ translate('dashboard.expenses') }}</span
+          ><ArrowDownRight :size="18" class="icon-coral" />
         </div>
         <strong>{{ formatNumber(summary?.monthlyExpense) }}</strong
-        ><small>Current month</small>
+        ><small>{{ translate('dashboard.currentMonth') }}</small>
       </article>
       <article class="metric-card">
         <div class="metric-card__top">
-          <span>Asset groups</span
+          <span>{{ translate('dashboard.assetGroups') }}</span
           ><span class="metric-count">{{ summary?.assetDistribution?.length ?? '—' }}</span>
         </div>
-        <strong class="metric-card__value-small">{{ summary ? 'Current' : '—' }}</strong
-        ><small>Server grouping</small>
+        <strong class="metric-card__value-small">{{
+          summary ? translate('dashboard.current') : '—'
+        }}</strong
+        ><small>{{ translate('dashboard.serverGrouping') }}</small>
       </article>
     </section>
 
@@ -150,22 +165,28 @@ onBeforeUnmount(() => requestController?.abort());
       <article class="panel panel--wide">
         <div class="panel-heading">
           <div>
-            <p class="section-kicker">Movement</p>
-            <h2>Month at a glance</h2>
+            <p class="section-kicker">{{ translate('dashboard.movement') }}</p>
+            <h2>{{ translate('dashboard.monthGlance') }}</h2>
           </div>
           <span class="panel-meta">{{
-            summary?.reportPeriodStart ? 'Server-calculated window' : 'Waiting for data'
+            summary?.reportPeriodStart
+              ? translate('dashboard.serverWindow')
+              : translate('dashboard.waitingData')
           }}</span>
         </div>
-        <div v-if="loading" class="skeleton-chart" aria-label="Loading chart"></div>
+        <div
+          v-if="loading"
+          class="skeleton-chart"
+          :aria-label="translate('dashboard.loadingChart')"
+        ></div>
         <div
           v-else-if="summary"
           class="chart-placeholder"
-          aria-label="Income and expense comparison"
+          :aria-label="translate('dashboard.comparison')"
         >
           <div class="comparison-bars">
             <div v-for="bar in movementBars" :key="bar.label" class="comparison-column">
-              <span class="comparison-value">{{ bar.value }}</span
+              <span class="comparison-value">{{ formatNumber(bar.value) }}</span
               ><span
                 class="comparison-bar"
                 :class="`comparison-bar--${bar.tone}`"
@@ -176,15 +197,15 @@ onBeforeUnmount(() => requestController?.abort());
           </div>
         </div>
         <div v-else class="empty-state">
-          <p>No movement to display yet.</p>
-          <span>Your first confirmed transaction will appear here.</span>
+          <p>{{ translate('dashboard.noMovement') }}</p>
+          <span>{{ translate('dashboard.firstTransaction') }}</span>
         </div>
       </article>
       <article class="panel">
         <div class="panel-heading">
           <div>
-            <p class="section-kicker">Accounts</p>
-            <h2>Asset distribution</h2>
+            <p class="section-kicker">{{ translate('dashboard.accounts') }}</p>
+            <h2>{{ translate('dashboard.assetDistribution') }}</h2>
           </div>
         </div>
         <div v-if="assetRows.length" class="summary-breakdown-list">
@@ -199,22 +220,26 @@ onBeforeUnmount(() => requestController?.abort());
             </div>
           </div>
         </div>
-        <div v-else class="empty-state"><p>No account distribution yet.</p></div>
+        <div v-else class="empty-state">
+          <p>{{ translate('dashboard.noDistribution') }}</p>
+        </div>
       </article>
     </section>
 
     <section class="panel dashboard-category-panel" aria-labelledby="top-categories-title">
       <div class="panel-heading">
         <div>
-          <p class="section-kicker">Spending</p>
-          <h2 id="top-categories-title">Top expense categories</h2>
+          <p class="section-kicker">{{ translate('dashboard.spending') }}</p>
+          <h2 id="top-categories-title">{{ translate('dashboard.topCategories') }}</h2>
         </div>
-        <RouterLink class="text-link" :to="{ name: 'reports' }">Open reports</RouterLink>
+        <RouterLink class="text-link" :to="{ name: 'reports' }">{{
+          translate('dashboard.openReports')
+        }}</RouterLink>
       </div>
       <div v-if="categoryRows.length" class="dashboard-category-grid">
         <div v-for="category in categoryRows" :key="category.categoryId ?? 'uncategorized'">
           <div class="dashboard-category-row">
-            <strong>{{ category.categoryName || 'Uncategorized' }}</strong>
+            <strong>{{ category.categoryName || translate('ledger.uncategorized') }}</strong>
             <span>{{ formatNumber(category.amount) }} {{ summary?.baseCurrency }}</span>
             <small>{{ category.percentage }}</small>
           </div>
@@ -223,15 +248,13 @@ onBeforeUnmount(() => requestController?.abort());
           </div>
         </div>
       </div>
-      <div v-else class="empty-state"><p>No expenses this month.</p></div>
+      <div v-else class="empty-state">
+        <p>{{ translate('dashboard.noExpenses') }}</p>
+      </div>
     </section>
 
     <section class="dashboard-footnote">
-      <span class="privacy-dot"></span
-      ><span
-        >All totals are calculated by the PFH service in your configured timezone. This view never
-        invents missing data.</span
-      >
+      <span class="privacy-dot"></span><span>{{ translate('dashboard.footnote') }}</span>
     </section>
   </AppShell>
 </template>

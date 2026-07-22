@@ -12,8 +12,10 @@ import {
   type UserAuditLogItem,
 } from '../services/maintenance-api';
 import { formatDecimalString, formatInstant } from '../services/presentation';
+import { localDateTimeToInstant } from '../services/zoned-date-time';
 import { useAccountStore } from '../stores/accounts';
 import { useUserContextStore } from '../stores/user-context';
+import { translate, type MessageKey } from '../i18n';
 
 const accounts = useAccountStore();
 const userContext = useUserContextStore();
@@ -47,6 +49,20 @@ const actionOptions: UserAuditAction[] = [
   'token_refresh',
   'security_event',
 ];
+const actionLabels: Record<UserAuditAction, MessageKey> = {
+  create: 'maintenance.action.create',
+  update: 'maintenance.action.update',
+  archive: 'maintenance.action.archive',
+  delete: 'maintenance.action.delete',
+  dangerous_delete: 'maintenance.action.dangerousDelete',
+  sync_import: 'maintenance.action.syncImport',
+  refresh: 'maintenance.action.refresh',
+  register: 'maintenance.action.register',
+  login: 'maintenance.action.login',
+  logout: 'maintenance.action.logout',
+  token_refresh: 'maintenance.action.tokenRefresh',
+  security_event: 'maintenance.action.securityEvent',
+};
 
 const locale = computed(() => userContext.preference?.locale ?? 'en-US');
 const presentationLocale = computed(() => ({
@@ -72,12 +88,20 @@ function showError(reason: unknown, fallback: string): void {
 
 function isoInput(value: string): string | undefined {
   if (!value) return undefined;
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+  return localDateTimeToInstant(value, userContext.preference?.timezone ?? 'UTC');
 }
 
 async function loadAudit(reset = true): Promise<void> {
   if (!reset && !nextCursor.value) return;
+  let from: string | undefined;
+  let to: string | undefined;
+  try {
+    from = isoInput(fromInput.value);
+    to = isoInput(toInput.value);
+  } catch {
+    showError(translate('ledger.invalidLocalTime'), translate('ledger.invalidLocalTime'));
+    return;
+  }
   const cursor = reset ? undefined : (nextCursor.value ?? undefined);
   const generation = ++auditGeneration;
   auditController?.abort();
@@ -94,8 +118,8 @@ async function loadAudit(reset = true): Promise<void> {
       {
         action: action.value || undefined,
         resourceType: resourceType.value.trim() || undefined,
-        from: isoInput(fromInput.value),
-        to: isoInput(toInput.value),
+        from,
+        to,
         pageSize: 50,
       },
       cursor,
@@ -106,7 +130,7 @@ async function loadAudit(reset = true): Promise<void> {
     nextCursor.value = page.nextCursor;
   } catch (reason) {
     if (generation === auditGeneration && !controller.signal.aborted) {
-      showError(reason, 'Audit activity could not be loaded.');
+      showError(reason, translate('maintenance.auditLoadFailed'));
     }
   } finally {
     if (auditController === controller) {
@@ -142,7 +166,7 @@ async function rebuild(scope: 'all' | 'selected'): Promise<void> {
     rebuildItems.value = result.accounts;
     await loadAudit();
   } catch (reason) {
-    if (!controller.signal.aborted) showError(reason, 'Balance caches could not be rebuilt.');
+    if (!controller.signal.aborted) showError(reason, translate('maintenance.rebuildFailed'));
   } finally {
     if (rebuildController === controller) {
       rebuildController = null;
@@ -159,7 +183,7 @@ onMounted(async () => {
   const results = await Promise.allSettled([loadAudit(), accounts.loadList('all')]);
   const accountFailure = results[1];
   if (accountFailure?.status === 'rejected' && !error.value) {
-    showError(accountFailure.reason, 'Accounts could not be loaded.');
+    showError(accountFailure.reason, translate('maintenance.accountsLoadFailed'));
   }
 });
 
@@ -174,8 +198,8 @@ onBeforeUnmount(() => {
   <AppShell>
     <div class="content-header maintenance-header">
       <div>
-        <p class="eyebrow">Account / Activity</p>
-        <h1>Maintenance</h1>
+        <p class="eyebrow">{{ translate('maintenance.eyebrow') }}</p>
+        <h1>{{ translate('maintenance.title') }}</h1>
       </div>
       <button
         class="button button--quiet"
@@ -183,38 +207,41 @@ onBeforeUnmount(() => {
         :disabled="auditLoading"
         @click="loadAudit()"
       >
-        <RefreshCw :size="16" :class="{ spin: auditLoading }" /> Refresh
+        <RefreshCw :size="16" :class="{ spin: auditLoading }" />
+        {{ translate('common.refresh') }}
       </button>
     </div>
 
     <div v-if="error" class="page-alert" role="alert">
       <CircleAlert :size="19" />
       <div>
-        <strong>Maintenance request failed</strong>
+        <strong>{{ translate('maintenance.requestFailed') }}</strong>
         <p>{{ error }}</p>
-        <small v-if="errorTraceId">Trace {{ errorTraceId }}</small>
+        <small v-if="errorTraceId">{{
+          translate('maintenance.traceValue', { traceId: errorTraceId })
+        }}</small>
       </div>
     </div>
 
     <section class="maintenance-tool" aria-labelledby="balance-cache-heading">
       <div class="section-heading">
         <div>
-          <p class="section-kicker">Balances</p>
-          <h2 id="balance-cache-heading">Cache rebuild</h2>
+          <p class="section-kicker">{{ translate('maintenance.balances') }}</p>
+          <h2 id="balance-cache-heading">{{ translate('maintenance.cacheRebuild') }}</h2>
         </div>
         <DatabaseZap :size="22" aria-hidden="true" />
       </div>
       <div class="maintenance-actions">
         <label class="field">
-          <span>Account</span>
+          <span>{{ translate('ledger.account') }}</span>
           <select
             v-model="selectedAccountId"
             :disabled="rebuilding || accounts.listState === 'loading'"
           >
-            <option value="">Select account</option>
+            <option value="">{{ translate('maintenance.selectAccount') }}</option>
             <option v-for="account in accounts.items" :key="account.id" :value="String(account.id)">
               {{ account.name }} · {{ account.currencyCode
-              }}{{ account.isArchived ? ' · Archived' : '' }}
+              }}{{ account.isArchived ? ` · ${translate('accounts.archived')}` : '' }}
             </option>
           </select>
         </label>
@@ -224,18 +251,28 @@ onBeforeUnmount(() => {
           :disabled="rebuilding || !selectedAccountId"
           @click="rebuild('selected')"
         >
-          <RotateCcw :size="16" /> Rebuild selected
+          <RotateCcw :size="16" /> {{ translate('maintenance.rebuildSelected') }}
         </button>
         <button class="button" type="button" :disabled="rebuilding" @click="rebuild('all')">
-          <DatabaseZap :size="16" /> Rebuild all
+          <DatabaseZap :size="16" /> {{ translate('maintenance.rebuildAll') }}
         </button>
       </div>
 
       <div v-if="rebuildItems.length" class="rebuild-result" aria-live="polite">
         <div v-for="item in rebuildItems" :key="item.accountId" class="rebuild-result__row">
-          <strong>Account {{ item.accountId }}</strong>
-          <span>{{ formatDecimalString(item.balance, locale) }} {{ item.currencyCode }}</span>
-          <span>Source {{ item.sourceVersion }} / Cache {{ item.cacheVersion }}</span>
+          <strong>{{ translate('ledger.accountNumber', { id: item.accountId }) }}</strong>
+          <span
+            >{{
+              formatDecimalString(item.balance, locale, 8, userContext.preference?.numberFormat)
+            }}
+            {{ item.currencyCode }}</span
+          >
+          <span>{{
+            translate('maintenance.cacheVersions', {
+              source: item.sourceVersion,
+              cache: item.cacheVersion,
+            })
+          }}</span>
           <time :datetime="item.rebuiltAt">{{ displayTime(item.rebuiltAt) }}</time>
         </div>
       </div>
@@ -244,57 +281,70 @@ onBeforeUnmount(() => {
     <section class="maintenance-audit" aria-labelledby="audit-heading">
       <div class="section-heading">
         <div>
-          <p class="section-kicker">Security record</p>
-          <h2 id="audit-heading">Audit activity</h2>
+          <p class="section-kicker">{{ translate('maintenance.securityRecord') }}</p>
+          <h2 id="audit-heading">{{ translate('maintenance.auditActivity') }}</h2>
         </div>
       </div>
 
-      <form class="audit-filters" aria-label="Audit filters" @submit.prevent="loadAudit()">
+      <form
+        class="audit-filters"
+        :aria-label="translate('maintenance.auditFilters')"
+        @submit.prevent="loadAudit()"
+      >
         <Filter :size="18" aria-hidden="true" />
         <label class="field">
-          <span>Action</span>
+          <span>{{ translate('maintenance.action') }}</span>
           <select v-model="action">
-            <option value="">All actions</option>
+            <option value="">{{ translate('maintenance.allActions') }}</option>
             <option v-for="item in actionOptions" :key="item" :value="item">
-              {{ item.replaceAll('_', ' ') }}
+              {{ translate(actionLabels[item]) }}
             </option>
           </select>
         </label>
         <label class="field">
-          <span>Resource</span>
-          <input v-model="resourceType" maxlength="64" placeholder="account" />
+          <span>{{ translate('maintenance.resource') }}</span>
+          <input
+            v-model="resourceType"
+            maxlength="64"
+            :placeholder="translate('maintenance.resourcePlaceholder')"
+          />
         </label>
         <label class="field">
-          <span>From</span>
+          <span>{{ translate('ledger.from') }}</span>
           <input v-model="fromInput" type="datetime-local" :max="toInput || undefined" />
         </label>
         <label class="field">
-          <span>To</span>
+          <span>{{ translate('ledger.to') }}</span>
           <input v-model="toInput" type="datetime-local" :min="fromInput || undefined" />
         </label>
         <div class="audit-filters__actions">
           <button class="button button--quiet button--small" type="button" @click="resetFilters">
-            Reset
+            {{ translate('ledger.clearFilters') }}
           </button>
-          <button class="button button--small" type="submit" :disabled="auditLoading">Apply</button>
+          <button class="button button--small" type="submit" :disabled="auditLoading">
+            {{ translate('ledger.apply') }}
+          </button>
         </div>
       </form>
 
       <div class="audit-list" :aria-busy="auditLoading" tabindex="0">
         <div class="audit-list__head" aria-hidden="true">
-          <span>When</span><span>Action</span><span>Resource</span><span>Result</span
-          ><span>Trace</span>
+          <span>{{ translate('ledger.when') }}</span
+          ><span>{{ translate('maintenance.action') }}</span
+          ><span>{{ translate('maintenance.resource') }}</span
+          ><span>{{ translate('maintenance.result') }}</span
+          ><span>{{ translate('maintenance.trace') }}</span>
         </div>
         <div v-for="item in auditItems" :key="item.id" class="audit-list__row">
           <time :datetime="item.occurredAt">{{ displayTime(item.occurredAt) }}</time>
-          <strong>{{ item.action.replaceAll('_', ' ') }}</strong>
+          <strong>{{ translate(actionLabels[item.action]) }}</strong>
           <span>{{ item.resourceType }} · {{ item.resourceId }}</span>
-          <span class="status-badge">{{ item.result }}</span>
-          <code>{{ item.traceId ?? 'Unavailable' }}</code>
+          <span class="status-badge">{{ translate('maintenance.success') }}</span>
+          <code>{{ item.traceId ?? translate('maintenance.unavailable') }}</code>
         </div>
         <div v-if="!auditLoading && !auditItems.length" class="empty-state">
-          <p>No audit activity found</p>
-          <span>Adjust the current filters and try again.</span>
+          <p>{{ translate('maintenance.noActivity') }}</p>
+          <span>{{ translate('maintenance.noActivityDetail') }}</span>
         </div>
       </div>
       <div v-if="nextCursor" class="ledger-load-more">
@@ -304,7 +354,7 @@ onBeforeUnmount(() => {
           :disabled="auditLoading"
           @click="loadAudit(false)"
         >
-          Load more
+          {{ translate('ledger.loadMore') }}
         </button>
       </div>
     </section>

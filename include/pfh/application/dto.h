@@ -357,6 +357,12 @@ struct CurrencyMetadataDto {
     bool is_crypto = false;
 };
 
+struct TimeZoneMetadataDto {
+    std::string id;
+    std::string canonical_id;
+    bool is_alias = false;
+};
+
 struct CashFlowPeriodDto {
     std::string period;
     std::string income;

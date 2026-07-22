@@ -1,4 +1,7 @@
 import Decimal from 'decimal.js';
+import type { components } from '../generated/api-types';
+
+type NumberFormat = components['schemas']['NumberFormat'];
 
 export interface PresentationLocale {
   locale: string;
@@ -15,6 +18,7 @@ export function formatDecimalString(
   value: string,
   locale = 'en-US',
   maximumFractionDigits = 8,
+  numberFormat?: NumberFormat,
 ): string {
   try {
     const decimal = new Decimal(value).toDecimalPlaces(
@@ -25,11 +29,25 @@ export function formatDecimalString(
     const unsigned = normalized.startsWith('-') ? normalized.slice(1) : normalized;
     const [whole, fraction] = unsigned.split('.');
     const parts = new Intl.NumberFormat(locale).formatToParts(1000.1);
-    const group = parts.find((part) => part.type === 'group')?.value ?? ',';
-    const decimalSeparator = parts.find((part) => part.type === 'decimal')?.value ?? '.';
+    const separators: Record<NumberFormat, { group: string; decimal: string }> = {
+      '1,234.56': { group: ',', decimal: '.' },
+      '1.234,56': { group: '.', decimal: ',' },
+      '1 234,56': { group: ' ', decimal: ',' },
+    };
+    const selected = numberFormat ? separators[numberFormat] : undefined;
+    const group = selected?.group ?? parts.find((part) => part.type === 'group')?.value ?? ',';
+    const decimalSeparator =
+      selected?.decimal ?? parts.find((part) => part.type === 'decimal')?.value ?? '.';
     const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, group);
-    const sign = decimal.isNegative() && !decimal.isZero() ? '-' : '';
-    return `${sign}${grouped}${fraction ? `${decimalSeparator}${fraction}` : ''}`;
+    const formatter = new Intl.NumberFormat(locale, { useGrouping: false });
+    const digits = Array.from({ length: 10 }, (_, digit) => formatter.format(digit));
+    const localizeDigits = (text: string) => text.replace(/\d/g, (digit) => digits[Number(digit)]);
+    const minusSign =
+      formatter.formatToParts(-1).find((part) => part.type === 'minusSign')?.value ?? '-';
+    const sign = decimal.isNegative() && !decimal.isZero() ? minusSign : '';
+    return `${sign}${localizeDigits(grouped)}${
+      fraction ? `${decimalSeparator}${localizeDigits(fraction)}` : ''
+    }`;
   } catch {
     return value;
   }

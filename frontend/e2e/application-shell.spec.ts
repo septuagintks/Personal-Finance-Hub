@@ -8,11 +8,13 @@ const preferencePayload = {
   baseCurrency: 'CNY',
   locale: 'en-US',
   timezone: 'Asia/Shanghai',
-  dateFormat: 'yyyy-MM-dd',
-  numberFormat: 'standard',
+  dateFormat: 'YYYY-MM-DD',
+  numberFormat: '1,234.56',
   theme: 'system',
   defaultHomePage: 'dashboard',
   defaultReportPeriod: 'current_month',
+  customReportStartMonth: null,
+  customReportEndMonth: null,
 };
 
 const currencyPayload = [
@@ -102,10 +104,29 @@ for (const viewport of [
       await page.goto('/');
       await expect(page.getByRole('heading', { name: "Candy's Ledger" })).toBeVisible();
       await expect(page.getByRole('link', { name: /Start a private ledger/ })).toBeVisible();
-      const overflow = await page.evaluate(
-        () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      const overflow = await page.evaluate(() => {
+        const viewportWidth = document.documentElement.clientWidth;
+        const offenders = [...document.querySelectorAll<HTMLElement>('body *')]
+          .map((element) => {
+            const rect = element.getBoundingClientRect();
+            return {
+              selector: `${element.tagName.toLowerCase()}.${element.className}`,
+              left: Math.round(rect.left),
+              right: Math.round(rect.right),
+              width: Math.round(rect.width),
+            };
+          })
+          .filter(({ left, right }) => left < -1 || right > viewportWidth + 1)
+          .slice(0, 10);
+        return {
+          viewportWidth,
+          scrollWidth: document.documentElement.scrollWidth,
+          offenders,
+        };
+      });
+      expect(overflow.scrollWidth, JSON.stringify(overflow)).toBeLessThanOrEqual(
+        overflow.viewportWidth,
       );
-      expect(overflow).toBe(false);
       expect(refreshRequests).toBe(0);
       await expectNoAccessibilityViolations(page);
     });
@@ -129,7 +150,9 @@ for (const viewport of [
     test('registration preloads user context before opening the dashboard', async ({ page }) => {
       await routeDashboard(page);
       let preferenceAuthorization = '';
+      let registrationPayload: Record<string, unknown> = {};
       await page.route('**/api/v1/web/auth/register', async (route) => {
+        registrationPayload = route.request().postDataJSON() as Record<string, unknown>;
         await route.fulfill({
           status: 201,
           contentType: 'application/json',
@@ -164,11 +187,16 @@ for (const viewport of [
       await page
         .locator('input[name="new-password-confirmation"]')
         .fill('correct horse battery staple');
+      const browserTimezone = await page.evaluate(
+        () => Intl.DateTimeFormat().resolvedOptions().timeZone,
+      );
       await page.getByRole('button', { name: 'Create private ledger' }).click();
 
       await expect(page).toHaveURL(/\/dashboard$/);
       await expect(page.getByRole('heading', { name: 'Good morning.' })).toBeVisible();
       expect(preferenceAuthorization).toBe('Bearer registered-access');
+      expect(registrationPayload.preferredTimezone).toBe(browserTimezone);
+      expect(registrationPayload.preferredLocale).toBe('en-US');
     });
 
     test('login and logout keep credentials out of browser storage', async ({ page }) => {
@@ -350,11 +378,12 @@ for (const viewport of [
 
       await expect(page).toHaveURL(/\/dashboard$/);
       await expect(page.getByRole('heading', { name: 'Good morning.' })).toBeVisible();
-      expect(refreshRequests).toBe(2);
-      expect(dashboardAuthorizations).toEqual([
-        'Bearer expiring-access',
-        'Bearer refreshed-access',
-      ]);
+      await expect
+        .poll(() => ({ refreshRequests, dashboardAuthorizations: [...dashboardAuthorizations] }))
+        .toEqual({
+          refreshRequests: 2,
+          dashboardAuthorizations: ['Bearer expiring-access', 'Bearer refreshed-access'],
+        });
     });
 
     test('direct navigation and reload restore context before the protected page loads', async ({
@@ -470,7 +499,7 @@ for (const viewport of [
       await page.getByRole('button', { name: 'Sign in' }).click();
 
       await expect(page).toHaveURL(/\/login$/);
-      await expect(page.getByRole('alert')).toContainText('The service is unavailable right now.');
+      await expect(page.getByRole('alert')).toContainText('The service could not be reached.');
       const stored = await page.evaluate(() => ({
         local: { ...window.localStorage },
         session: { ...window.sessionStorage },

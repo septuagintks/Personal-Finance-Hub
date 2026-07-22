@@ -8,6 +8,12 @@ describe('presentation adapters', () => {
     expect(formatDecimalString('-0.004', 'en-US', 2)).toBe('0');
   });
 
+  it('applies each persisted number format independently from the locale', () => {
+    expect(formatDecimalString('1234567.89', 'en-US', 8, '1,234.56')).toBe('1,234,567.89');
+    expect(formatDecimalString('1234567.89', 'en-US', 8, '1.234,56')).toBe('1.234.567,89');
+    expect(formatDecimalString('-1234567.89', 'en-US', 8, '1 234,56')).toBe('-1 234 567,89');
+  });
+
   it('uses an IANA timezone for instant presentation', () => {
     const instant = '2026-07-01T00:30:00Z';
     expect(formatInstant(instant, { locale: 'en-US', timeZone: 'America/Los_Angeles' })).toContain(

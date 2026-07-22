@@ -13,6 +13,12 @@ const currencies = [
   },
 ];
 
+const timezones = [
+  { id: 'America/New_York', canonicalId: 'America/New_York', isAlias: false },
+  { id: 'Asia/Shanghai', canonicalId: 'Asia/Shanghai', isAlias: false },
+  { id: 'UTC', canonicalId: 'Etc/UTC', isAlias: true },
+];
+
 const longCategoryName =
   'InternationalReconciliationAndTravelExpenseDocumentationForAnnualReporting';
 const longTagName = 'year-end-regulatory-reconciliation-documentation-review';
@@ -26,6 +32,8 @@ let preference = {
   theme: 'system',
   defaultHomePage: 'dashboard',
   defaultReportPeriod: 'current_month',
+  customReportStartMonth: null as string | null,
+  customReportEndMonth: null as string | null,
 };
 
 async function json(route: Route, body: unknown, status = 200): Promise<void> {
@@ -71,6 +79,7 @@ function installApi(page: Page): void {
     }),
   );
   void page.route('**/api/v1/currencies', (route) => json(route, currencies));
+  void page.route('**/api/v1/timezones', (route) => json(route, timezones));
   void page.route('**/api/v1/users/me/preferences', async (route) => {
     if (route.request().method() === 'PUT') {
       preference = route.request().postDataJSON() as typeof preference;
@@ -205,12 +214,27 @@ for (const viewport of [
 
     await page.getByRole('tab', { name: 'Preferences' }).click();
     await page.getByLabel('Base currency').selectOption('USDT');
+    const timezone = page.getByLabel('Search IANA timezones');
+    await timezone.click();
+    await timezone.fill('new_york');
+    await timezone.press('ArrowDown');
+    await timezone.press('Enter');
+    await expect(timezone).toHaveValue('America/New_York');
+    await page.getByLabel('Default report period').selectOption('custom');
+    await page.getByLabel('Custom start month').fill('2025-01');
+    await page.getByLabel('Custom end month').fill('2025-03');
     await page.getByLabel('Language').selectOption('zh-CN');
     await page.getByLabel('Theme').selectOption('dark');
     await page.getByRole('button', { name: 'Save preferences' }).click();
     await expect(page.getByRole('heading', { name: '设置' })).toBeVisible();
     await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    expect(preference).toMatchObject({
+      timezone: 'America/New_York',
+      defaultReportPeriod: 'custom',
+      customReportStartMonth: '2025-01',
+      customReportEndMonth: '2025-03',
+    });
 
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth > document.documentElement.clientWidth,

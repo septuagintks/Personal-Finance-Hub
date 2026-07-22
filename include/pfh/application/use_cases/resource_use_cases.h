@@ -320,4 +320,9 @@ public:
     [[nodiscard]] Result<std::vector<CurrencyMetadataDto>> execute() const;
 };
 
+class ListTimeZonesUseCase {
+public:
+    [[nodiscard]] Result<std::vector<TimeZoneMetadataDto>> execute() const;
+};
+
 } // namespace pfh::application

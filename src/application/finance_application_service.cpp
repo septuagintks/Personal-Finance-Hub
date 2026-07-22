@@ -378,6 +378,11 @@ FinanceApplicationService::list_currencies() const {
     return ListCurrenciesUseCase().execute();
 }
 
+Result<std::vector<TimeZoneMetadataDto>>
+FinanceApplicationService::list_timezones() const {
+    return ListTimeZonesUseCase().execute();
+}
+
 Result<TransactionDto> FinanceApplicationService::create_transaction(
     const CreateTransactionCommand& command) {
     auto scope = open_scope(command.user_id);

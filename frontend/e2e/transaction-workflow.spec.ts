@@ -29,6 +29,8 @@ const preference = {
   theme: 'system',
   defaultHomePage: 'transactions',
   defaultReportPeriod: 'current_month',
+  customReportStartMonth: null,
+  customReportEndMonth: null,
 };
 
 const account = {

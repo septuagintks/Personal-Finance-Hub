@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue';
 import { ArrowLeft, ArrowRight, LoaderCircle, Trash2 } from '@lucide/vue';
 import type { Account } from '../services/account-api';
 import ModalDialog from './ModalDialog.vue';
+import { translate } from '../i18n';
 
 const props = withDefaults(
   defineProps<{
@@ -34,30 +35,28 @@ watch(
 <template>
   <ModalDialog
     :open="open"
-    title="Permanently delete account"
-    :description="`Step ${step} of 3`"
+    :title="translate('deleteAccount.title')"
+    :description="translate('deleteAccount.step', { step })"
     @close="pending ? undefined : emit('close')"
   >
     <div v-if="error" class="form-alert" role="alert">{{ error }}</div>
     <section v-if="step === 1" class="delete-step">
-      <h3>Review affected records</h3>
+      <h3>{{ translate('deleteAccount.reviewTitle') }}</h3>
       <ul class="impact-list">
-        <li>All transactions recorded in this account</li>
-        <li>Transfer groups touching this account, including their other leg</li>
-        <li>Related tag links and cached balances</li>
+        <li>{{ translate('deleteAccount.transactions') }}</li>
+        <li>{{ translate('deleteAccount.transfers') }}</li>
+        <li>{{ translate('deleteAccount.relatedData') }}</li>
       </ul>
     </section>
     <section v-else-if="step === 2" class="delete-step">
-      <h3>Confirm irreversible removal</h3>
+      <h3>{{ translate('deleteAccount.confirmTitle') }}</h3>
       <label class="acknowledgement">
         <input v-model="acknowledged" type="checkbox" />
-        <span
-          >I understand that this account and its related ledger records cannot be restored.</span
-        >
+        <span>{{ translate('deleteAccount.acknowledge') }}</span>
       </label>
     </section>
     <section v-else class="delete-step">
-      <h3>Enter the account name</h3>
+      <h3>{{ translate('deleteAccount.enterName') }}</h3>
       <label class="field">
         <span>{{ account.name }}</span>
         <input
@@ -76,7 +75,7 @@ watch(
         @click="step === 1 ? emit('close') : (step -= 1)"
       >
         <ArrowLeft v-if="step > 1" :size="17" />
-        {{ step === 1 ? 'Cancel' : 'Back' }}
+        {{ translate(step === 1 ? 'common.cancel' : 'common.back') }}
       </button>
       <button
         v-if="step < 3"
@@ -85,7 +84,7 @@ watch(
         :disabled="step === 2 && !acknowledged"
         @click="step += 1"
       >
-        Continue <ArrowRight :size="17" />
+        {{ translate('common.continue') }} <ArrowRight :size="17" />
       </button>
       <button
         v-else
@@ -96,7 +95,7 @@ watch(
       >
         <LoaderCircle v-if="pending" class="spin" :size="17" />
         <Trash2 v-else :size="17" />
-        {{ pending ? 'Deleting' : 'Delete permanently' }}
+        {{ translate(pending ? 'deleteAccount.deleting' : 'deleteAccount.deletePermanently') }}
       </button>
     </footer>
   </ModalDialog>

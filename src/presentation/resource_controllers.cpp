@@ -28,35 +28,52 @@ namespace {
 
 using Json = nlohmann::json;
 
-[[nodiscard]] std::string currency_catalog_etag(
-    const std::vector<application::CurrencyMetadataDto>& currencies) {
-    std::uint64_t hash = 14695981039346656037ULL;
+void mix_catalog_text(std::uint64_t& hash, std::string_view value) {
     const auto mix_byte = [&](std::uint8_t byte) {
         hash ^= byte;
         hash *= 1099511628211ULL;
     };
-    const auto mix_text = [&](std::string_view value) {
-        auto size = static_cast<std::uint64_t>(value.size());
-        for (int shift = 0; shift < 64; shift += 8) {
-            mix_byte(static_cast<std::uint8_t>(size >> shift));
-        }
-        for (const char value_byte : value) {
-            mix_byte(static_cast<std::uint8_t>(
-                static_cast<unsigned char>(value_byte)));
-        }
-    };
-    for (const auto& currency : currencies) {
-        mix_text(currency.code);
-        mix_text(currency.symbol);
-        mix_text(std::to_string(currency.precision));
-        mix_text(currency.display_name);
-        mix_text(currency.is_crypto ? "1" : "0");
+    auto size = static_cast<std::uint64_t>(value.size());
+    for (int shift = 0; shift < 64; shift += 8) {
+        mix_byte(static_cast<std::uint8_t>(size >> shift));
     }
+    for (const char value_byte : value) {
+        mix_byte(static_cast<std::uint8_t>(
+            static_cast<unsigned char>(value_byte)));
+    }
+}
 
+[[nodiscard]] std::string catalog_etag(
+    std::string_view catalog,
+    std::uint64_t hash) {
     std::ostringstream result;
-    result << "W/\"pfh-currency-" << std::hex << std::setfill('0')
+    result << "W/\"pfh-" << catalog << '-' << std::hex << std::setfill('0')
            << std::setw(16) << hash << '\"';
     return result.str();
+}
+
+[[nodiscard]] std::string currency_catalog_etag(
+    const std::vector<application::CurrencyMetadataDto>& currencies) {
+    std::uint64_t hash = 14695981039346656037ULL;
+    for (const auto& currency : currencies) {
+        mix_catalog_text(hash, currency.code);
+        mix_catalog_text(hash, currency.symbol);
+        mix_catalog_text(hash, std::to_string(currency.precision));
+        mix_catalog_text(hash, currency.display_name);
+        mix_catalog_text(hash, currency.is_crypto ? "1" : "0");
+    }
+    return catalog_etag("currency", hash);
+}
+
+[[nodiscard]] std::string timezone_catalog_etag(
+    const std::vector<application::TimeZoneMetadataDto>& timezones) {
+    std::uint64_t hash = 14695981039346656037ULL;
+    for (const auto& timezone : timezones) {
+        mix_catalog_text(hash, timezone.id);
+        mix_catalog_text(hash, timezone.canonical_id);
+        mix_catalog_text(hash, timezone.is_alias ? "1" : "0");
+    }
+    return catalog_etag("timezone", hash);
 }
 
 [[nodiscard]] application::Result<domain::UserId> require_user(
@@ -866,6 +883,30 @@ HttpResponse CurrencyController::list(const HttpRequest& request) {
             {"precision", currency.precision},
             {"displayName", currency.display_name},
             {"isCrypto", currency.is_crypto}});
+    }
+    auto response = HttpResponseMapper::json(200, body);
+    response.headers.emplace("ETag", etag);
+    response.headers.emplace("Cache-Control", "public, max-age=86400");
+    return response;
+}
+
+HttpResponse TimeZoneController::list(const HttpRequest& request) {
+    auto result = service_.list_timezones();
+    if (!result) return HttpResponseMapper::error(result.error(), request.trace_id);
+    const auto etag = timezone_catalog_etag(*result);
+    if (request.header("If-None-Match") == std::optional<std::string>(etag)) {
+        HttpResponse response;
+        response.status = 304;
+        response.headers.emplace("ETag", etag);
+        response.headers.emplace("Cache-Control", "public, max-age=86400");
+        return response;
+    }
+    Json body = Json::array();
+    for (const auto& timezone : *result) {
+        body.push_back(Json{
+            {"id", timezone.id},
+            {"canonicalId", timezone.canonical_id},
+            {"isAlias", timezone.is_alias}});
     }
     auto response = HttpResponseMapper::json(200, body);
     response.headers.emplace("ETag", etag);

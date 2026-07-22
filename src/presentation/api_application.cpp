@@ -130,6 +130,10 @@ HttpResponse ApiApplication::handle(HttpRequest request) noexcept {
             return finalize(currencies_->list(request));
         }
         if (request.method == HttpMethod::Get &&
+            request.path == "/api/v1/timezones" && timezones_ != nullptr) {
+            return finalize(timezones_->list(request));
+        }
+        if (request.method == HttpMethod::Get &&
             request.path == "/api/v1/accounts" && accounts_ != nullptr) {
             return finalize(accounts_->list(request));
         }
