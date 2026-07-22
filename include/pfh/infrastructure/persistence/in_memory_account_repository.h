@@ -301,28 +301,59 @@ public:
     balances_at(
         domain::UserId user_id,
         std::chrono::system_clock::time_point as_of) override {
+        auto projections = balances_at_many(user_id, {as_of});
+        if (!projections) return std::unexpected(projections.error());
+        return std::move(projections->front().balances);
+    }
+
+    [[nodiscard]] domain::RepositoryResult<
+        std::vector<domain::AccountBalancesAtPoint>>
+    balances_at_many(
+        domain::UserId user_id,
+        const std::vector<std::chrono::system_clock::time_point>& as_of) override {
+        if (!user_id.is_valid() ||
+            as_of.size() > domain::kMaximumBalanceProjectionPoints) {
+            return std::unexpected(domain::RepositoryError::validation(
+                "Historical balance projection request is invalid"));
+        }
+        if (as_of.empty()) return std::vector<domain::AccountBalancesAtPoint>{};
         auto accounts = find_by_user(user_id, std::nullopt);
         if (!accounts) return std::unexpected(accounts.error());
+        auto transactions = transaction_repo_.find_by_user(user_id, false);
+        if (!transactions) return std::unexpected(transactions.error());
 
-        std::vector<domain::AccountBalanceAt> result;
-        result.reserve(accounts->size());
-        for (const auto& account : *accounts) {
-            if (account.archived_at().has_value() &&
-                *account.archived_at() <= as_of) {
-                continue;
+        std::map<std::int64_t, std::vector<domain::Transaction>> by_account;
+        for (const auto& transaction : *transactions) {
+            by_account[transaction.account_id().value()].push_back(transaction);
+        }
+
+        std::vector<domain::AccountBalancesAtPoint> result;
+        result.reserve(as_of.size());
+        for (const auto point : as_of) {
+            domain::AccountBalancesAtPoint projection;
+            projection.as_of = point;
+            projection.balances.reserve(accounts->size());
+            for (const auto& account : *accounts) {
+                if (account.archived_at().has_value() &&
+                    *account.archived_at() <= point) {
+                    continue;
+                }
+                const auto found = by_account.find(account.id().value());
+                static const std::vector<domain::Transaction> kEmpty;
+                const auto& entries = found == by_account.end()
+                    ? kEmpty : found->second;
+                auto balance =
+                    domain::BalanceCalculationService::calculate_balance_at(
+                        account.id(), entries, account.currency(), point);
+                if (!balance) {
+                    return std::unexpected(domain::RepositoryError::database(
+                        "Historical balance calculation failed: " +
+                        balance.error().message));
+                }
+                projection.balances.push_back(domain::AccountBalanceAt{
+                    account, std::move(balance->balance)});
             }
-            auto transactions = transaction_repo_.find_by_account(
-                account.id(), std::nullopt, std::nullopt, false);
-            if (!transactions) return std::unexpected(transactions.error());
-            auto balance = domain::BalanceCalculationService::calculate_balance_at(
-                account.id(), *transactions, account.currency(), as_of);
-            if (!balance) {
-                return std::unexpected(domain::RepositoryError::database(
-                    "Historical balance calculation failed: " +
-                    balance.error().message));
-            }
-            result.push_back(domain::AccountBalanceAt{
-                account, std::move(balance->balance)});
+            result.push_back(std::move(projection));
         }
         return result;
     }

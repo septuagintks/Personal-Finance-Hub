@@ -382,6 +382,10 @@ Result<TransactionDto> FinanceApplicationService::create_transaction(
     const CreateTransactionCommand& command) {
     auto scope = open_scope(command.user_id);
     if (!scope) return err(scope.error());
+    auto effective = command;
+    if (!effective.occurred_at.has_value()) {
+        effective.occurred_at = clock_.now();
+    }
     return CreateTransactionUseCase(
         (*scope)->accounts(),
         (*scope)->categories(),
@@ -389,7 +393,7 @@ Result<TransactionDto> FinanceApplicationService::create_transaction(
         (*scope)->unit_of_work(),
         nullptr,
         &(*scope)->tags())
-        .execute(command);
+        .execute(effective);
 }
 
 Result<TagDto> FinanceApplicationService::create_tag(
@@ -489,6 +493,10 @@ Result<TransactionDto> FinanceApplicationService::create_transaction(
     if (!fingerprint) return err(fingerprint.error());
     auto scope = open_scope(command.user_id);
     if (!scope) return err(scope.error());
+    auto effective = command;
+    if (!effective.occurred_at.has_value()) {
+        effective.occurred_at = clock_.now();
+    }
     return CreateTransactionUseCase(
         (*scope)->accounts(),
         (*scope)->categories(),
@@ -496,7 +504,7 @@ Result<TransactionDto> FinanceApplicationService::create_transaction(
         (*scope)->unit_of_work(),
         &(*scope)->idempotency(),
         &(*scope)->tags())
-        .execute(command, IdempotencyRequest{
+        .execute(effective, IdempotencyRequest{
             std::string(idempotency_key), *fingerprint, clock_.now()});
 }
 
@@ -515,11 +523,15 @@ Result<TransferResultDto> FinanceApplicationService::create_transfer(
     const CreateTransferCommand& command) {
     auto scope = open_scope(command.user_id);
     if (!scope) return err(scope.error());
+    auto effective = command;
+    if (!effective.occurred_at.has_value()) {
+        effective.occurred_at = clock_.now();
+    }
     return CreateTransferUseCase(
         (*scope)->accounts(),
         (*scope)->transactions(),
         (*scope)->unit_of_work())
-        .execute(command);
+        .execute(effective);
 }
 
 Result<TransferResultDto> FinanceApplicationService::create_transfer(
@@ -530,12 +542,16 @@ Result<TransferResultDto> FinanceApplicationService::create_transfer(
     if (!fingerprint) return err(fingerprint.error());
     auto scope = open_scope(command.user_id);
     if (!scope) return err(scope.error());
+    auto effective = command;
+    if (!effective.occurred_at.has_value()) {
+        effective.occurred_at = clock_.now();
+    }
     return CreateTransferUseCase(
         (*scope)->accounts(),
         (*scope)->transactions(),
         (*scope)->unit_of_work(),
         &(*scope)->idempotency())
-        .execute(command, IdempotencyRequest{
+        .execute(effective, IdempotencyRequest{
             std::string(idempotency_key), *fingerprint, clock_.now()});
 }
 

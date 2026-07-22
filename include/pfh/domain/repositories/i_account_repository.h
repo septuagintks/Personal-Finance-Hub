@@ -12,9 +12,16 @@
 
 namespace pfh::domain {
 
+inline constexpr std::size_t kMaximumBalanceProjectionPoints = 120;
+
 struct AccountBalanceAt {
     Account account;
     Money balance;
+};
+
+struct AccountBalancesAtPoint {
+    std::chrono::system_clock::time_point as_of{};
+    std::vector<AccountBalanceAt> balances;
 };
 
 struct BalanceCacheRebuildResult {
@@ -81,6 +88,14 @@ public:
     balances_at(
         UserId user_id,
         std::chrono::system_clock::time_point as_of) = 0;
+
+    /// @brief Return the same historical projection for several valuation
+    /// instants in one repository round trip. Results preserve input order,
+    /// including duplicate instants and points with no visible accounts.
+    [[nodiscard]] virtual RepositoryResult<std::vector<AccountBalancesAtPoint>>
+    balances_at_many(
+        UserId user_id,
+        const std::vector<std::chrono::system_clock::time_point>& as_of) = 0;
 
     /// @brief Insert or update. Optimistic lock: update requires matching version.
     [[nodiscard]] virtual RepositoryResult<AccountId> save(

@@ -1378,6 +1378,83 @@ public:
     }
 };
 
+class CountingAccountRepository final : public IAccountRepository {
+public:
+    explicit CountingAccountRepository(IAccountRepository& delegate)
+        : delegate_(delegate) {}
+
+    RepositoryResult<Account> find_by_id(AccountId id) override {
+        return delegate_.find_by_id(id);
+    }
+    RepositoryResult<Account> find_by_id_for_user(
+        AccountId id, UserId user_id) override {
+        return delegate_.find_by_id_for_user(id, user_id);
+    }
+    RepositoryResult<Account> find_by_id_for_update(
+        ITransactionContext& tx, AccountId id, UserId user_id) override {
+        return delegate_.find_by_id_for_update(tx, id, user_id);
+    }
+    RepositoryResult<std::vector<Account>> find_active_by_user(
+        UserId user_id) override {
+        return delegate_.find_active_by_user(user_id);
+    }
+    RepositoryResult<std::vector<Account>> find_by_user(
+        UserId user_id, std::optional<bool> archived) override {
+        return delegate_.find_by_user(user_id, archived);
+    }
+    RepositoryResult<bool> has_transactions(
+        ITransactionContext& tx, AccountId id) override {
+        return delegate_.has_transactions(tx, id);
+    }
+    RepositoryResult<BalanceSnapshot> balance_of(AccountId id) override {
+        ++balance_of_calls;
+        return delegate_.balance_of(id);
+    }
+    RepositoryResult<std::vector<BalanceCacheRebuildResult>>
+    rebuild_balance_cache(
+        ITransactionContext& tx,
+        UserId user_id,
+        std::optional<AccountId> account_id,
+        std::chrono::system_clock::time_point rebuilt_at) override {
+        return delegate_.rebuild_balance_cache(
+            tx, user_id, account_id, rebuilt_at);
+    }
+    RepositoryResult<std::vector<AccountBalanceAt>> balances_at(
+        UserId user_id,
+        std::chrono::system_clock::time_point as_of) override {
+        ++balances_at_calls;
+        return delegate_.balances_at(user_id, as_of);
+    }
+    RepositoryResult<std::vector<AccountBalancesAtPoint>> balances_at_many(
+        UserId user_id,
+        const std::vector<std::chrono::system_clock::time_point>& as_of) override {
+        ++balances_at_many_calls;
+        projection_queries.push_back(as_of);
+        return delegate_.balances_at_many(user_id, as_of);
+    }
+    RepositoryResult<AccountId> save(
+        ITransactionContext& tx, const Account& account) override {
+        return delegate_.save(tx, account);
+    }
+    RepositoryVoidResult delete_balance_cache(
+        ITransactionContext& tx, AccountId id) override {
+        return delegate_.delete_balance_cache(tx, id);
+    }
+    RepositoryVoidResult physical_delete(
+        ITransactionContext& tx, AccountId id) override {
+        return delegate_.physical_delete(tx, id);
+    }
+
+    std::size_t balance_of_calls = 0;
+    std::size_t balances_at_calls = 0;
+    std::size_t balances_at_many_calls = 0;
+    std::vector<std::vector<std::chrono::system_clock::time_point>>
+        projection_queries;
+
+private:
+    IAccountRepository& delegate_;
+};
+
 class CountingTransactionRepository final : public ITransactionRepository {
 public:
     using PageHandler = std::function<RepositoryResult<TransactionPageResult>(
@@ -1611,6 +1688,77 @@ TEST_F(UseCaseTest, NetWorth_WhenRateRepositoryFails_ReturnsInfrastructureFailur
     EXPECT_EQ(nw.error().code, ErrorCode::InfrastructureFailure);
     // Must NOT leak the DB message.
     EXPECT_EQ(nw.error().message, "Database operation failed");
+}
+
+TEST_F(UseCaseTest, HistoricalBalanceBatchPreservesOrderDuplicatesAndLimits) {
+    const auto seeded = seed();
+    CreateTransactionCommand command;
+    command.user_id = seeded.user;
+    command.account_id = seeded.cash;
+    command.type = TransactionType::Income;
+    command.amount = "100";
+    command.currency_code = "USD";
+    command.occurred_at = sample_time();
+    ASSERT_TRUE(CreateTransactionUseCase(
+        *account_repo_, *category_repo_, *tx_repo_, *uow_)
+        .execute(command).has_value());
+
+    const auto before = sample_time() - std::chrono::seconds(1);
+    const auto after = sample_time() + std::chrono::seconds(1);
+    auto projections = account_repo_->balances_at_many(
+        seeded.user, {after, before, after});
+    ASSERT_TRUE(projections.has_value()) << projections.error().message;
+    ASSERT_EQ(projections->size(), 3U);
+    EXPECT_EQ((*projections)[0].as_of, after);
+    EXPECT_EQ((*projections)[1].as_of, before);
+    EXPECT_EQ((*projections)[2].as_of, after);
+
+    const auto cash_balance = [&](std::size_t position) {
+        const auto& balances = (*projections)[position].balances;
+        const auto found = std::find_if(
+            balances.begin(), balances.end(), [&](const AccountBalanceAt& value) {
+                return value.account.id() == seeded.cash;
+            });
+        EXPECT_NE(found, balances.end());
+        return found == balances.end()
+            ? std::string{}
+            : found->balance.amount().to_string();
+    };
+    EXPECT_EQ(cash_balance(0), "100");
+    EXPECT_EQ(cash_balance(1), "0");
+    EXPECT_EQ(cash_balance(2), "100");
+
+    auto empty = account_repo_->balances_at_many(seeded.user, {});
+    ASSERT_TRUE(empty.has_value()) << empty.error().message;
+    EXPECT_TRUE(empty->empty());
+
+    std::vector<std::chrono::system_clock::time_point> too_many(
+        kMaximumBalanceProjectionPoints + 1U, sample_time());
+    auto rejected = account_repo_->balances_at_many(seeded.user, too_many);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().status, RepositoryStatus::ValidationError);
+}
+
+TEST_F(UseCaseTest, ReportsUseCrossAccountBalanceProjectionsWithoutNPlusOneReads) {
+    const auto seeded = seed();
+    CountingAccountRepository accounts(*account_repo_);
+    ReportQueryService reports(
+        accounts, *tx_repo_, *rate_repo_, *pref_repo_, category_repo_.get());
+
+    const auto now = sample_time() + std::chrono::hours(1);
+    auto net_worth = reports.net_worth(seeded.user, now);
+    ASSERT_TRUE(net_worth.has_value()) << net_worth.error().message;
+    auto dashboard = reports.dashboard_summary(seeded.user, now);
+    ASSERT_TRUE(dashboard.has_value()) << dashboard.error().message;
+    EXPECT_EQ(accounts.balance_of_calls, 0U);
+    EXPECT_EQ(accounts.balances_at_calls, 2U);
+
+    auto analysis = reports.analysis(ReportAnalysisQuery{
+        seeded.user, 2024, 4, 2024, 6, ReportDimension::Account}, now);
+    ASSERT_TRUE(analysis.has_value()) << analysis.error().message;
+    EXPECT_EQ(accounts.balances_at_many_calls, 1U);
+    ASSERT_EQ(accounts.projection_queries.size(), 1U);
+    EXPECT_EQ(accounts.projection_queries.front().size(), 3U);
 }
 
 TEST_F(UseCaseTest, ReportsBatchTransactionsAndCacheRateHistoryPerRequest) {

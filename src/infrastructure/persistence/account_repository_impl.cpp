@@ -9,6 +9,8 @@
 #include "pfh/infrastructure/persistence/postgres_repository_support.h"
 #include "pfh/infrastructure/persistence/postgres_result_set.h"
 
+#include <nlohmann/json.hpp>
+
 #include <optional>
 #include <string>
 #include <utility>
@@ -409,13 +411,40 @@ domain::RepositoryResult<std::vector<domain::AccountBalanceAt>>
 AccountRepositoryImpl::balances_at(
     domain::UserId user_id,
     std::chrono::system_clock::time_point as_of) {
+    auto projections = balances_at_many(user_id, {as_of});
+    if (!projections) return std::unexpected(projections.error());
+    return std::move(projections->front().balances);
+}
+
+domain::RepositoryResult<std::vector<domain::AccountBalancesAtPoint>>
+AccountRepositoryImpl::balances_at_many(
+    domain::UserId user_id,
+    const std::vector<std::chrono::system_clock::time_point>& as_of) {
     if (user_id != tenant_user_id_) {
         return std::unexpected(account_not_found());
     }
-    return postgres::execute_tenant_read<std::vector<domain::AccountBalanceAt>>(
+    if (as_of.size() > domain::kMaximumBalanceProjectionPoints) {
+        return std::unexpected(domain::RepositoryError::validation(
+            "Historical balance projection request is too large"));
+    }
+    if (as_of.empty()) {
+        return std::vector<domain::AccountBalancesAtPoint>{};
+    }
+
+    nlohmann::json points = nlohmann::json::array();
+    for (const auto point : as_of) {
+        points.push_back(pg::toDbTimestamp(point));
+    }
+    return postgres::execute_tenant_read<
+        std::vector<domain::AccountBalancesAtPoint>>(
         db_, tenant_user_id_, "read historical account balances",
         [&](const auto& transaction) {
             constexpr const char* kSql = R"SQL(
+                WITH requested AS (
+                    SELECT value::timestamptz AS as_of, position
+                    FROM jsonb_array_elements_text($2::jsonb)
+                         WITH ORDINALITY AS point(value, position)
+                )
                 SELECT
                     account.id, account.user_id, account.name,
                     account.type::text, account.subtype,
@@ -423,48 +452,63 @@ AccountRepositoryImpl::balances_at(
                     account.description, account.is_archived,
                     account.archived_at, account.created_at,
                     account.updated_at, account.version,
-                    COALESCE(SUM(entry.amount), 0)::text
-                FROM accounts account
+                    COALESCE(SUM(entry.amount), 0)::text,
+                    requested.position
+                FROM requested
+                JOIN accounts account ON account.user_id = $1
                 LEFT JOIN transactions entry
                   ON entry.account_id = account.id
                  AND entry.user_id = account.user_id
                  AND entry.deleted_at IS NULL
-                 AND entry.transaction_time <= $2
-                WHERE account.user_id = $1
-                  AND (account.archived_at IS NULL OR account.archived_at > $2)
+                 AND entry.transaction_time <= requested.as_of
+                WHERE account.archived_at IS NULL
+                   OR account.archived_at > requested.as_of
                 GROUP BY
+                    requested.position,
                     account.id, account.user_id, account.name, account.type,
                     account.subtype, account.category, account.currency_code,
                     account.description, account.is_archived,
                     account.archived_at, account.created_at,
                     account.updated_at, account.version
-                ORDER BY account.id
+                ORDER BY requested.position, account.id
             )SQL";
             const auto rows = transaction->execSqlSync(
-                kSql, user_id.value(), pg::toDbTimestamp(as_of));
-            std::vector<domain::AccountBalanceAt> result;
-            result.reserve(rows.size());
+                kSql, user_id.value(), points.dump());
+            std::vector<domain::AccountBalancesAtPoint> result;
+            result.reserve(as_of.size());
+            for (const auto point : as_of) {
+                result.push_back(domain::AccountBalancesAtPoint{point, {}});
+            }
             for (const auto& row : rows) {
+                const auto position = pg::getBigInt(row, 14);
+                if (position <= 0 ||
+                    static_cast<std::size_t>(position) > result.size()) {
+                    return domain::RepositoryResult<
+                        std::vector<domain::AccountBalancesAtPoint>>(
+                        std::unexpected(domain::RepositoryError::database(
+                            "Historical balance projection position is invalid")));
+                }
                 auto account = map_account_row(row);
                 if (!account) {
                     return domain::RepositoryResult<
-                        std::vector<domain::AccountBalanceAt>>(
+                        std::vector<domain::AccountBalancesAtPoint>>(
                         std::unexpected(account.error()));
                 }
                 auto amount = domain::Decimal::parse_numeric_20_8(
                     pg::getNumericAsString(row, 13));
                 if (!amount) {
                     return domain::RepositoryResult<
-                        std::vector<domain::AccountBalanceAt>>(
+                        std::vector<domain::AccountBalancesAtPoint>>(
                         std::unexpected(domain::RepositoryError::database(
                             "Historical account balance is invalid")));
                 }
-                result.push_back(domain::AccountBalanceAt{
+                result[static_cast<std::size_t>(position - 1)].balances.push_back(
+                    domain::AccountBalanceAt{
                     *account,
                     domain::Money(*amount, account->currency())});
             }
             return domain::RepositoryResult<
-                std::vector<domain::AccountBalanceAt>>(std::move(result));
+                std::vector<domain::AccountBalancesAtPoint>>(std::move(result));
         });
 }
 

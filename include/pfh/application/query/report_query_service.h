@@ -205,18 +205,15 @@ public:
         if (!pref) {
             return err(from_repository(pref.error()));
         }
-        auto accounts = accounts_.find_active_by_user(user_id);
-        if (!accounts) {
-            return err(from_repository(accounts.error()));
-        }
-
+        auto balances = accounts_.balances_at(user_id, now);
+        if (!balances) return err(from_repository(balances.error()));
         HistoricalRateCache rate_cache(rates_);
-        auto balances = load_account_values(
-            *accounts, pref->base_currency(), now, rate_cache);
-        if (!balances) {
-            return err(balances.error());
+        auto values = convert_account_balances(
+            *balances, pref->base_currency(), now, rate_cache);
+        if (!values) {
+            return err(values.error());
         }
-        return aggregate_net_worth(*balances, pref->base_currency(), now);
+        return aggregate_net_worth(*values, pref->base_currency(), now);
     }
 
     // `now` is injectable so tests can pin the reporting window; production
@@ -242,13 +239,11 @@ public:
         }
         const auto [period_start, period_end] = *window;
 
-        auto accounts = accounts_.find_active_by_user(user_id);
-        if (!accounts) {
-            return err(from_repository(accounts.error()));
-        }
+        auto balances = accounts_.balances_at(user_id, now);
+        if (!balances) return err(from_repository(balances.error()));
         HistoricalRateCache rate_cache(rates_);
-        auto account_values = load_account_values(
-            *accounts, preference->base_currency(), now, rate_cache);
+        auto account_values = convert_account_balances(
+            *balances, preference->base_currency(), now, rate_cache);
         if (!account_values) {
             return err(account_values.error());
         }
@@ -300,7 +295,7 @@ public:
         dto.income_total = cash_flow->income_total;
         dto.expense_total = cash_flow->expense_total;
         dto.cash_flow_net = cash_flow->net_total;
-        dto.account_count = accounts->size();
+        dto.account_count = balances->size();
         dto.report_period_start = period_start;
         dto.report_period_end = period_end;
         dto.generated_at = now;
@@ -627,25 +622,21 @@ private:
             net->amount().to_string()};
     }
 
-    [[nodiscard]] Result<std::vector<AccountValue>> load_account_values(
-        const std::vector<domain::Account>& accounts,
+    [[nodiscard]] Result<std::vector<AccountValue>> convert_account_balances(
+        const std::vector<domain::AccountBalanceAt>& balances,
         const domain::Currency& base,
         TimePoint now,
         HistoricalRateCache& rate_cache) {
         std::vector<AccountValue> result;
-        result.reserve(accounts.size());
-        for (const auto& account : accounts) {
-            auto snapshot = accounts_.balance_of(account.id());
-            if (!snapshot) {
-                return err(from_repository(snapshot.error()));
-            }
+        result.reserve(balances.size());
+        for (const auto& balance : balances) {
             auto converted = convert_to_base(
-                snapshot->balance, base, now, rate_cache);
+                balance.balance, base, now, rate_cache);
             if (!converted) {
                 return err(converted.error());
             }
             result.push_back(AccountValue{
-                account.type(), std::move(*converted)});
+                balance.account.type(), std::move(*converted)});
         }
         return result;
     }

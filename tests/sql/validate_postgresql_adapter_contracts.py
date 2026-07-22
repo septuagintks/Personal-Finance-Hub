@@ -292,11 +292,35 @@ def main() -> int:
         failures,
     )
     require(
-        "AccountRepositoryImpl::balances_at" in account
-        and "entry.transaction_time <= $2" in account
+        "AccountRepositoryImpl::balances_at_many" in account
+        and "jsonb_array_elements_text($2::jsonb)" in account
+        and "WITH ORDINALITY AS point(value, position)" in account
+        and "JOIN accounts account ON account.user_id = $1" in account
+        and "entry.deleted_at IS NULL" in account
+        and "entry.transaction_time <= requested.as_of" in account
         and "COALESCE(SUM(entry.amount), 0)::text" in account
-        and "account.archived_at > $2" in account,
-        "S09 historical balances must use tenant-scoped signed SQL aggregation",
+        and "account.archived_at > requested.as_of" in account
+        and "requested.position" in account,
+        "S09 historical balances must use an ordered tenant-scoped batch aggregation",
+        failures,
+    )
+    transfer_page_start = transaction.find(
+        "TransactionRepositoryImpl::find_transfer_page"
+    )
+    transfer_lock_start = transaction.find(
+        "TransactionRepositoryImpl::find_transfer_by_group_for_update"
+    )
+    transfer_page = transaction[transfer_page_start:transfer_lock_start]
+    require(
+        transfer_page_start >= 0
+        and transfer_lock_start > transfer_page_start
+        and "jsonb_array_elements_text($1::jsonb)" in transfer_page
+        and "WITH ORDINALITY AS requested(group_id, position)" in transfer_page
+        and "JOIN transactions member" in transfer_page
+        and "member.user_id = $2" in transfer_page
+        and "requested.position" in transfer_page
+        and "load_transfer_snapshot" not in transfer_page,
+        "S09 transfer pages must batch member loading without a per-group query",
         failures,
     )
     require(

@@ -295,10 +295,8 @@ void invalidate_balance_cache(
         user_id.value());
 }
 
-domain::RepositoryResult<domain::TransferSnapshot> load_transfer_snapshot(
-    drogon::orm::Transaction& database,
-    const drogon::orm::Row& group_row,
-    bool lock_members) {
+domain::RepositoryResult<domain::TransferSnapshot> map_transfer_group_row(
+    const drogon::orm::Row& group_row) {
     try {
         domain::TransferSnapshot snapshot;
         snapshot.group_id = domain::TransferGroupId(pg::getBigInt(group_row, 0));
@@ -329,44 +327,67 @@ domain::RepositoryResult<domain::TransferSnapshot> load_transfer_snapshot(
             snapshot.corrected_by_group_id =
                 domain::TransferGroupId(*replacement);
         }
+        return snapshot;
+    } catch (const std::exception&) {
+        return std::unexpected(domain::RepositoryError::database(
+            "Stored transfer projection is invalid"));
+    }
+}
 
+domain::RepositoryVoidResult finalize_transfer_snapshot(
+    domain::TransferSnapshot& snapshot) {
+    if (snapshot.transactions.empty()) {
+        return std::unexpected(domain::RepositoryError::database(
+            "Persisted transfer has no transactions"));
+    }
+    bool any_active = false;
+    bool any_deleted = false;
+    std::optional<std::chrono::system_clock::time_point> latest_deleted;
+    for (const auto& transaction : snapshot.transactions) {
+        if (snapshot.occurred_at.time_since_epoch().count() == 0 ||
+            transaction.occurred_at() < snapshot.occurred_at) {
+            snapshot.occurred_at = transaction.occurred_at();
+        }
+        if (transaction.is_deleted()) {
+            any_deleted = true;
+            if (!latest_deleted.has_value() ||
+                *transaction.deleted_at() > *latest_deleted) {
+                latest_deleted = transaction.deleted_at();
+            }
+        } else {
+            any_active = true;
+        }
+    }
+    if (any_active && any_deleted) {
+        return std::unexpected(domain::RepositoryError::database(
+            "Persisted transfer is partially deleted"));
+    }
+    if (any_deleted) snapshot.deleted_at = latest_deleted;
+    return {};
+}
+
+domain::RepositoryResult<domain::TransferSnapshot> load_transfer_snapshot(
+    drogon::orm::Transaction& database,
+    const drogon::orm::Row& group_row,
+    bool lock_members) {
+    try {
+        auto snapshot = map_transfer_group_row(group_row);
+        if (!snapshot) return std::unexpected(snapshot.error());
         std::string sql = std::string("SELECT ") + kTransactionColumns +
             " FROM transactions WHERE transfer_group_id = $1 "
             "AND user_id = $2 ORDER BY account_id, id";
         if (lock_members) sql += " FOR UPDATE NOWAIT";
         const auto rows = database.execSqlSync(
-            sql, snapshot.group_id.value(), snapshot.user_id.value());
-        if (rows.empty()) {
-            return std::unexpected(domain::RepositoryError::database(
-                "Persisted transfer has no transactions"));
-        }
-        snapshot.transactions.reserve(rows.size());
-        bool any_active = false;
-        bool any_deleted = false;
-        std::optional<std::chrono::system_clock::time_point> latest_deleted;
+            sql, snapshot->group_id.value(), snapshot->user_id.value());
+        snapshot->transactions.reserve(rows.size());
         for (const auto& row : rows) {
             auto transaction = map_transaction_row(row);
             if (!transaction) return std::unexpected(transaction.error());
-            if (snapshot.occurred_at.time_since_epoch().count() == 0 ||
-                transaction->occurred_at() < snapshot.occurred_at) {
-                snapshot.occurred_at = transaction->occurred_at();
-            }
-            if (transaction->is_deleted()) {
-                any_deleted = true;
-                if (!latest_deleted.has_value() ||
-                    *transaction->deleted_at() > *latest_deleted) {
-                    latest_deleted = transaction->deleted_at();
-                }
-            } else {
-                any_active = true;
-            }
-            snapshot.transactions.push_back(std::move(*transaction));
+            snapshot->transactions.push_back(std::move(*transaction));
         }
-        if (any_active && any_deleted) {
-            return std::unexpected(domain::RepositoryError::database(
-                "Persisted transfer is partially deleted"));
+        if (auto finalized = finalize_transfer_snapshot(*snapshot); !finalized) {
+            return std::unexpected(finalized.error());
         }
-        if (any_deleted) snapshot.deleted_at = latest_deleted;
         return snapshot;
     } catch (const std::exception&) {
         return std::unexpected(domain::RepositoryError::database(
@@ -1004,14 +1025,65 @@ TransactionRepositoryImpl::find_transfer_page(
             page.has_more = rows.size() > query.limit;
             const auto count = page.has_more ? query.limit : rows.size();
             page.items.reserve(count);
+            nlohmann::json group_ids = nlohmann::json::array();
             for (std::size_t index = 0; index < count; ++index) {
-                auto snapshot = load_transfer_snapshot(
-                    *transaction, rows[index], false);
+                auto snapshot = map_transfer_group_row(rows[index]);
                 if (!snapshot) {
                     return domain::RepositoryResult<domain::TransferPageResult>(
                         std::unexpected(snapshot.error()));
                 }
+                group_ids.push_back(snapshot->group_id.value());
                 page.items.push_back(std::move(*snapshot));
+            }
+            if (page.items.empty()) {
+                return domain::RepositoryResult<domain::TransferPageResult>(
+                    std::move(page));
+            }
+
+            const std::string member_sql = std::string("SELECT ") +
+                "member.id, member.user_id, member.account_id, "
+                "member.category_id, member.type::text, member.amount::text, "
+                "member.currency_code, member.description, "
+                "member.transfer_group_id, member.deleted_at, "
+                "member.transaction_time, member.created_at, "
+                "requested.position " + R"SQL(
+                FROM jsonb_array_elements_text($1::jsonb)
+                     WITH ORDINALITY AS requested(group_id, position)
+                JOIN transactions member
+                  ON member.transfer_group_id = requested.group_id::bigint
+                 AND member.user_id = $2
+                ORDER BY requested.position, member.account_id, member.id
+            )SQL";
+            const auto member_rows = transaction->execSqlSync(
+                member_sql, group_ids.dump(), query.user_id.value());
+            for (const auto& row : member_rows) {
+                const auto position = pg::getBigInt(row, 12);
+                if (position <= 0 ||
+                    static_cast<std::size_t>(position) > page.items.size()) {
+                    return domain::RepositoryResult<domain::TransferPageResult>(
+                        std::unexpected(domain::RepositoryError::database(
+                            "Transfer member projection position is invalid")));
+                }
+                auto member = map_transaction_row(row);
+                if (!member) {
+                    return domain::RepositoryResult<domain::TransferPageResult>(
+                        std::unexpected(member.error()));
+                }
+                auto& snapshot = page.items[static_cast<std::size_t>(position - 1)];
+                if (!member->transfer_group_id().has_value() ||
+                    *member->transfer_group_id() != snapshot.group_id) {
+                    return domain::RepositoryResult<domain::TransferPageResult>(
+                        std::unexpected(domain::RepositoryError::database(
+                            "Transfer member projection group is inconsistent")));
+                }
+                snapshot.transactions.push_back(std::move(*member));
+            }
+            for (auto& snapshot : page.items) {
+                if (auto finalized = finalize_transfer_snapshot(snapshot);
+                    !finalized) {
+                    return domain::RepositoryResult<domain::TransferPageResult>(
+                        std::unexpected(finalized.error()));
+                }
             }
             return domain::RepositoryResult<domain::TransferPageResult>(
                 std::move(page));

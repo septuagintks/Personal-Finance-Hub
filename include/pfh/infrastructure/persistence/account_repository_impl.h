@@ -63,6 +63,12 @@ public:
         domain::UserId user_id,
         std::chrono::system_clock::time_point as_of) override;
 
+    [[nodiscard]] domain::RepositoryResult<
+        std::vector<domain::AccountBalancesAtPoint>>
+    balances_at_many(
+        domain::UserId user_id,
+        const std::vector<std::chrono::system_clock::time_point>& as_of) override;
+
     [[nodiscard]] domain::RepositoryResult<domain::AccountId> save(
         domain::ITransactionContext& tx,
         const domain::Account& account) override;

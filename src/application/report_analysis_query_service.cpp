@@ -213,17 +213,29 @@ Result<ReportAnalysisDto> ReportQueryService::analysis(
 
     bool any_historical = false;
     result.net_worth_trend.reserve(windows.size());
-    for (std::size_t index = 0; index < windows.size(); ++index) {
-        const auto period_end = std::min(windows[index].second, valuation_at);
-        const auto valued_at = period_end == valuation_at
+    std::vector<TimePoint> valuation_points;
+    valuation_points.reserve(windows.size());
+    for (const auto& window : windows) {
+        const auto period_end = std::min(window.second, valuation_at);
+        valuation_points.push_back(period_end == valuation_at
             ? valuation_at
-            : period_end - ch::microseconds(1);
+            : period_end - ch::microseconds(1));
+    }
+    auto balance_projections = accounts_.balances_at_many(
+        query.user_id, valuation_points);
+    if (!balance_projections) {
+        return err(from_repository(balance_projections.error()));
+    }
+    if (balance_projections->size() != windows.size()) {
+        return err(Error::infrastructure_failure(
+            "Historical balance projection count is inconsistent"));
+    }
+    for (std::size_t index = 0; index < windows.size(); ++index) {
+        const auto valued_at = valuation_points[index];
         rates.reset_evidence();
-        auto balances = accounts_.balances_at(query.user_id, valued_at);
-        if (!balances) return err(from_repository(balances.error()));
         std::vector<AccountValue> values;
-        values.reserve(balances->size());
-        for (const auto& balance : *balances) {
+        values.reserve((*balance_projections)[index].balances.size());
+        for (const auto& balance : (*balance_projections)[index].balances) {
             auto converted = convert_to_base(
                 balance.balance, preference->base_currency(), valued_at, rates);
             if (!converted) return err(converted.error());
