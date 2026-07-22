@@ -26,7 +26,7 @@
   "dependencies": {
     "@js-temporal/polyfill": "0.5.1",
     "@lucide/vue": "1.24.0",
-    "axios": "1.16.0",
+    "axios": "1.18.0",
     "decimal.js": "10.5.0",
     "echarts": "6.1.0",
     "pinia": "3.0.3",

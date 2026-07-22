@@ -2,7 +2,7 @@
 
 Version: 1.2
 Baseline: `main@43d06fb79bd0c1faa41f4f3fffb0c15c05673fc2`
-Status: In progress (`R01`-`R10` implemented; `R11`-`R12` pending)
+Status: In progress (`R01`-`R11` implemented; `R12` local gates pass; target-environment validation and final archive pending)
 Suggested Branch: `fix/post-phase2-audit-remediation`
 
 ---
@@ -329,6 +329,8 @@ OpenAPI 预计增加或修改：
 
 验收：无 sanitizer 告警；所有场景满足计划中固定的资源预算；压力解除后 worker、队列、RSS 与浏览器 heap 回落到允许基线；关键 SQL 不出现未接受的顺序扫描或线性往返。
 
+实现状态（2026-07-23）：已加入独立 ASan/UBSan CMake 开关与 Linux 执行矩阵、Daily/Stress API 基准和真实 PostgreSQL `EXPLAIN (ANALYZE, BUFFERS)` 摘要、认证/读取/CSV/队列/断连压力与 `/proc` RSS 采样工具；工具参数、计划解析、请求构造和 Metrics 解析具有离线 CTest 契约。Chromium 长会话门禁覆盖 200 条流水驻留窗口、120 个月/200 维度报表、25 轮 SPA 往返、画布/DOM 上限及强制 GC 后不超过 16 MiB 的 heap 增长，本机 39 项 Chromium E2E 通过。Linux ASan/UBSan、真实 PostgreSQL 计划、进程压力和三浏览器复核仍须在目标环境执行，不在本机结果中预判通过。
+
 ### 4.12 R12 全量回归与文档收口
 
 开发内容：
@@ -340,6 +342,8 @@ OpenAPI 预计增加或修改：
 5. 将本计划中的长期规则改写到事实来源后删除本文件，不保留整改过程叙事。
 
 验收：第 6 节全部门禁通过，性能基线与安全上限进入测试和运维事实来源，工作区无临时报告、生成漂移、秘密或未归档任务文件。
+
+本机状态（2026-07-23）：Windows GCC 16 PostgreSQL OFF 的 Debug 与 Release 均为 418/418 PASS；前端 quality 为 26 文件、90/90 PASS，Chromium 为 39/39 PASS，包含独立 CDP heap 门禁。联网 production dependency audit 发现的 Axios 高危公告已通过精确升级至 `1.18.0` 修复，复核为 0 个已知漏洞。Linux PostgreSQL ON、Flyway/RLS/Runtime、ASan/UBSan、真实数据 `EXPLAIN`、进程压力及 Firefox/WebKit 仍待目标环境复核；完成前不得归档本计划或宣告本轮结束。
 
 ---
 
