@@ -85,6 +85,7 @@ describe('metadata store', () => {
     store.clear();
 
     await expect(pending).resolves.toBe(false);
+    await delay(70);
     expect(store.categories).toEqual([]);
     expect(store.categoryState).toBe('idle');
   });

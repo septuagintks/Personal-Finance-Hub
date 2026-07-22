@@ -90,6 +90,7 @@ describe('account store', () => {
 
     await expect(second).resolves.toBe(true);
     await expect(first).resolves.toBe(false);
+    await delay(80);
     expect(store.listStatus).toBe('archived');
     expect(store.items.map(({ id }) => id)).toEqual([2]);
   });

@@ -60,6 +60,7 @@ describe('transaction store', () => {
     store.clear();
 
     await expect(pending).resolves.toBe(false);
+    await delay(70);
     expect(store.selected).toBeNull();
     expect(store.detailState).toBe('idle');
   });
