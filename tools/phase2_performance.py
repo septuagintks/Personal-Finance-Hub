@@ -14,7 +14,7 @@ import subprocess
 import sys
 import time
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 
@@ -24,18 +24,58 @@ class Profile:
     accounts: int
     dimensions: int
     list_p95_ms: float
+    transfer_p95_ms: float
     dashboard_p95_ms: float
+    cash_flow_p95_ms: float
+    report_p95_ms: float
     csv_first_byte_p95_ms: float
 
 
 PROFILES = {
-    "daily": Profile(10_000, 20, 200, 300, 500, 2_000),
-    "stress": Profile(100_000, 50, 500, 500, 800, 5_000),
+    "daily": Profile(10_000, 20, 200, 300, 400, 500, 1_000, 1_500, 2_000),
+    "stress": Profile(100_000, 50, 500, 500, 800, 800, 3_000, 4_000, 5_000),
 }
 
 
 class PerformanceFailure(RuntimeError):
     pass
+
+
+def database_environment() -> dict[str, str]:
+    database_url = os.environ.get("PFH_PERF_DATABASE_URL")
+    if not database_url:
+        raise PerformanceFailure("PFH_PERF_DATABASE_URL is required for database checks")
+    environment = os.environ.copy()
+    environment["PGDATABASE"] = database_url
+    return environment
+
+
+def run_psql_text(psql: str, sql: str) -> str:
+    completed = subprocess.run(
+        [psql, "-X", "-At", "--set=ON_ERROR_STOP=1", "--quiet"],
+        input=sql,
+        text=True,
+        capture_output=True,
+        check=False,
+        env=database_environment(),
+    )
+    if completed.returncode != 0:
+        summary = completed.stderr.strip().splitlines()[-1:] or ["psql failed"]
+        raise PerformanceFailure(summary[0])
+    return completed.stdout.strip()
+
+
+def fixture_row_count(psql: str, profile_name: str, user_id: int) -> int:
+    prefix = f"PFH-PERF-{profile_name}-%"
+    query = (
+        "SELECT count(*) FROM transactions "
+        f"WHERE user_id={user_id} AND description LIKE '{prefix}';"
+    )
+    raw = run_psql_text(psql, query)
+    try:
+        return int(raw)
+    except ValueError as error:
+        raise PerformanceFailure("fixture count verification returned invalid output") from error
 
 
 def fixture_sql(profile_name: str, user_id: int) -> str:
@@ -264,43 +304,16 @@ COMMIT;
 
 
 def run_psql(arguments: argparse.Namespace) -> None:
-    database_url = os.environ.get("PFH_PERF_DATABASE_URL")
-    if not database_url:
-        raise PerformanceFailure("PFH_PERF_DATABASE_URL is required for fixture seeding")
     if not arguments.confirm_test_database:
         raise PerformanceFailure(
             "--confirm-test-database is required because fixture seeding changes test data"
         )
     sql = fixture_sql(arguments.profile, arguments.user_id)
-    command = [arguments.psql, "-X", "--set=ON_ERROR_STOP=1", "--quiet"]
-    psql_environment = os.environ.copy()
-    psql_environment["PGDATABASE"] = database_url
-    seeded = subprocess.run(
-        command,
-        input=sql,
-        text=True,
-        capture_output=True,
-        check=False,
-        env=psql_environment,
-    )
-    if seeded.returncode != 0:
-        summary = seeded.stderr.strip().splitlines()[-1:] or ["psql failed"]
-        raise PerformanceFailure(f"fixture seed failed: {summary[0]}")
-    prefix = f"PFH-PERF-{arguments.profile}-%"
-    count_query = (
-        "SELECT count(*) FROM transactions "
-        f"WHERE user_id={arguments.user_id} AND description LIKE '{prefix}'"
-    )
-    counted = subprocess.run(
-        [arguments.psql, "-X", "-At", "-c", count_query],
-        text=True,
-        capture_output=True,
-        check=False,
-        env=psql_environment,
-    )
-    if counted.returncode != 0:
-        raise PerformanceFailure("fixture count verification failed")
-    actual = int(counted.stdout.strip())
+    try:
+        run_psql_text(arguments.psql, sql)
+    except PerformanceFailure as error:
+        raise PerformanceFailure(f"fixture seed failed: {error}") from error
+    actual = fixture_row_count(arguments.psql, arguments.profile, arguments.user_id)
     expected = PROFILES[arguments.profile].rows
     if actual != expected:
         raise PerformanceFailure(f"fixture expected {expected} rows, found {actual}")
@@ -308,8 +321,16 @@ def run_psql(arguments: argparse.Namespace) -> None:
 
 
 def percentile(values: list[float], fraction: float) -> float:
+    if not values:
+        return 0.0
     ordered = sorted(values)
     return ordered[max(0, math.ceil(len(ordered) * fraction) - 1)]
+
+
+def shifted_month(value: datetime, offset: int) -> str:
+    absolute = value.year * 12 + value.month - 1 + offset
+    year, zero_based_month = divmod(absolute, 12)
+    return f"{year:04d}-{zero_based_month + 1:02d}"
 
 
 def measure_request(url: str, token: str, timeout: float) -> tuple[float, float, int]:
@@ -340,6 +361,8 @@ def benchmark(arguments: argparse.Namespace) -> None:
     export_days = 365 if arguments.profile == "daily" else 28
     from_value = (now - timedelta(days=export_days)).isoformat().replace("+00:00", "Z")
     to_value = (now + timedelta(days=1)).isoformat().replace("+00:00", "Z")
+    report_from = shifted_month(now, -119)
+    report_to = shifted_month(now, 0)
     endpoints = {
         "transactions_first_page": (
             "/api/v1/transactions?" + urlencode({"pageSize": 50}),
@@ -351,6 +374,32 @@ def benchmark(arguments: argparse.Namespace) -> None:
             arguments.iterations,
         ),
         "dashboard": ("/api/v1/reports/dashboard-summary", arguments.iterations),
+        "transfers_first_page": (
+            "/api/v1/transfers?" + urlencode({"pageSize": 200}),
+            arguments.iterations,
+        ),
+        "cash_flow_120_months": (
+            "/api/v1/reports/cash-flow?"
+            + urlencode(
+                {
+                    "startDate": report_from,
+                    "endDate": report_to,
+                    "periodType": "MONTH",
+                }
+            ),
+            min(arguments.iterations, 10),
+        ),
+        "report_analysis_tags": (
+            "/api/v1/reports/analysis?"
+            + urlencode(
+                {
+                    "startDate": report_from,
+                    "endDate": report_to,
+                    "dimension": "tag",
+                }
+            ),
+            min(arguments.iterations, 10),
+        ),
         "csv_export": (
             "/api/v1/exports/transactions.csv?"
             + urlencode({"from": from_value, "to": to_value}),
@@ -386,6 +435,12 @@ def benchmark(arguments: argparse.Namespace) -> None:
         failures.append("transaction filter p95 exceeds budget")
     if results["dashboard"]["total_p95_ms"] > profile.dashboard_p95_ms:
         failures.append("dashboard p95 exceeds budget")
+    if results["transfers_first_page"]["total_p95_ms"] > profile.transfer_p95_ms:
+        failures.append("transfer first-page p95 exceeds budget")
+    if results["cash_flow_120_months"]["total_p95_ms"] > profile.cash_flow_p95_ms:
+        failures.append("120-month cash-flow p95 exceeds budget")
+    if results["report_analysis_tags"]["total_p95_ms"] > profile.report_p95_ms:
+        failures.append("tag report p95 exceeds budget")
     if results["csv_export"]["first_byte_p95_ms"] > profile.csv_first_byte_p95_ms:
         failures.append("CSV first-byte p95 exceeds budget")
 
@@ -394,6 +449,166 @@ def benchmark(arguments: argparse.Namespace) -> None:
         "rows": profile.rows,
         "measured_at": datetime.now(timezone.utc).isoformat(),
         "results": results,
+        "budgets_passed": not failures,
+    }
+    serialized = json.dumps(document, indent=2, sort_keys=True)
+    print(serialized)
+    if arguments.output:
+        Path(arguments.output).write_text(serialized + "\n", encoding="utf-8")
+    if failures and arguments.enforce:
+        raise PerformanceFailure("; ".join(failures))
+
+
+def walk_plan(node: dict[str, object]) -> list[dict[str, object]]:
+    nodes = [node]
+    for child in node.get("Plans", []):
+        if isinstance(child, dict):
+            nodes.extend(walk_plan(child))
+    return nodes
+
+
+def summarize_plan(document: object) -> dict[str, object]:
+    if not isinstance(document, list) or len(document) != 1 or not isinstance(document[0], dict):
+        raise PerformanceFailure("EXPLAIN returned an unexpected JSON document")
+    envelope = document[0]
+    root = envelope.get("Plan")
+    if not isinstance(root, dict):
+        raise PerformanceFailure("EXPLAIN JSON does not contain a plan")
+    nodes = walk_plan(root)
+    index_names = sorted(
+        {
+            str(node["Index Name"])
+            for node in nodes
+            if isinstance(node.get("Index Name"), str)
+        }
+    )
+    sequential_relations = sorted(
+        {
+            str(node["Relation Name"])
+            for node in nodes
+            if node.get("Node Type") == "Seq Scan"
+            and isinstance(node.get("Relation Name"), str)
+        }
+    )
+    return {
+        "planning_ms": round(float(envelope.get("Planning Time", 0.0)), 3),
+        "execution_ms": round(float(envelope.get("Execution Time", 0.0)), 3),
+        "actual_rows": int(root.get("Actual Rows", 0)),
+        "shared_hit_blocks": int(root.get("Shared Hit Blocks", 0)),
+        "shared_read_blocks": int(root.get("Shared Read Blocks", 0)),
+        "index_names": index_names,
+        "sequential_relations": sequential_relations,
+    }
+
+
+def explain_queries(profile_name: str, user_id: int) -> dict[str, tuple[str, float, bool]]:
+    profile = PROFILES[profile_name]
+    transfer_budget = profile.transfer_p95_ms * 2
+    return {
+        "transaction_page": (
+            f"""
+            SELECT t.id, t.transaction_time
+            FROM transactions AS t
+            WHERE t.user_id = {user_id} AND t.deleted_at IS NULL
+            ORDER BY t.transaction_time DESC, t.id DESC
+            LIMIT 201
+            """,
+            profile.list_p95_ms,
+            True,
+        ),
+        "transfer_page": (
+            f"""
+            SELECT tg.id, aggregate_state.occurred_at
+            FROM transfer_groups AS tg
+            JOIN LATERAL (
+                SELECT MIN(member.transaction_time) AS occurred_at,
+                       BOOL_AND(member.deleted_at IS NULL) AS is_active
+                FROM transactions AS member
+                WHERE member.transfer_group_id = tg.id
+                  AND member.user_id = tg.user_id
+            ) AS aggregate_state ON TRUE
+            WHERE tg.user_id = {user_id} AND aggregate_state.is_active
+            ORDER BY aggregate_state.occurred_at DESC, tg.id DESC
+            LIMIT 201
+            """,
+            transfer_budget,
+            True,
+        ),
+        "transfer_members": (
+            f"""
+            WITH requested AS MATERIALIZED (
+                SELECT id, row_number() OVER (ORDER BY id DESC) AS position
+                FROM transfer_groups
+                WHERE user_id = {user_id}
+                ORDER BY id DESC
+                LIMIT 200
+            )
+            SELECT member.id, member.transfer_group_id, requested.position
+            FROM requested
+            JOIN transactions AS member
+              ON member.transfer_group_id = requested.id
+             AND member.user_id = {user_id}
+            ORDER BY requested.position, member.account_id, member.id
+            """,
+            profile.list_p95_ms,
+            True,
+        ),
+        "cash_flow_months": (
+            f"""
+            SELECT to_char(
+                       date_trunc('month', timezone('America/New_York', t.transaction_time)),
+                       'YYYY-MM') AS period,
+                   SUM(t.amount) FILTER (WHERE t.type <> 'transfer'::transaction_type)
+            FROM transactions AS t
+            WHERE t.user_id = {user_id}
+              AND t.deleted_at IS NULL
+              AND t.transaction_time >= NOW() - INTERVAL '10 years'
+              AND t.transaction_time < NOW() + INTERVAL '1 day'
+            GROUP BY period
+            ORDER BY period
+            """,
+            profile.cash_flow_p95_ms,
+            False,
+        ),
+    }
+
+
+def explain(arguments: argparse.Namespace) -> None:
+    if not arguments.confirm_test_database:
+        raise PerformanceFailure("--confirm-test-database is required for EXPLAIN ANALYZE")
+    actual = fixture_row_count(arguments.psql, arguments.profile, arguments.user_id)
+    expected = PROFILES[arguments.profile].rows
+    if actual != expected:
+        raise PerformanceFailure(f"fixture expected {expected} rows, found {actual}; run seed first")
+
+    results: dict[str, dict[str, object]] = {}
+    failures: list[str] = []
+    for name, (query, budget_ms, forbid_transaction_seq_scan) in explain_queries(
+        arguments.profile, arguments.user_id
+    ).items():
+        raw = run_psql_text(
+            arguments.psql,
+            "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + query + ";",
+        )
+        try:
+            summary = summarize_plan(json.loads(raw))
+        except json.JSONDecodeError as error:
+            raise PerformanceFailure(f"{name} EXPLAIN returned invalid JSON") from error
+        summary["budget_ms"] = budget_ms
+        results[name] = summary
+        if float(summary["execution_ms"]) > budget_ms:
+            failures.append(f"{name} execution time exceeds budget")
+        if (
+            forbid_transaction_seq_scan
+            and "transactions" in summary["sequential_relations"]
+        ):
+            failures.append(f"{name} performs a sequential transaction scan")
+
+    document = {
+        "profile": arguments.profile,
+        "rows": expected,
+        "measured_at": datetime.now(timezone.utc).isoformat(),
+        "plans": results,
         "budgets_passed": not failures,
     }
     serialized = json.dumps(document, indent=2, sort_keys=True)
@@ -423,17 +638,55 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--output")
     run.add_argument("--enforce", action="store_true")
     run.set_defaults(action=benchmark)
+
+    plans = commands.add_parser("explain")
+    plans.add_argument("--profile", choices=PROFILES, required=True)
+    plans.add_argument("--user-id", type=int, required=True)
+    plans.add_argument("--psql", default="psql")
+    plans.add_argument("--confirm-test-database", action="store_true")
+    plans.add_argument("--output")
+    plans.add_argument("--enforce", action="store_true")
+    plans.set_defaults(action=explain)
     return root
+
+
+def validate_arguments(arguments: argparse.Namespace) -> None:
+    if getattr(arguments, "user_id", 1) <= 0:
+        raise PerformanceFailure("user id must be positive")
+    if arguments.command == "benchmark":
+        if not arguments.base_url:
+            raise PerformanceFailure("--base-url or PFH_PERF_BASE_URL is required")
+        try:
+            parsed = urlsplit(arguments.base_url)
+            parsed.port
+        except ValueError as error:
+            raise PerformanceFailure("base URL is invalid") from error
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or any(character.isspace() for character in arguments.base_url)
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or parsed.path not in {"", "/"}
+        ):
+            raise PerformanceFailure("base URL must be an HTTP(S) origin without credentials")
+        if arguments.iterations <= 0 or arguments.iterations > 1_000:
+            raise PerformanceFailure("iterations must be between 1 and 1000")
+        if arguments.warmup < 0 or arguments.warmup > 100:
+            raise PerformanceFailure("warmup must be between 0 and 100")
+        if (
+            not math.isfinite(arguments.timeout)
+            or arguments.timeout <= 0
+            or arguments.timeout > 300
+        ):
+            raise PerformanceFailure("timeout must be between 0 and 300 seconds")
 
 
 def main() -> int:
     arguments = parser().parse_args()
-    if getattr(arguments, "user_id", 1) <= 0:
-        raise PerformanceFailure("user id must be positive")
-    if arguments.command == "benchmark" and not arguments.base_url:
-        raise PerformanceFailure("--base-url or PFH_PERF_BASE_URL is required")
-    if getattr(arguments, "iterations", 1) <= 0 or getattr(arguments, "warmup", 0) < 0:
-        raise PerformanceFailure("iterations and warmup must be non-negative")
+    validate_arguments(arguments)
     arguments.action(arguments)
     return 0
 

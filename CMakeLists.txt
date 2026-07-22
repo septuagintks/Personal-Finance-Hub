@@ -15,6 +15,32 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+option(PFH_ENABLE_ADDRESS_SANITIZER "Enable AddressSanitizer for PFH targets" OFF)
+option(PFH_ENABLE_UNDEFINED_SANITIZER "Enable UndefinedBehaviorSanitizer for PFH targets" OFF)
+
+add_library(pfh_sanitizer_options INTERFACE)
+if(PFH_ENABLE_ADDRESS_SANITIZER OR PFH_ENABLE_UNDEFINED_SANITIZER)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        message(FATAL_ERROR
+            "PFH sanitizer builds require GCC or Clang. Disable the sanitizer "
+            "options for this compiler.")
+    endif()
+
+    set(PFH_SANITIZER_FLAGS "")
+    if(PFH_ENABLE_ADDRESS_SANITIZER)
+        list(APPEND PFH_SANITIZER_FLAGS -fsanitize=address)
+    endif()
+    if(PFH_ENABLE_UNDEFINED_SANITIZER)
+        list(APPEND PFH_SANITIZER_FLAGS
+            -fsanitize=undefined
+            -fno-sanitize-recover=undefined
+        )
+    endif()
+    list(APPEND PFH_SANITIZER_FLAGS -fno-omit-frame-pointer)
+    target_compile_options(pfh_sanitizer_options INTERFACE ${PFH_SANITIZER_FLAGS})
+    target_link_options(pfh_sanitizer_options INTERFACE ${PFH_SANITIZER_FLAGS})
+endif()
+
 # Dashboard month windows use the C++20 IANA timezone database. Calendar-only
 # chrono support is insufficient: the standard library must also provide and
 # link locate_zone/time_zone. Fail at configure time with a useful diagnostic
@@ -246,6 +272,7 @@ endif()
 # Domain Library (no external dependencies - MUST NOT link Drogon/PostgreSQL/spdlog)
 add_library(pfh_domain STATIC ${PFH_DOMAIN_SOURCES})
 target_include_directories(pfh_domain PUBLIC ${PFH_INCLUDE_DIR})
+target_link_libraries(pfh_domain PUBLIC pfh_sanitizer_options)
 
 # Application Layer - use-case orchestration, depending only on Domain ports.
 add_library(pfh_application STATIC ${PFH_APPLICATION_SOURCES})
@@ -434,6 +461,16 @@ set_tests_properties(release_hardening_contracts PROPERTIES
     LABELS "release;security;frontend;static"
 )
 
+add_test(
+    NAME phase2_tool_contracts
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/tools/validate_phase2_tools.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+set_tests_properties(phase2_tool_contracts PROPERTIES
+    LABELS "release;performance;static"
+)
+
 # Integration Tests
 add_subdirectory(tests/integration)
 
@@ -460,6 +497,8 @@ message(STATUS "Project Version: ${PROJECT_VERSION}")
 message(STATUS "C++ Standard: C++${CMAKE_CXX_STANDARD}")
 message(STATUS "Build Type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "Compiler: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
+message(STATUS "AddressSanitizer: ${PFH_ENABLE_ADDRESS_SANITIZER}")
+message(STATUS "UndefinedBehaviorSanitizer: ${PFH_ENABLE_UNDEFINED_SANITIZER}")
 if(PFH_BUILD_POSTGRESQL)
     message(STATUS "PostgreSQL: ${PostgreSQL_VERSION_STRING}")
     message(STATUS "Drogon: ${Drogon_VERSION}")

@@ -175,15 +175,66 @@ python3 tools/phase2_performance.py seed \
 python3 tools/phase2_performance.py benchmark \
   --profile daily --base-url "$PFH_PERF_BASE_URL" --enforce \
   --output /tmp/pfh-phase2-daily.json
+python3 tools/phase2_performance.py explain \
+  --profile daily --user-id <test-user-id> --confirm-test-database --enforce \
+  --output /tmp/pfh-phase2-daily-plans.json
 
 python3 tools/phase2_performance.py seed \
   --profile stress --user-id <test-user-id> --confirm-test-database
 python3 tools/phase2_performance.py benchmark \
   --profile stress --base-url "$PFH_PERF_BASE_URL" --enforce \
   --output /tmp/pfh-phase2-stress.json
+python3 tools/phase2_performance.py explain \
+  --profile stress --user-id <test-user-id> --confirm-test-database --enforce \
+  --output /tmp/pfh-phase2-stress-plans.json
 ```
 
 每次 seed 会先清理该用户的 `PFH-PERF-*` 夹具，使 Daily 与 Stress 互斥。记录 p50/p95、响应大小、数据库/应用资源、页面指标和关键查询的 `EXPLAIN (ANALYZE, BUFFERS)` 脱敏摘要；不要提交完整数据库 URL、Token、原始日志或大体积结果。
+
+### 6.3 Sanitizer、压力与浏览器 Heap
+
+Sanitizer 使用独立 build tree，并分别运行 ASan 和 UBSan：
+
+```bash
+PFH_SANITIZER_POSTGRESQL=OFF tools/run_sanitizers.sh
+PFH_SANITIZER_BUILD_ROOT=build/sanitizers-postgresql \
+  PFH_SANITIZER_POSTGRESQL=ON tools/run_sanitizers.sh
+```
+
+PostgreSQL ON 前先设置第 5.3 节三个测试连接串。切换 GCC/Clang 时使用不同的 `PFH_SANITIZER_BUILD_ROOT`，避免 CMake cache 复用编译器；任何 sanitizer 告警均阻断交付。
+
+压力测试直接连接 Backend 的 HTTP 测试端口，并使用短期测试 Token。`PFH_PRESSURE_SERVER_PID` 必须是该次 `pfh_server` 进程，Operator Token 只用于采集受控拒绝计数：
+
+```bash
+export PFH_PRESSURE_BASE_URL='http://127.0.0.1:8081'
+export PFH_PRESSURE_ACCESS_TOKEN='<ephemeral-access-token>'
+export PFH_PRESSURE_OPERATOR_TOKEN='<ephemeral-operator-token>'
+export PFH_PRESSURE_SERVER_PID='<pfh-server-pid>'
+
+python3 tools/phase2_pressure.py --scenario read \
+  --requests 500 --concurrency 32 --enforce --output /tmp/pfh-pressure-read.json
+python3 tools/phase2_pressure.py --scenario csv \
+  --requests 20 --concurrency 4 --enforce --output /tmp/pfh-pressure-csv.json
+python3 tools/phase2_pressure.py --scenario auth \
+  --requests 100 --concurrency 8 --enforce --output /tmp/pfh-pressure-auth.json
+python3 tools/phase2_pressure.py --scenario queue \
+  --requests 500 --concurrency 64 --body-bytes 1048576 --enforce \
+  --output /tmp/pfh-pressure-queue.json
+python3 tools/phase2_pressure.py --scenario disconnect \
+  --requests 100 --concurrency 16 --enforce --output /tmp/pfh-pressure-disconnect.json
+```
+
+每个场景都必须通过状态、恢复时间、峰值 RSS 与冷却后 RSS 预算；auth 与 queue 还必须在 Operator Metrics 中观察到对应 admission rejection 增长，否则不构成饱和测试。断连场景使用 Backend 直连 HTTP，避免把反向代理 TLS 行为误记为应用进程结果。
+
+Chromium heap 门禁与完整三浏览器矩阵分开执行：
+
+```bash
+corepack pnpm --dir frontend exec playwright test \
+  e2e/long-session-memory.spec.ts --project=local-chromium
+PLAYWRIGHT_FULL_BROWSERS=1 corepack pnpm --dir frontend e2e
+```
+
+heap 用例通过 CDP 强制 GC；Firefox/WebKit 项目会跳过该单项，但必须通过其余完整 E2E。
 
 ---
 

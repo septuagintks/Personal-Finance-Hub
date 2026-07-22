@@ -132,7 +132,8 @@ def main() -> int:
         failures,
     )
     require(
-        'psql_environment["PGDATABASE"] = database_url' in performance
+        'environment["PGDATABASE"] = database_url' in performance
+        and "def database_environment()" in performance
         and "--confirm-test-database" in performance
         and 'fixture_prefix = "PFH-PERF-%"' in performance
         and "[arguments.psql, database_url" not in performance,
