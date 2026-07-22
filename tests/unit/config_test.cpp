@@ -39,7 +39,14 @@ private:
 constexpr const char* kValidConfig = R"({
   "environment": "test",
   "server": { "host": "127.0.0.1", "port": 9090, "threads": 8,
-                "request_worker_threads": 6, "request_queue_capacity": 120 },
+                "request_worker_threads": 6, "request_queue_capacity": 120,
+                "request_queue_byte_capacity": 8388608,
+                "maximum_request_body_bytes": 524288,
+                "auth_worker_threads": 3, "auth_queue_capacity": 12,
+                "auth_queue_byte_capacity": 2097152,
+                "auth_rate_limit_attempts": 15,
+                "auth_rate_limit_window_seconds": 45,
+                "auth_rate_limit_sources": 5000 },
   "database": { "host": "db", "port": 6543, "name": "pfh_test",
                 "user": "tester", "password": "pw", "pool_size": 5,
                 "connection_timeout": 15 },
@@ -74,6 +81,14 @@ TEST(JsonConfigLoader, WhenValidConfig_LoadsAllFields) {
     EXPECT_EQ(r->server.threads, 8u);
     EXPECT_EQ(r->server.request_worker_threads, 6u);
     EXPECT_EQ(r->server.request_queue_capacity, 120u);
+    EXPECT_EQ(r->server.request_queue_byte_capacity, 8U * 1024U * 1024U);
+    EXPECT_EQ(r->server.maximum_request_body_bytes, 512U * 1024U);
+    EXPECT_EQ(r->server.auth_worker_threads, 3U);
+    EXPECT_EQ(r->server.auth_queue_capacity, 12U);
+    EXPECT_EQ(r->server.auth_queue_byte_capacity, 2U * 1024U * 1024U);
+    EXPECT_EQ(r->server.auth_rate_limit_attempts, 15U);
+    EXPECT_EQ(r->server.auth_rate_limit_window, std::chrono::seconds(45));
+    EXPECT_EQ(r->server.auth_rate_limit_sources, 5000U);
     EXPECT_EQ(r->database.port, 6543);
     EXPECT_EQ(r->database.name, "pfh_test");
     EXPECT_EQ(r->database.pool_size, 5u);
@@ -214,7 +229,16 @@ TEST(JsonConfigLoader, WhenRequestWorkerConfigurationIsInvalid_ReturnsError) {
     expect_invalid("\"request_worker_threads\":0");
     expect_invalid("\"request_worker_threads\":65");
     expect_invalid("\"request_queue_capacity\":0");
-    expect_invalid("\"request_queue_capacity\":10001");
+    expect_invalid("\"request_queue_capacity\":2049");
+    expect_invalid("\"request_queue_byte_capacity\":0");
+    expect_invalid("\"maximum_request_body_bytes\":16777217");
+    expect_invalid(
+        "\"request_queue_byte_capacity\":1024,"
+        "\"maximum_request_body_bytes\":2048");
+    expect_invalid("\"auth_worker_threads\":9");
+    expect_invalid("\"auth_queue_capacity\":257");
+    expect_invalid("\"auth_rate_limit_attempts\":0");
+    expect_invalid("\"auth_rate_limit_sources\":1000001");
 }
 
 // ---- Log level / output parsing ----

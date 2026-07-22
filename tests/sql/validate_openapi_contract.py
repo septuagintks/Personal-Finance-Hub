@@ -150,8 +150,24 @@ def main() -> int:
         failures.append(
             "Drogon route registration differs from the checked-in OpenAPI route table"
         )
-    if 'if (request.path == "/livez")' not in adapter_source:
+    liveness_position = adapter_source.find('if (path == "/livez")')
+    submission_position = adapter_source.find("submit_weighted(")
+    if (
+        liveness_position < 0
+        or submission_position < 0
+        or liveness_position > submission_position
+    ):
         failures.append("Drogon liveness dispatch must bypass the application queue")
+    for resource_boundary in (
+        "maximum_request_body_bytes",
+        "auth_rate_limiter.allow",
+        "password_auth ? auth_executor : request_executor",
+        "setClientMaxBodySize",
+    ):
+        if resource_boundary not in adapter_source:
+            failures.append(
+                f"Drogon adapter is missing resource boundary: {resource_boundary}"
+            )
     if 'response.headers.insert_or_assign("X-Trace-Id", trace_id)' not in adapter_source:
         failures.append("Drogon exception responses must expose their trace id header")
     if "error.what()" in adapter_source:

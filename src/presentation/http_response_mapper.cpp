@@ -159,4 +159,24 @@ HttpResponse HttpResponseMapper::overloaded(std::string_view trace_id) {
     return response;
 }
 
+HttpResponse HttpResponseMapper::payload_too_large(std::string_view trace_id) {
+    return json(413, nlohmann::json{
+        {"error_code", "PAYLOAD_TOO_LARGE"},
+        {"message", "The request body is too large"},
+        {"trace_id", trace_id},
+        {"retryable", false},
+        {"field_errors", nlohmann::json::array()}});
+}
+
+HttpResponse HttpResponseMapper::rate_limited(std::string_view trace_id) {
+    auto response = json(429, nlohmann::json{
+        {"error_code", "RATE_LIMITED"},
+        {"message", "Too many authentication attempts"},
+        {"trace_id", trace_id},
+        {"retryable", true},
+        {"field_errors", nlohmann::json::array()}});
+    response.headers.emplace("Retry-After", "60");
+    return response;
+}
+
 } // namespace pfh::presentation

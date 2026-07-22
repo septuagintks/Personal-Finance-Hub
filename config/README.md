@@ -21,7 +21,15 @@
 - `port`: HTTP port (default: 8080)
 - `threads`: Number of Drogon event-loop threads
 - `request_worker_threads`: Dedicated workers for synchronous application and database work (1-64)
-- `request_queue_capacity`: Maximum queued HTTP requests before the server returns a retryable 503 (1-10000)
+- `request_queue_capacity`: Maximum queued ordinary HTTP requests before a retryable 503 (1-2048)
+- `request_queue_byte_capacity`: Maximum total request-body bytes retained by accepted ordinary work (up to 256 MiB)
+- `maximum_request_body_bytes`: Per-request body limit enforced before worker admission (up to 16 MiB)
+- `auth_worker_threads`: Dedicated Argon2 worker count (1-8)
+- `auth_queue_capacity`: Maximum queued login/register requests (1-256)
+- `auth_queue_byte_capacity`: Body-byte budget reserved for login/register work (up to 16 MiB)
+- `auth_rate_limit_attempts`: Fixed-window login/register attempts allowed per direct peer
+- `auth_rate_limit_window_seconds`: Authentication rate-limit window
+- `auth_rate_limit_sources`: Maximum peer counters retained in memory
 
 #### Database Settings
 - `host`: PostgreSQL server address
@@ -60,7 +68,7 @@
 - `api_key`: FreeCurrencyAPI key; prefer `PFH_FREECURRENCYAPI_API_KEY`
 - `request_timeout_seconds`: Per-provider HTTPS timeout; because failover is sequential, it must not exceed half the job execution timeout
 
-HTTP event-loop callbacks copy the request boundary and enqueue synchronous Application, PostgreSQL and Argon2 work on the dedicated bounded request pool. Scheduler timer callbacks use a separate bounded background pool, so background jobs cannot consume HTTP request capacity. `job_execution_timeout_seconds` is a soft deadline because C++ worker threads are not terminated unsafely; external HTTP has its own hard timeout. Both `outbox_processing_timeout_seconds` and `job_lease_duration_seconds` must be longer than the soft deadline. FreeCurrencyAPI and exchangerate.fun may run sequentially, so twice `request_timeout_seconds` must fit within the soft deadline.
+HTTP event-loop callbacks validate request size before copying the body and use task-count plus retained-body-byte admission. Login and registration use a separate, smaller Argon2 pool and a bounded direct-peer rate limiter, so unauthenticated password work cannot consume ordinary API workers. Scheduler callbacks use a third bounded background pool. `job_execution_timeout_seconds` is a soft deadline because C++ worker threads are not terminated unsafely; external HTTP has its own hard timeout. Both `outbox_processing_timeout_seconds` and `job_lease_duration_seconds` must be longer than the soft deadline. FreeCurrencyAPI and exchangerate.fun may run sequentially, so twice `request_timeout_seconds` must fit within the soft deadline.
 
 The request-role database client performs Outbox transitions, exchange-rate appends, supplemental audit writes, token cleanup and job lease updates against non-RLS tables. The background BYPASSRLS/default-read-only client is reserved exclusively for the cross-tenant active-currency query.
 

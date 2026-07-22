@@ -1,6 +1,7 @@
 // Personal Finance Hub - HTTP Boundary Tests
 
 #include "pfh/presentation/http/http_response_mapper.h"
+#include "pfh/presentation/http/auth_rate_limiter.h"
 #include "pfh/presentation/http/concurrency.h"
 #include "pfh/presentation/http/json_request_parser.h"
 #include "pfh/presentation/http/time_codec.h"
@@ -111,6 +112,43 @@ TEST(HttpBoundaryTest, OverloadResponseIsRetryableAndTraceable) {
     EXPECT_EQ(body["trace_id"], "trace-overload");
     EXPECT_TRUE(body["retryable"].get<bool>());
     EXPECT_TRUE(body["field_errors"].empty());
+}
+
+TEST(HttpBoundaryTest, ResourceRejectionsUseStableHttpContracts) {
+    const auto oversized = HttpResponseMapper::payload_too_large(
+        "trace-payload");
+    ASSERT_EQ(oversized.status, 413);
+    auto oversized_body = nlohmann::json::parse(oversized.body);
+    EXPECT_EQ(oversized_body["error_code"], "PAYLOAD_TOO_LARGE");
+    EXPECT_FALSE(oversized_body["retryable"].get<bool>());
+
+    const auto limited = HttpResponseMapper::rate_limited("trace-rate");
+    ASSERT_EQ(limited.status, 429);
+    ASSERT_TRUE(limited.headers.contains("Retry-After"));
+    auto limited_body = nlohmann::json::parse(limited.body);
+    EXPECT_EQ(limited_body["error_code"], "RATE_LIMITED");
+    EXPECT_TRUE(limited_body["retryable"].get<bool>());
+}
+
+TEST(AuthRateLimiterTest, BoundsSourcesAndResetsExpiredWindows) {
+    using Clock = AuthRateLimiter::Clock;
+    const auto start = Clock::time_point{};
+    AuthRateLimiter limiter(2, std::chrono::seconds(60), 2);
+
+    EXPECT_TRUE(limiter.allow("source-a", start));
+    EXPECT_TRUE(limiter.allow(
+        "source-a", start + std::chrono::seconds(1)));
+    EXPECT_FALSE(limiter.allow(
+        "source-a", start + std::chrono::seconds(2)));
+    EXPECT_TRUE(limiter.allow(
+        "source-b", start + std::chrono::seconds(2)));
+    EXPECT_FALSE(limiter.allow(
+        "source-c", start + std::chrono::seconds(2)));
+    EXPECT_EQ(limiter.tracked_sources(), 2U);
+
+    EXPECT_TRUE(limiter.allow(
+        "source-c", start + std::chrono::seconds(63)));
+    EXPECT_EQ(limiter.tracked_sources(), 1U);
 }
 
 TEST(HttpBoundaryTest, IfMatchAcceptsOneStrongVersionAndRejectsAmbiguity) {

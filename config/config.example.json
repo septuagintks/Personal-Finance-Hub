@@ -5,7 +5,15 @@
     "port": 8080,
     "threads": 4,
     "request_worker_threads": 8,
-    "request_queue_capacity": 256
+    "request_queue_capacity": 256,
+    "request_queue_byte_capacity": 16777216,
+    "maximum_request_body_bytes": 1048576,
+    "auth_worker_threads": 2,
+    "auth_queue_capacity": 16,
+    "auth_queue_byte_capacity": 1048576,
+    "auth_rate_limit_attempts": 20,
+    "auth_rate_limit_window_seconds": 60,
+    "auth_rate_limit_sources": 10000
   },
   "database": {
     "host": "localhost",

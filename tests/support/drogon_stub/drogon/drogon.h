@@ -12,6 +12,14 @@
 #include <utility>
 
 namespace drogon {
+namespace stub {
+
+class PeerAddress {
+public:
+    [[nodiscard]] std::string toIp() const { return "127.0.0.1"; }
+};
+
+} // namespace stub
 
 enum HttpMethod { Get, Post, Put, Delete };
 enum HttpStatusCode { k200OK = 200, k500InternalServerError = 500 };
@@ -33,6 +41,10 @@ public:
     }
     [[nodiscard]] std::string methodString() const { return "GET"; }
     [[nodiscard]] std::string path() const { return "/"; }
+    [[nodiscard]] const stub::PeerAddress& peerAddr() const noexcept {
+        static const stub::PeerAddress address;
+        return address;
+    }
 };
 
 using HttpRequestPtr = std::shared_ptr<HttpRequest>;
@@ -82,6 +94,7 @@ public:
         return *this;
     }
     HttpAppFramework& setThreadNum(std::size_t) { return *this; }
+    HttpAppFramework& setClientMaxBodySize(std::size_t) { return *this; }
     [[nodiscard]] EventLoop* getLoop() noexcept { return &loop_; }
 
     template <typename Advice>

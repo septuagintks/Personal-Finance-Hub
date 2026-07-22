@@ -172,6 +172,29 @@ TEST(BoundedThreadPoolTest, RejectsOverflowAndDrainsAcceptedTasksOnShutdown) {
     EXPECT_FALSE(pool.submit([] {}));
 }
 
+TEST(BoundedThreadPoolTest, WeightedCapacityIsReleasedAfterSuccessAndException) {
+    BoundedThreadPool pool(1, 4, 10);
+    std::promise<void> first_started;
+    std::promise<void> release_first;
+    const auto release = release_first.get_future().share();
+
+    ASSERT_TRUE(pool.submit_weighted([&] {
+        first_started.set_value();
+        release.wait();
+    }, 7));
+    first_started.get_future().wait();
+    EXPECT_EQ(pool.reserved_weight(), 7U);
+    EXPECT_FALSE(pool.submit_weighted([] {}, 4));
+    ASSERT_TRUE(pool.submit_weighted([] {
+        throw std::runtime_error("expected task failure");
+    }, 3));
+    EXPECT_EQ(pool.reserved_weight(), 10U);
+
+    release_first.set_value();
+    pool.shutdown();
+    EXPECT_EQ(pool.reserved_weight(), 0U);
+}
+
 TEST(InMemoryJobLeaseRepositoryTest,
      LeaseExpiryAndTokenPreventStaleOwnerRelease) {
     const auto now = std::chrono::system_clock::time_point{123456s};

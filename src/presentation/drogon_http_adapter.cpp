@@ -35,11 +35,14 @@ namespace {
 
 [[nodiscard]] HttpRequest to_core(
     const drogon::HttpRequestPtr& request,
-    HttpMethod method) {
+    HttpMethod method,
+    bool copy_body) {
     HttpRequest core;
     core.method = method;
     core.path = request->path();
-    core.body = std::string(request->body());
+    if (copy_body) {
+        core.body = std::string(request->body());
+    }
     core.trace_id = ApiApplication::generate_trace_id();
     const auto authorization = request->getHeader("Authorization");
     if (!authorization.empty()) {
@@ -81,22 +84,64 @@ using ResponseCallback =
 
 void dispatch_request(
     ApiApplication& application,
-    application::IBackgroundExecutor& executor,
-    HttpRequest request,
+    application::IBackgroundExecutor& request_executor,
+    application::IBackgroundExecutor& auth_executor,
+    AuthRateLimiter& auth_rate_limiter,
+    std::size_t maximum_request_body_bytes,
+    const drogon::HttpRequestPtr& drogon_request,
+    HttpMethod method,
     ResponseCallback callback) {
+    const auto path = drogon_request->path();
+    const auto trace_id = ApiApplication::generate_trace_id();
     // Liveness must remain independent of the bounded application worker queue.
-    if (request.path == "/livez") {
+    if (path == "/livez") {
+        auto request = to_core(drogon_request, method, true);
+        request.trace_id = trace_id;
         callback(to_drogon(application.handle(std::move(request))));
         return;
     }
-    const auto trace_id = request.trace_id;
+
+    const auto body_size = drogon_request->body().size();
+    if (body_size > maximum_request_body_bytes) {
+        spdlog::warn(
+            "HTTP request body rejected trace_id={} bytes={}",
+            trace_id,
+            body_size);
+        auto response = HttpResponseMapper::payload_too_large(trace_id);
+        response.headers.insert_or_assign("X-Trace-Id", trace_id);
+        callback(to_drogon(std::move(response)));
+        return;
+    }
+
+    const bool password_auth =
+        path == "/api/v1/auth/register" ||
+        path == "/api/v1/auth/login" ||
+        path == "/api/v1/web/auth/register" ||
+        path == "/api/v1/web/auth/login";
+    if (password_auth &&
+        !auth_rate_limiter.allow(drogon_request->peerAddr().toIp())) {
+        spdlog::warn("Authentication rate limited trace_id={}", trace_id);
+        auto response = HttpResponseMapper::rate_limited(trace_id);
+        response.headers.insert_or_assign("X-Trace-Id", trace_id);
+        callback(to_drogon(std::move(response)));
+        return;
+    }
+
+    auto request = to_core(drogon_request, method, false);
+    request.trace_id = trace_id;
     auto response_callback =
         std::make_shared<ResponseCallback>(std::move(callback));
-    const bool accepted = executor.submit(
-        [&application, request = std::move(request), response_callback]() mutable {
+    auto& executor = password_auth ? auth_executor : request_executor;
+    const bool accepted = executor.submit_weighted(
+        [&application, request = std::move(request),
+         queued_request = drogon_request,
+         response_callback]() mutable {
+            request.body = std::string(queued_request->body());
+            queued_request.reset();
             (*response_callback)(to_drogon(
                 application.handle(std::move(request))));
-        });
+        },
+        body_size);
     if (!accepted) {
         spdlog::warn("HTTP request queue is full trace_id={}", trace_id);
         auto response = HttpResponseMapper::overloaded(trace_id);
@@ -118,8 +163,9 @@ void DrogonHttpAdapter::configure() {
                 const drogon::HttpRequestPtr& request,
                 std::function<void(const drogon::HttpResponsePtr&)>&& callback) {
                 dispatch_request(
-                    application_, request_executor_,
-                    to_core(request, core_method), std::move(callback));
+                    application_, request_executor_, auth_executor_,
+                    auth_rate_limiter_, server_.maximum_request_body_bytes,
+                    request, core_method, std::move(callback));
             },
             {method});
     };
@@ -134,8 +180,9 @@ void DrogonHttpAdapter::configure() {
                 std::function<void(const drogon::HttpResponsePtr&)>&& callback,
                 std::string /*path_parameter*/) {
                 dispatch_request(
-                    application_, request_executor_,
-                    to_core(request, core_method), std::move(callback));
+                    application_, request_executor_, auth_executor_,
+                    auth_rate_limiter_, server_.maximum_request_body_bytes,
+                    request, core_method, std::move(callback));
             },
             {method});
     };
@@ -243,7 +290,8 @@ void DrogonHttpAdapter::configure() {
 
     drogon::app()
         .addListener(server_.host, server_.port)
-        .setThreadNum(server_.threads);
+        .setThreadNum(server_.threads)
+        .setClientMaxBodySize(server_.maximum_request_body_bytes);
 }
 
 void DrogonHttpAdapter::run() {

@@ -215,6 +215,7 @@ endif()
 
 # Presentation Layer - REST API controllers
 set(PFH_PRESENTATION_SOURCES
+    src/presentation/auth_rate_limiter.cpp
     src/presentation/time_codec.cpp
     src/presentation/json_request_parser.cpp
     src/presentation/http_response_mapper.cpp

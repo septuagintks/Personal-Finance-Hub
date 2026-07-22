@@ -66,6 +66,23 @@ public:
                     "request_worker_threads", 8);
                 config.server.request_queue_capacity = server.value<std::uint32_t>(
                     "request_queue_capacity", 256);
+                config.server.request_queue_byte_capacity = server.value<std::uint64_t>(
+                    "request_queue_byte_capacity", 16U * 1024U * 1024U);
+                config.server.maximum_request_body_bytes = server.value<std::uint64_t>(
+                    "maximum_request_body_bytes", 1024U * 1024U);
+                config.server.auth_worker_threads = server.value<std::uint32_t>(
+                    "auth_worker_threads", 2);
+                config.server.auth_queue_capacity = server.value<std::uint32_t>(
+                    "auth_queue_capacity", 16);
+                config.server.auth_queue_byte_capacity = server.value<std::uint64_t>(
+                    "auth_queue_byte_capacity", 1024U * 1024U);
+                config.server.auth_rate_limit_attempts = server.value<std::uint32_t>(
+                    "auth_rate_limit_attempts", 20);
+                config.server.auth_rate_limit_window = std::chrono::seconds(
+                    server.value<std::int64_t>(
+                        "auth_rate_limit_window_seconds", 60));
+                config.server.auth_rate_limit_sources = server.value<std::uint32_t>(
+                    "auth_rate_limit_sources", 10'000);
             }
 
             // Database config
@@ -217,10 +234,35 @@ public:
                     "Password pepper still holds a placeholder value; set a real pepper or leave it empty"));
             }
             if (config.server.threads == 0 ||
+                config.server.threads > 64 ||
                 config.server.request_worker_threads == 0 ||
                 config.server.request_worker_threads > 64 ||
                 config.server.request_queue_capacity == 0 ||
-                config.server.request_queue_capacity > 10000 ||
+                config.server.request_queue_capacity > 2048 ||
+                config.server.request_queue_byte_capacity == 0 ||
+                config.server.request_queue_byte_capacity >
+                    256U * 1024U * 1024U ||
+                config.server.maximum_request_body_bytes == 0 ||
+                config.server.maximum_request_body_bytes >
+                    16U * 1024U * 1024U ||
+                config.server.maximum_request_body_bytes >
+                    config.server.request_queue_byte_capacity ||
+                config.server.auth_worker_threads == 0 ||
+                config.server.auth_worker_threads > 8 ||
+                config.server.auth_queue_capacity == 0 ||
+                config.server.auth_queue_capacity > 256 ||
+                config.server.auth_queue_byte_capacity == 0 ||
+                config.server.auth_queue_byte_capacity >
+                    16U * 1024U * 1024U ||
+                config.server.maximum_request_body_bytes >
+                    config.server.auth_queue_byte_capacity ||
+                config.server.auth_rate_limit_attempts == 0 ||
+                config.server.auth_rate_limit_attempts > 10'000 ||
+                config.server.auth_rate_limit_window <=
+                    std::chrono::seconds::zero() ||
+                config.server.auth_rate_limit_window > std::chrono::hours(24) ||
+                config.server.auth_rate_limit_sources == 0 ||
+                config.server.auth_rate_limit_sources > 1'000'000 ||
                 config.database.pool_size == 0 ||
                 config.background_database.pool_size == 0) {
                 return std::unexpected(Error(application::ErrorCode::ConfigurationError,

@@ -77,6 +77,9 @@ ProductionCompositionRoot::ProductionCompositionRoot(
     : config_(std::move(config)) {}
 
 ProductionCompositionRoot::~ProductionCompositionRoot() {
+    if (auth_executor_) {
+        auth_executor_->shutdown();
+    }
     if (request_executor_) {
         request_executor_->shutdown();
     }
@@ -480,14 +483,27 @@ application::VoidResult ProductionCompositionRoot::initialize() {
     request_executor_ =
         std::make_unique<infrastructure::BoundedThreadPool>(
             config_.server.request_worker_threads,
-            config_.server.request_queue_capacity);
+            config_.server.request_queue_capacity,
+            config_.server.request_queue_byte_capacity);
+    auth_executor_ =
+        std::make_unique<infrastructure::BoundedThreadPool>(
+            config_.server.auth_worker_threads,
+            config_.server.auth_queue_capacity,
+            config_.server.auth_queue_byte_capacity);
     http_adapter_ = std::make_unique<presentation::DrogonHttpAdapter>(
         *api_application_,
         *request_executor_,
+        *auth_executor_,
         presentation::HttpServerConfig{
             config_.server.host,
             config_.server.port,
-            config_.server.threads});
+            config_.server.threads,
+            static_cast<std::size_t>(
+                config_.server.maximum_request_body_bytes),
+            config_.server.auth_rate_limit_attempts,
+            static_cast<std::uint32_t>(
+                config_.server.auth_rate_limit_window.count()),
+            config_.server.auth_rate_limit_sources});
     http_adapter_->configure();
     return application::ok();
 }

@@ -19,6 +19,14 @@ struct ServerConfig {
     std::uint32_t threads = 4;
     std::uint32_t request_worker_threads = 8;
     std::uint32_t request_queue_capacity = 256;
+    std::uint64_t request_queue_byte_capacity = 16U * 1024U * 1024U;
+    std::uint64_t maximum_request_body_bytes = 1024U * 1024U;
+    std::uint32_t auth_worker_threads = 2;
+    std::uint32_t auth_queue_capacity = 16;
+    std::uint64_t auth_queue_byte_capacity = 1024U * 1024U;
+    std::uint32_t auth_rate_limit_attempts = 20;
+    std::chrono::seconds auth_rate_limit_window{60};
+    std::uint32_t auth_rate_limit_sources = 10'000;
 };
 
 /// @brief Database configuration
