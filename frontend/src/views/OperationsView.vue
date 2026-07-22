@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { Activity, CircleAlert, RefreshCw, RotateCcw, ServerCog } from '@lucide/vue';
+import { Activity, ArrowUpToLine, CircleAlert, RefreshCw, RotateCcw, ServerCog } from '@lucide/vue';
 import AppShell from '../components/AppShell.vue';
 import { ApiError } from '../services/api-error';
 import {
@@ -12,12 +12,14 @@ import {
 } from '../services/operations-api';
 import { formatInstant } from '../services/presentation';
 import { createIntentKeyTracker } from '../services/idempotency';
+import { createResidentPageWindow } from '../services/resident-page-window';
 import { useUserContextStore } from '../stores/user-context';
 import { translate } from '../i18n';
 
 const userContext = useUserContextStore();
 const summary = ref<OperationsSummary | null>(null);
 const deadLetters = ref<DeadLetterItem[]>([]);
+const hasEvictedDeadLetters = ref(false);
 const nextCursor = ref<string | null>(null);
 const loading = ref(false);
 const loadingMore = ref(false);
@@ -29,6 +31,7 @@ let loadMoreController: AbortController | null = null;
 let retryController: AbortController | null = null;
 let requestGeneration = 0;
 const retryIntent = createIntentKeyTracker('dead-letter');
+const deadLetterWindow = createResidentPageWindow<DeadLetterItem>(({ id }) => id);
 
 const presentationLocale = computed(() => ({
   locale: userContext.preference?.locale ?? 'en-US',
@@ -103,7 +106,9 @@ async function load(): Promise<void> {
     ]);
     if (generation !== requestGeneration || controller.signal.aborted) return;
     summary.value = overview;
-    deadLetters.value = page.items;
+    const update = deadLetterWindow.reset(page.items);
+    deadLetters.value = update.items;
+    hasEvictedDeadLetters.value = update.evicted;
     nextCursor.value = page.nextCursor;
   } catch (reason) {
     if (generation === requestGeneration && !controller.signal.aborted) {
@@ -129,7 +134,9 @@ async function loadMore(): Promise<void> {
   try {
     const page = await listDeadLetters(cursor, 50, controller.signal);
     if (generation !== requestGeneration || controller.signal.aborted) return;
-    deadLetters.value = [...deadLetters.value, ...page.items];
+    const update = deadLetterWindow.append(page.items);
+    deadLetters.value = update.items;
+    hasEvictedDeadLetters.value = hasEvictedDeadLetters.value || update.evicted;
     nextCursor.value = page.nextCursor;
   } catch (reason) {
     if (generation === requestGeneration && !controller.signal.aborted) {
@@ -174,6 +181,7 @@ onBeforeUnmount(() => {
   loadMoreController?.abort();
   retryController?.abort();
   retryIntent.clear();
+  deadLetterWindow.clear();
 });
 </script>
 
@@ -337,6 +345,12 @@ onBeforeUnmount(() => {
           <p>{{ translate('operations.noDeadLetters') }}</p>
           <span>{{ translate('operations.noDeadLettersDetail') }}</span>
         </div>
+      </div>
+      <div v-if="hasEvictedDeadLetters" class="resident-window-notice" role="status">
+        <span>{{ translate('ledger.residentWindowLimited') }}</span>
+        <button class="button button--small button--quiet" type="button" @click="load">
+          <ArrowUpToLine :size="16" /> {{ translate('ledger.returnToLatest') }}
+        </button>
       </div>
       <div v-if="nextCursor" class="ledger-load-more">
         <button

@@ -128,7 +128,10 @@ function handleFocusOut(event: FocusEvent): void {
 }
 
 onMounted(load);
-onBeforeUnmount(() => controller?.abort());
+onBeforeUnmount(() => {
+  controller?.abort();
+  controller = null;
+});
 </script>
 
 <template>

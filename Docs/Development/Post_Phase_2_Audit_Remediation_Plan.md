@@ -2,7 +2,7 @@
 
 Version: 1.2
 Baseline: `main@43d06fb79bd0c1faa41f4f3fffb0c15c05673fc2`
-Status: In progress (`R01`-`R09` implemented; `R10`-`R12` pending)
+Status: In progress (`R01`-`R10` implemented; `R11`-`R12` pending)
 Suggested Branch: `fix/post-phase2-audit-remediation`
 
 ---
@@ -314,6 +314,8 @@ OpenAPI 预计增加或修改：
 5. 对路由往返、连续 `loadMore`、偏好反复切换和大列表滚动执行浏览器 heap 回归。
 
 验收：长列表驻留对象和 DOM 节点有固定上限；重复进入/离开页面后 heap 能回落；首次 Reports 不重复请求；formatter 构造次数不与单元格数量同阶增长。
+
+实现状态（2026-07-23）：Reports 路由规范化与聚合 revision 已合并为单一加载入口；流水、转账、审计和死信列表使用增量 ID 索引，并固定为最多 4 个响应页、200 条驻留记录。流水列表每行最多投影 4 个标签及剩余数量，避免标签上限放大 DOM；被释放较新页时可显式返回最新结果。数字和日期时间 formatter 使用有界 LRU 缓存，Object URL、ECharts、ResizeObserver、时区请求及列表请求均完成卸载路径复核。前端完整质量门禁、90 项单元测试及 Chromium 报表/流水工作流通过；重复路由往返后的浏览器 heap 回落仍按 `R11` 执行动态验收。
 
 ### 4.11 R11 动态内存与压力验证
 

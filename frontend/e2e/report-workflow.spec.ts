@@ -152,6 +152,7 @@ for (const viewport of [
     await expect(page.getByRole('heading', { name: 'Root category breakdown' })).toBeVisible();
     await expect(page.getByRole('cell', { name: '10,000' }).first()).toBeVisible();
     await expectChartsPainted(page);
+    expect(state.dimensions).toEqual(['root_category']);
     await expectAccessibleAndContained(page);
 
     await page.getByRole('combobox', { name: 'Breakdown' }).selectOption('account');

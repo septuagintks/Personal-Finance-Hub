@@ -1,7 +1,17 @@
-import { describe, expect, it } from 'vitest';
-import { formatDecimalString, formatInstant, toChartRatios, toEnumOptions } from './presentation';
+import { beforeEach, describe, expect, it } from 'vitest';
+import {
+  clearPresentationFormatterCaches,
+  formatDecimalString,
+  formatInstant,
+  PRESENTATION_FORMATTER_CACHE_LIMITS,
+  presentationFormatterCacheSizes,
+  toChartRatios,
+  toEnumOptions,
+} from './presentation';
 
 describe('presentation adapters', () => {
+  beforeEach(() => clearPresentationFormatterCaches());
+
   it('formats large decimal strings without converting the financial value to Number', () => {
     expect(formatDecimalString('999999999999.12345678', 'en-US')).toBe('999,999,999,999.12345678');
     expect(formatDecimalString('-1234.555', 'en-US', 2)).toBe('-1,234.56');
@@ -40,6 +50,37 @@ describe('presentation adapters', () => {
     expect(dayFirst).toMatch(/^01\/07\/2026 /);
     expect(yearFirst).toContain('8:30');
     expect(dayFirst).toContain('8:30');
+  });
+
+  it('reuses Intl formatters across repeated table-cell formatting', () => {
+    for (let index = 0; index < 20; index += 1) {
+      formatDecimalString(String(index), 'en-US', 8, '1,234.56');
+      formatInstant('2026-07-01T00:30:00Z', {
+        locale: 'en-US',
+        timeZone: 'Asia/Shanghai',
+        dateFormat: 'YYYY-MM-DD',
+      });
+    }
+
+    expect(presentationFormatterCacheSizes()).toEqual({ number: 1, dateTime: 2 });
+  });
+
+  it('bounds the formatter key space across timezone changes', () => {
+    const zones = Intl.supportedValuesOf('timeZone').slice(
+      0,
+      PRESENTATION_FORMATTER_CACHE_LIMITS.dateTime + 8,
+    );
+    for (const timeZone of zones) {
+      formatInstant('2026-07-01T00:30:00Z', {
+        locale: 'en-US',
+        timeZone,
+        dateFormat: 'YYYY-MM-DD',
+      });
+    }
+
+    expect(presentationFormatterCacheSizes().dateTime).toBeLessThanOrEqual(
+      PRESENTATION_FORMATTER_CACHE_LIMITS.dateTime,
+    );
   });
 
   it('disambiguates repeated local times across a daylight-saving transition', () => {

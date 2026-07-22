@@ -1,7 +1,15 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref, watch } from 'vue';
+import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { ArrowRightLeft, CircleAlert, Filter, LoaderCircle, Plus, RotateCcw } from '@lucide/vue';
+import {
+  ArrowRightLeft,
+  ArrowUpToLine,
+  CircleAlert,
+  Filter,
+  LoaderCircle,
+  Plus,
+  RotateCcw,
+} from '@lucide/vue';
 import AppShell from '../components/AppShell.vue';
 import TransferFormDialog from '../components/TransferFormDialog.vue';
 import { ApiError, type ApiErrorShape } from '../services/api-error';
@@ -89,6 +97,15 @@ async function clearFilters(): Promise<void> {
   await router.replace({ name: 'transfers' });
 }
 
+async function loadMore(): Promise<void> {
+  pageError.value = null;
+  try {
+    await transfers.loadMore();
+  } catch (error) {
+    pageError.value = mapError(error);
+  }
+}
+
 function accountName(accountId: number): string {
   return (
     accounts.items.find(({ id }) => id === accountId)?.name ??
@@ -143,6 +160,8 @@ onMounted(async () => {
   await accounts.loadList('active').catch(() => undefined);
   await load();
 });
+
+onBeforeUnmount(() => transfers.cancelListLoad());
 </script>
 
 <template>
@@ -265,12 +284,18 @@ onMounted(async () => {
         <ArrowRightLeft :size="28" /><strong>{{ translate('transfers.noMatch') }}</strong>
       </div>
     </section>
+    <div v-if="transfers.hasEvictedItems" class="resident-window-notice" role="status">
+      <span>{{ translate('ledger.residentWindowLimited') }}</span>
+      <button class="button button--small button--quiet" type="button" @click="load">
+        <ArrowUpToLine :size="16" /> {{ translate('ledger.returnToLatest') }}
+      </button>
+    </div>
     <div v-if="transfers.nextCursor" class="ledger-load-more">
       <button
         class="button button--quiet"
         type="button"
         :disabled="transfers.listState === 'loading-more'"
-        @click="transfers.loadMore()"
+        @click="loadMore"
       >
         <LoaderCircle v-if="transfers.listState === 'loading-more'" class="spin" :size="17" />
         {{ translate('ledger.loadMore') }}

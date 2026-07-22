@@ -2,6 +2,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { HttpResponse, delay, http as mockHttp } from 'msw';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { Transfer } from '../services/transfer-api';
+import { RESIDENT_PAGE_LIMIT } from '../services/resident-page-window';
 import { server } from '../test/server';
 import { useTransferStore } from './transfers';
 import { useUserContextStore } from './user-context';
@@ -41,7 +42,7 @@ describe('transfer store', () => {
       mockHttp.get('*/api/v1/transfers', ({ request }) => {
         const cursor = new URL(request.url).searchParams.get('cursor');
         return cursor
-          ? HttpResponse.json({ items: [transfer(2), transfer(1)], nextCursor: null })
+          ? HttpResponse.json({ items: [transfer(2), transfer(1), transfer(1)], nextCursor: null })
           : HttpResponse.json({ items: [transfer(3), transfer(2)], nextCursor: 'page-2' });
       }),
     );
@@ -49,6 +50,26 @@ describe('transfer store', () => {
     await expect(store.load({ pageSize: 2 })).resolves.toBe(true);
     await expect(store.loadMore()).resolves.toBe(true);
     expect(store.items.map(({ transferGroupId }) => transferGroupId)).toEqual([3, 2, 1]);
+  });
+
+  it('keeps only a fixed window of aggregate cursor pages', async () => {
+    server.use(
+      mockHttp.get('*/api/v1/transfers', ({ request }) => {
+        const rawCursor = new URL(request.url).searchParams.get('cursor');
+        const page = rawCursor ? Number(rawCursor) : 0;
+        return HttpResponse.json({
+          items: [transfer(100 - page)],
+          nextCursor: page < RESIDENT_PAGE_LIMIT ? String(page + 1) : null,
+        });
+      }),
+    );
+    const store = useTransferStore();
+
+    await store.load({ pageSize: 1 });
+    while (store.nextCursor) await store.loadMore();
+
+    expect(store.items.map(({ transferGroupId }) => transferGroupId)).toEqual([99, 98, 97, 96]);
+    expect(store.hasEvictedItems).toBe(true);
   });
 
   it('does not publish a late detail after session state is cleared', async () => {

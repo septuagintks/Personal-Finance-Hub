@@ -1,7 +1,15 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref, watch } from 'vue';
+import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { CircleAlert, Filter, LoaderCircle, Plus, ReceiptText, RotateCcw } from '@lucide/vue';
+import {
+  ArrowUpToLine,
+  CircleAlert,
+  Filter,
+  LoaderCircle,
+  Plus,
+  ReceiptText,
+  RotateCcw,
+} from '@lucide/vue';
 import AppShell from '../components/AppShell.vue';
 import TransactionFormDialog from '../components/TransactionFormDialog.vue';
 import { ApiError, type ApiErrorShape } from '../services/api-error';
@@ -126,6 +134,12 @@ async function loadMore(): Promise<void> {
   }
 }
 
+function visibleTags(
+  tags: Array<{ id: number; name: string }>,
+): Array<{ id: number; name: string }> {
+  return tags.slice(0, 4);
+}
+
 function accountName(accountId: number): string {
   return (
     accounts.items.find(({ id }) => id === accountId)?.name ??
@@ -190,6 +204,8 @@ onMounted(async () => {
   ]).catch(() => undefined);
   await load();
 });
+
+onBeforeUnmount(() => transactions.cancelListLoad());
 </script>
 
 <template>
@@ -329,7 +345,12 @@ onMounted(async () => {
               transaction.description || translate(typeLabels[transaction.type])
             }}</strong>
             <span class="ledger-tags">
-              <small v-for="tag in transaction.tags" :key="tag.id">{{ tag.name }}</small>
+              <small v-for="tag in visibleTags(transaction.tags)" :key="tag.id">{{
+                tag.name
+              }}</small>
+              <small v-if="transaction.tags.length > 4">
+                {{ translate('ledger.moreTags', { count: transaction.tags.length - 4 }) }}
+              </small>
             </span>
           </span>
           <span :data-label="translate('ledger.account')">{{
@@ -351,6 +372,12 @@ onMounted(async () => {
         <strong>{{ translate('transactions.noMatch') }}</strong>
       </div>
     </section>
+    <div v-if="transactions.hasEvictedItems" class="resident-window-notice" role="status">
+      <span>{{ translate('ledger.residentWindowLimited') }}</span>
+      <button class="button button--small button--quiet" type="button" @click="load">
+        <ArrowUpToLine :size="16" /> {{ translate('ledger.returnToLatest') }}
+      </button>
+    </div>
     <div v-if="transactions.nextCursor" class="ledger-load-more">
       <button
         class="button button--quiet"

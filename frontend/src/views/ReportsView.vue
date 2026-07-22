@@ -30,6 +30,7 @@ const endInput = ref('');
 const dimensionInput = ref<ReportDimension>('root_category');
 let requestController: AbortController | null = null;
 let exportController: AbortController | null = null;
+const pendingObjectUrls = new Map<string, number>();
 
 const dimensions: Array<{ value: ReportDimension; label: MessageKey }> = [
   { value: 'root_category', label: 'reports.dimension.rootCategory' },
@@ -78,8 +79,7 @@ function apiError(reason: unknown): ApiErrorShape {
       };
 }
 
-async function load(): Promise<void> {
-  const filters = routeFilters();
+async function load(filters = routeFilters()): Promise<void> {
   syncInputs(filters);
   requestController?.abort();
   const controller = new AbortController();
@@ -97,6 +97,14 @@ async function load(): Promise<void> {
       loading.value = false;
     }
   }
+}
+
+function scheduleObjectUrlRelease(url: string): void {
+  const timer = window.setTimeout(() => {
+    URL.revokeObjectURL(url);
+    pendingObjectUrls.delete(url);
+  }, 0);
+  pendingObjectUrls.set(url, timer);
 }
 
 async function applyFilters(): Promise<void> {
@@ -131,7 +139,7 @@ async function exportCsv(): Promise<void> {
     document.body.append(anchor);
     anchor.click();
     anchor.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    scheduleObjectUrlRelease(url);
   } catch (reason) {
     if (!controller.signal.aborted) error.value = apiError(reason);
   } finally {
@@ -201,19 +209,28 @@ async function synchronizeRoute(): Promise<void> {
     });
     return;
   }
-  await load();
+  await load(filters);
 }
 
 watch(
-  () => [route.query.startDate, route.query.endDate, route.query.dimension],
+  () => [
+    route.query.startDate,
+    route.query.endDate,
+    route.query.dimension,
+    userContext.aggregationRevision,
+  ],
   () => void synchronizeRoute(),
   { immediate: true },
 );
-watch(() => userContext.aggregationRevision, load);
 
 onBeforeUnmount(() => {
   requestController?.abort();
   exportController?.abort();
+  for (const [url, timer] of pendingObjectUrls) {
+    window.clearTimeout(timer);
+    URL.revokeObjectURL(url);
+  }
+  pendingObjectUrls.clear();
 });
 </script>
 
@@ -280,7 +297,7 @@ onBeforeUnmount(() => {
         v-if="error.retryable"
         class="button button--small button--quiet"
         type="button"
-        @click="load"
+        @click="load()"
       >
         {{ translate('ledger.tryAgain') }}
       </button>

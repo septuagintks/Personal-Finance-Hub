@@ -114,6 +114,7 @@ watch(() => [props.kind, props.labels, props.series, props.accessibleLabel], ren
 
 onBeforeUnmount(() => {
   observer?.disconnect();
+  observer = null;
   window.removeEventListener('resize', resize);
   chart?.dispose();
   chart = null;

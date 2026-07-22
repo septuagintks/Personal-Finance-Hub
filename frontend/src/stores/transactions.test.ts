@@ -2,6 +2,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { HttpResponse, delay, http as mockHttp } from 'msw';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { Transaction } from '../services/transaction-api';
+import { RESIDENT_PAGE_LIMIT } from '../services/resident-page-window';
 import { server } from '../test/server';
 import { useTransactionStore } from './transactions';
 import { useUserContextStore } from './user-context';
@@ -35,7 +36,10 @@ describe('transaction store', () => {
       mockHttp.get('*/api/v1/transactions', ({ request }) => {
         const cursor = new URL(request.url).searchParams.get('cursor');
         return cursor
-          ? HttpResponse.json({ items: [transaction(2), transaction(1)], nextCursor: null })
+          ? HttpResponse.json({
+              items: [transaction(2), transaction(1), transaction(1)],
+              nextCursor: null,
+            })
           : HttpResponse.json({ items: [transaction(3), transaction(2)], nextCursor: 'page-2' });
       }),
     );
@@ -45,6 +49,28 @@ describe('transaction store', () => {
     await expect(store.loadMore()).resolves.toBe(true);
     expect(store.items.map(({ id }) => id)).toEqual([3, 2, 1]);
     expect(store.nextCursor).toBeNull();
+  });
+
+  it('keeps only a fixed window of cursor pages', async () => {
+    server.use(
+      mockHttp.get('*/api/v1/transactions', ({ request }) => {
+        const rawCursor = new URL(request.url).searchParams.get('cursor');
+        const page = rawCursor ? Number(rawCursor) : 0;
+        return HttpResponse.json({
+          items: [transaction(100 - page)],
+          nextCursor: page < RESIDENT_PAGE_LIMIT ? String(page + 1) : null,
+        });
+      }),
+    );
+    const store = useTransactionStore();
+
+    await store.load({ pageSize: 1 });
+    while (store.nextCursor) await store.loadMore();
+
+    expect(store.items.map(({ id }) => id)).toEqual([99, 98, 97, 96]);
+    expect(store.hasEvictedItems).toBe(true);
+    store.clear();
+    expect(store.hasEvictedItems).toBe(false);
   });
 
   it('does not publish a late detail after the session is cleared', async () => {

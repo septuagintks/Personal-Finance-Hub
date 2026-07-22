@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { CircleAlert, DatabaseZap, Filter, RefreshCw, RotateCcw } from '@lucide/vue';
+import { ArrowUpToLine, CircleAlert, DatabaseZap, Filter, RefreshCw, RotateCcw } from '@lucide/vue';
 import AppShell from '../components/AppShell.vue';
 import { ApiError } from '../services/api-error';
 import {
@@ -12,6 +12,7 @@ import {
   type UserAuditLogItem,
 } from '../services/maintenance-api';
 import { formatDecimalString, formatInstant } from '../services/presentation';
+import { createResidentPageWindow } from '../services/resident-page-window';
 import { localDateTimeToInstant } from '../services/zoned-date-time';
 import { useAccountStore } from '../stores/accounts';
 import { useUserContextStore } from '../stores/user-context';
@@ -20,6 +21,7 @@ import { translate, type MessageKey } from '../i18n';
 const accounts = useAccountStore();
 const userContext = useUserContextStore();
 const auditItems = ref<UserAuditLogItem[]>([]);
+const hasEvictedAuditItems = ref(false);
 const nextCursor = ref<string | null>(null);
 const auditLoading = ref(false);
 const rebuilding = ref(false);
@@ -34,6 +36,7 @@ const rebuildItems = ref<BalanceCacheRebuildItem[]>([]);
 let auditController: AbortController | null = null;
 let rebuildController: AbortController | null = null;
 let auditGeneration = 0;
+const auditWindow = createResidentPageWindow<UserAuditLogItem>(({ id }) => id);
 
 const actionOptions: UserAuditAction[] = [
   'create',
@@ -109,7 +112,9 @@ async function loadAudit(reset = true): Promise<void> {
   auditController = controller;
   auditLoading.value = true;
   if (reset) {
+    auditWindow.clear();
     auditItems.value = [];
+    hasEvictedAuditItems.value = false;
     nextCursor.value = null;
   }
   clearError();
@@ -126,7 +131,9 @@ async function loadAudit(reset = true): Promise<void> {
       controller.signal,
     );
     if (generation !== auditGeneration || controller.signal.aborted) return;
-    auditItems.value = reset ? page.items : [...auditItems.value, ...page.items];
+    const update = reset ? auditWindow.reset(page.items) : auditWindow.append(page.items);
+    auditItems.value = update.items;
+    hasEvictedAuditItems.value = hasEvictedAuditItems.value || update.evicted;
     nextCursor.value = page.nextCursor;
   } catch (reason) {
     if (generation === auditGeneration && !controller.signal.aborted) {
@@ -191,6 +198,7 @@ onBeforeUnmount(() => {
   auditGeneration += 1;
   auditController?.abort();
   rebuildController?.abort();
+  auditWindow.clear();
 });
 </script>
 
@@ -346,6 +354,12 @@ onBeforeUnmount(() => {
           <p>{{ translate('maintenance.noActivity') }}</p>
           <span>{{ translate('maintenance.noActivityDetail') }}</span>
         </div>
+      </div>
+      <div v-if="hasEvictedAuditItems" class="resident-window-notice" role="status">
+        <span>{{ translate('ledger.residentWindowLimited') }}</span>
+        <button class="button button--small button--quiet" type="button" @click="loadAudit()">
+          <ArrowUpToLine :size="16" /> {{ translate('ledger.returnToLatest') }}
+        </button>
       </div>
       <div v-if="nextCursor" class="ledger-load-more">
         <button

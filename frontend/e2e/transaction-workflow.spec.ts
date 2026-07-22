@@ -98,10 +98,13 @@ async function json(route: Route, body: unknown, status = 200): Promise<void> {
   await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
 
-function installApi(page: Page): { intents: string[]; transactions: Transaction[] } {
+function installApi(
+  page: Page,
+  initialTransactions: Transaction[] = [makeTransaction(1), makeTransaction(2)],
+): { intents: string[]; transactions: Transaction[] } {
   const state = {
     intents: [] as string[],
-    transactions: [makeTransaction(1), makeTransaction(2)],
+    transactions: [...initialTransactions],
   };
   void page.route('**/api/v1/web/auth/refresh', (route) =>
     json(route, {
@@ -184,6 +187,33 @@ function installApi(page: Page): { intents: string[]; transactions: Transaction[
   });
   return state;
 }
+
+test('transaction list bounds resident rows and per-row tags', async ({ page }) => {
+  const tags = Array.from({ length: 10 }, (_, index) => ({
+    id: index + 1,
+    name: `tag-${index + 1}`,
+    isDeleted: false,
+  }));
+  installApi(
+    page,
+    Array.from({ length: 250 }, (_, index) =>
+      makeTransaction(index + 1, {
+        tags,
+        occurredAt: '2026-07-18T04:00:00Z',
+      }),
+    ),
+  );
+  await page.goto('/transactions');
+
+  await page.getByRole('button', { name: 'Load more' }).click();
+  await expect(page.locator('.ledger-list__row')).toHaveCount(200);
+  await expect(page.locator('.ledger-tags small')).toHaveCount(1_000);
+  await expect(page.getByText('This view is showing an older result window')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Return to latest' }).click();
+  await expect(page.locator('.ledger-list__row')).toHaveCount(1);
+  await expect(page.getByText('This view is showing an older result window')).toHaveCount(0);
+});
 
 async function expectAccessibleAndContained(page: Page): Promise<void> {
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);

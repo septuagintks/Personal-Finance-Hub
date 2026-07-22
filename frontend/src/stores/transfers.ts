@@ -11,11 +11,13 @@ import {
   type TransferFilters,
 } from '../services/transfer-api';
 import { createIntentKeyTracker } from '../services/idempotency';
+import { createResidentPageWindow } from '../services/resident-page-window';
 import { useTransactionStore } from './transactions';
 import { useUserContextStore } from './user-context';
 
 export const useTransferStore = defineStore('transfers', () => {
   const items = ref<Transfer[]>([]);
+  const hasEvictedItems = ref(false);
   const nextCursor = ref<string | null>(null);
   const listState = ref<'idle' | 'loading' | 'loading-more' | 'ready' | 'error'>('idle');
   const selected = ref<Transfer | null>(null);
@@ -29,6 +31,17 @@ export const useTransferStore = defineStore('transfers', () => {
   let actionController: AbortController | null = null;
   const createIntent = createIntentKeyTracker('transfer');
   const correctionIntent = createIntentKeyTracker('correction');
+  const residentWindow = createResidentPageWindow<Transfer>(
+    ({ transferGroupId }) => transferGroupId,
+  );
+
+  function replaceItem(transfer: Transfer): void {
+    items.value = residentWindow.replace(transfer);
+  }
+
+  function removeItem(transferGroupId: number): void {
+    items.value = residentWindow.remove(transferGroupId);
+  }
 
   async function load(filters: TransferFilters): Promise<boolean> {
     actionController?.abort();
@@ -39,7 +52,9 @@ export const useTransferStore = defineStore('transfers', () => {
     const controller = new AbortController();
     listController = controller;
     currentFilters = { ...filters };
+    residentWindow.clear();
     items.value = [];
+    hasEvictedItems.value = false;
     nextCursor.value = null;
     listState.value = 'loading';
     try {
@@ -47,7 +62,9 @@ export const useTransferStore = defineStore('transfers', () => {
       if (requestLifecycle !== lifecycle || request !== listRequest || controller.signal.aborted) {
         return false;
       }
-      items.value = page.items;
+      const update = residentWindow.reset(page.items);
+      items.value = update.items;
+      hasEvictedItems.value = update.evicted;
       nextCursor.value = page.nextCursor;
       listState.value = 'ready';
       return true;
@@ -75,8 +92,9 @@ export const useTransferStore = defineStore('transfers', () => {
       if (requestLifecycle !== lifecycle || request !== listRequest || controller.signal.aborted) {
         return false;
       }
-      const known = new Set(items.value.map(({ transferGroupId }) => transferGroupId));
-      items.value.push(...page.items.filter(({ transferGroupId }) => !known.has(transferGroupId)));
+      const update = residentWindow.append(page.items);
+      items.value = update.items;
+      hasEvictedItems.value = hasEvictedItems.value || update.evicted;
       nextCursor.value = page.nextCursor;
       listState.value = 'ready';
       return true;
@@ -111,8 +129,7 @@ export const useTransferStore = defineStore('transfers', () => {
         return false;
       }
       selected.value = transfer;
-      const index = items.value.findIndex(({ transferGroupId: id }) => id === transferGroupId);
-      if (index >= 0) items.value.splice(index, 1, transfer);
+      replaceItem(transfer);
       detailState.value = 'ready';
       return true;
     } catch (error) {
@@ -187,7 +204,7 @@ export const useTransferStore = defineStore('transfers', () => {
     }
     ensureCurrent(action);
     correctionIntent.complete(intentKey);
-    items.value = items.value.filter(({ transferGroupId }) => transferGroupId !== originalId);
+    removeItem(originalId);
     selected.value = result;
     invalidateFinancialViews();
     return result;
@@ -199,7 +216,7 @@ export const useTransferStore = defineStore('transfers', () => {
     const action = beginAction();
     await deleteTransfer(id, action.controller.signal);
     ensureCurrent(action);
-    items.value = items.value.filter(({ transferGroupId }) => transferGroupId !== id);
+    removeItem(id);
     selected.value = null;
     detailState.value = 'idle';
     invalidateFinancialViews();
@@ -217,7 +234,9 @@ export const useTransferStore = defineStore('transfers', () => {
     listController = null;
     detailController = null;
     actionController = null;
+    residentWindow.clear();
     items.value = [];
+    hasEvictedItems.value = false;
     nextCursor.value = null;
     listState.value = 'idle';
     selected.value = null;
@@ -225,8 +244,18 @@ export const useTransferStore = defineStore('transfers', () => {
     currentFilters = {};
   }
 
+  function cancelListLoad(): void {
+    listRequest += 1;
+    listController?.abort();
+    listController = null;
+    if (listState.value === 'loading' || listState.value === 'loading-more') {
+      listState.value = items.value.length ? 'ready' : 'idle';
+    }
+  }
+
   return {
     items,
+    hasEvictedItems,
     nextCursor,
     listState,
     selected,
@@ -237,6 +266,7 @@ export const useTransferStore = defineStore('transfers', () => {
     create,
     correctSelected,
     deleteSelected,
+    cancelListLoad,
     clear,
   };
 });

@@ -253,6 +253,10 @@ export const enUS = {
   'ledger.tryAgain': 'Try again',
   'ledger.when': 'When',
   'ledger.loadMore': 'Load more',
+  'ledger.moreTags': '+{count} more',
+  'ledger.residentWindowLimited':
+    'This view is showing an older result window; newer loaded rows were released.',
+  'ledger.returnToLatest': 'Return to latest',
   'ledger.correct': 'Correct',
   'ledger.delete': 'Delete',
   'ledger.deleting': 'Deleting',

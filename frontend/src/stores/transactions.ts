@@ -11,10 +11,12 @@ import {
   type TransactionFilters,
 } from '../services/transaction-api';
 import { createIntentKeyTracker } from '../services/idempotency';
+import { createResidentPageWindow } from '../services/resident-page-window';
 import { useUserContextStore } from './user-context';
 
 export const useTransactionStore = defineStore('transactions', () => {
   const items = ref<Transaction[]>([]);
+  const hasEvictedItems = ref(false);
   const nextCursor = ref<string | null>(null);
   const listState = ref<'idle' | 'loading' | 'loading-more' | 'ready' | 'error'>('idle');
   const selected = ref<Transaction | null>(null);
@@ -28,10 +30,14 @@ export const useTransactionStore = defineStore('transactions', () => {
   let actionController: AbortController | null = null;
   const createIntent = createIntentKeyTracker('transaction');
   const correctionIntent = createIntentKeyTracker('correction');
+  const residentWindow = createResidentPageWindow<Transaction>(({ id }) => id);
 
   function replaceItem(transaction: Transaction): void {
-    const index = items.value.findIndex(({ id }) => id === transaction.id);
-    if (index >= 0) items.value.splice(index, 1, transaction);
+    items.value = residentWindow.replace(transaction);
+  }
+
+  function removeItem(transactionId: number): void {
+    items.value = residentWindow.remove(transactionId);
   }
 
   async function load(filters: TransactionFilters): Promise<boolean> {
@@ -43,7 +49,9 @@ export const useTransactionStore = defineStore('transactions', () => {
     const controller = new AbortController();
     listController = controller;
     currentFilters = { ...filters };
+    residentWindow.clear();
     items.value = [];
+    hasEvictedItems.value = false;
     nextCursor.value = null;
     listState.value = 'loading';
     try {
@@ -51,7 +59,9 @@ export const useTransactionStore = defineStore('transactions', () => {
       if (requestLifecycle !== lifecycle || request !== listRequest || controller.signal.aborted) {
         return false;
       }
-      items.value = page.items;
+      const update = residentWindow.reset(page.items);
+      items.value = update.items;
+      hasEvictedItems.value = update.evicted;
       nextCursor.value = page.nextCursor;
       listState.value = 'ready';
       return true;
@@ -80,8 +90,9 @@ export const useTransactionStore = defineStore('transactions', () => {
       if (requestLifecycle !== lifecycle || request !== listRequest || controller.signal.aborted) {
         return false;
       }
-      const known = new Set(items.value.map(({ id }) => id));
-      items.value.push(...page.items.filter(({ id }) => !known.has(id)));
+      const update = residentWindow.append(page.items);
+      items.value = update.items;
+      hasEvictedItems.value = hasEvictedItems.value || update.evicted;
       nextCursor.value = page.nextCursor;
       listState.value = 'ready';
       return true;
@@ -191,7 +202,7 @@ export const useTransactionStore = defineStore('transactions', () => {
     }
     ensureCurrent(action);
     correctionIntent.complete(intentKey);
-    items.value = items.value.filter(({ id }) => id !== selected.value?.id);
+    removeItem(transactionId);
     selected.value = result;
     useUserContextStore().invalidateAggregates();
     return result;
@@ -203,7 +214,7 @@ export const useTransactionStore = defineStore('transactions', () => {
     const action = beginAction();
     await deleteTransaction(id, action.controller.signal);
     ensureCurrent(action);
-    items.value = items.value.filter((item) => item.id !== id);
+    removeItem(id);
     selected.value = null;
     detailState.value = 'idle';
     useUserContextStore().invalidateAggregates();
@@ -221,7 +232,9 @@ export const useTransactionStore = defineStore('transactions', () => {
     listController = null;
     detailController = null;
     actionController = null;
+    residentWindow.clear();
     items.value = [];
+    hasEvictedItems.value = false;
     nextCursor.value = null;
     listState.value = 'idle';
     selected.value = null;
@@ -229,8 +242,18 @@ export const useTransactionStore = defineStore('transactions', () => {
     currentFilters = {};
   }
 
+  function cancelListLoad(): void {
+    listRequest += 1;
+    listController?.abort();
+    listController = null;
+    if (listState.value === 'loading' || listState.value === 'loading-more') {
+      listState.value = items.value.length ? 'ready' : 'idle';
+    }
+  }
+
   return {
     items,
+    hasEvictedItems,
     nextCursor,
     listState,
     selected,
@@ -241,6 +264,7 @@ export const useTransactionStore = defineStore('transactions', () => {
     create,
     correctSelected,
     deleteSelected,
+    cancelListLoad,
     clear,
   };
 });
