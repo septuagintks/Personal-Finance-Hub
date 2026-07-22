@@ -6,7 +6,6 @@
 #include <array>
 #include <charconv>
 #include <cstdlib>
-#include <limits>
 
 // The Decimal storage type is GCC/Clang's native __int128. Under -pedantic the
 // compiler warns that ISO C++ does not support __int128; that is expected and
@@ -25,62 +24,75 @@ namespace {
 using Storage = Decimal::StorageType;
 using UStorage = Decimal::UStorageType;
 
-// Maximum absolute value we treat as valid. __int128 max is ~1.7e38.
-// With scale 10^10 that leaves ~1.7e28 for the integer part, far beyond the
-// NUMERIC(20,8) requirement. We keep the full range and only guard true overflow.
-constexpr Storage kInt128Max = (static_cast<Storage>(1) << 126); // safe headroom bound
+constexpr UStorage kSafeMagnitude =
+    static_cast<UStorage>(Decimal::kMaxRawValue);
+
+/// @brief Return |value| without ever negating a signed integer.
+[[nodiscard]] constexpr UStorage unsigned_magnitude(Storage value) noexcept {
+    const UStorage bits = static_cast<UStorage>(value);
+    return value < 0 ? UStorage{0} - bits : bits;
+}
+
+[[nodiscard]] constexpr bool is_valid_raw(Storage value) noexcept {
+    return value >= Decimal::kMinRawValue &&
+           value <= Decimal::kMaxRawValue;
+}
+
+[[nodiscard]] bool storage_from_magnitude(UStorage magnitude, bool negative,
+                                          Storage& out) noexcept {
+    if (magnitude > kSafeMagnitude) {
+        return false;
+    }
+    const Storage signed_magnitude = static_cast<Storage>(magnitude);
+    out = negative ? -signed_magnitude : signed_magnitude;
+    return true;
+}
 
 /// @brief Multiply two 128-bit values, detecting overflow.
 ///
-/// Signed overflow is undefined behaviour, so the product is computed in the
-/// unsigned domain (well-defined wraparound) and range-checked before casting
-/// back. We reject any product whose magnitude exceeds the signed max so the
-/// signed result is always representable.
+/// Signed overflow is undefined behaviour, so multiplication is performed in
+/// the unsigned magnitude domain and bounded before it happens.
 [[nodiscard]] bool checked_mul(Storage a, Storage b, Storage& out) noexcept {
     if (a == 0 || b == 0) {
         out = 0;
         return true;
     }
     const bool negative = (a < 0) != (b < 0);
-    const UStorage ua = (a < 0) ? static_cast<UStorage>(-a) : static_cast<UStorage>(a);
-    const UStorage ub = (b < 0) ? static_cast<UStorage>(-b) : static_cast<UStorage>(b);
-
-    const UStorage product = ua * ub;
-    // Overflow of the unsigned product itself.
-    if (product / ub != ua) {
+    const UStorage ua = unsigned_magnitude(a);
+    const UStorage ub = unsigned_magnitude(b);
+    if (ua > kSafeMagnitude / ub) {
         return false;
     }
-    // Ensure the magnitude fits in the signed range (|min| == max + 1).
-    const UStorage signed_max = static_cast<UStorage>(std::numeric_limits<Storage>::max());
-    if (negative) {
-        if (product == signed_max + 1) {
-            // Exactly INT_MIN: representable, but negating the cast would
-            // overflow, so produce it directly.
-            out = std::numeric_limits<Storage>::min();
-            return true;
-        }
-        if (product > signed_max) {
-            return false;
-        }
-        out = -static_cast<Storage>(product);
-    } else {
-        if (product > signed_max) {
-            return false;
-        }
-        out = static_cast<Storage>(product);
+    return storage_from_magnitude(ua * ub, negative, out);
+}
+
+/// @brief Add two valid raw values while preserving the safe-range invariant.
+[[nodiscard]] bool checked_add(Storage a, Storage b, Storage& out) noexcept {
+    if ((b > 0 && a > Decimal::kMaxRawValue - b) ||
+        (b < 0 && a < Decimal::kMinRawValue - b)) {
+        return false;
     }
+    out = a + b;
     return true;
 }
 
-/// @brief Add two 128-bit values, detecting overflow.
-[[nodiscard]] bool checked_add(Storage a, Storage b, Storage& out) noexcept {
-    // Overflow if both same sign and result flips sign.
-    Storage result = static_cast<Storage>(static_cast<UStorage>(a) +
-                                          static_cast<UStorage>(b));
-    if (((a ^ result) & (b ^ result)) < 0) {
+[[nodiscard]] bool checked_uadd_bounded(UStorage a, UStorage b,
+                                        UStorage bound,
+                                        UStorage& out) noexcept {
+    if (a > bound || b > bound - a) {
         return false;
     }
-    out = result;
+    out = a + b;
+    return true;
+}
+
+[[nodiscard]] bool checked_umul_bounded(UStorage a, UStorage b,
+                                        UStorage bound,
+                                        UStorage& out) noexcept {
+    if (a != 0 && b > bound / a) {
+        return false;
+    }
+    out = a * b;
     return true;
 }
 
@@ -104,6 +116,14 @@ DomainResult<Decimal> Decimal::from_integer(std::int64_t value) {
     Storage scaled = 0;
     if (!checked_mul(static_cast<Storage>(value), kScaleFactor, scaled)) {
         return std::unexpected(DomainError::overflow("from_integer"));
+    }
+    return Decimal(scaled);
+}
+
+DomainResult<Decimal> Decimal::from_scaled(StorageType scaled) {
+    if (!is_valid_raw(scaled)) {
+        return std::unexpected(DomainError::overflow(
+            "raw value outside Decimal safe range"));
     }
     return Decimal(scaled);
 }
@@ -251,16 +271,15 @@ DomainResult<Decimal> Decimal::parse(std::string_view text) {
         frac_part.append(static_cast<std::size_t>(kScale) - frac_part.size(), '0');
     }
 
-    // Build magnitude = int_part * 10^kScale + frac_part, with overflow checks.
-    Storage magnitude = 0;
+    // Build magnitude = int_part * 10^kScale + frac_part in the unsigned
+    // domain. Reject as soon as the public Decimal range would be exceeded.
+    UStorage magnitude = 0;
     auto push_digit = [&](char digit) -> bool {
-        Storage tmp = 0;
-        if (!checked_mul(magnitude, static_cast<Storage>(10), tmp)) {
+        const UStorage value = static_cast<UStorage>(digit - '0');
+        if (magnitude > (kSafeMagnitude - value) / 10) {
             return false;
         }
-        if (!checked_add(tmp, static_cast<Storage>(digit - '0'), magnitude)) {
-            return false;
-        }
+        magnitude = magnitude * 10 + value;
         return true;
     };
 
@@ -277,18 +296,17 @@ DomainResult<Decimal> Decimal::parse(std::string_view text) {
 
     // Apply Half-Even rounding carry.
     if (round_up) {
-        Storage carried = 0;
-        if (!checked_add(magnitude, static_cast<Storage>(1), carried)) {
+        if (magnitude == kSafeMagnitude) {
             return std::unexpected(DomainError::overflow("rounding carry"));
         }
-        magnitude = carried;
+        ++magnitude;
     }
 
-    if (magnitude > kInt128Max) {
+    Storage scaled = 0;
+    if (!storage_from_magnitude(magnitude, negative, scaled)) {
         return std::unexpected(DomainError::overflow("value out of range"));
     }
-
-    return Decimal(negative ? -magnitude : magnitude);
+    return Decimal(scaled);
 }
 
 std::string Decimal::to_string() const {
@@ -297,9 +315,7 @@ std::string Decimal::to_string() const {
     }
 
     const bool negative = value_ < 0;
-    UStorage magnitude = negative
-        ? static_cast<UStorage>(-value_)
-        : static_cast<UStorage>(value_);
+    const UStorage magnitude = unsigned_magnitude(value_);
 
     const UStorage scale = static_cast<UStorage>(kScaleFactor);
     const UStorage int_part = magnitude / scale;
@@ -339,57 +355,71 @@ DomainResult<Decimal> Decimal::add(const Decimal& other) const {
 }
 
 DomainResult<Decimal> Decimal::subtract(const Decimal& other) const {
-    Storage negated_other = 0;
-    // -other cannot overflow for our valid range, but guard the extreme.
-    if (other.value_ == std::numeric_limits<Storage>::min()) {
-        return std::unexpected(DomainError::overflow("subtract"));
-    }
-    negated_other = -other.value_;
     Storage result = 0;
-    if (!checked_add(value_, negated_other, result)) {
+    if (!checked_add(value_, -other.value_, result)) {
         return std::unexpected(DomainError::overflow("subtract"));
     }
     return Decimal(result);
 }
 
 DomainResult<Decimal> Decimal::multiply(const Decimal& other) const {
-    // (a * 10^s) * (b * 10^s) = (a*b) * 10^(2s); divide once by 10^s with Half-Even.
-    // Work in the sign-magnitude domain to keep rounding symmetric.
+    // Split each magnitude around the scale before multiplying. Every term is
+    // non-negative, so a valid final result can be assembled without requiring
+    // a temporary 256-bit product.
     const bool negative = (value_ < 0) != (other.value_ < 0);
-
-    UStorage lhs = value_ < 0
-        ? static_cast<UStorage>(-value_)
-        : static_cast<UStorage>(value_);
-    UStorage rhs = other.value_ < 0
-        ? static_cast<UStorage>(-other.value_)
-        : static_cast<UStorage>(other.value_);
-
-    if (lhs != 0 && rhs != 0) {
-        // Overflow check on the raw product before scaling down.
-        UStorage product = lhs * rhs;
-        if (product / rhs != lhs) {
-            return std::unexpected(DomainError::overflow("multiply"));
-        }
-
-        const UStorage scale = static_cast<UStorage>(kScaleFactor);
-        UStorage quotient = product / scale;
-        UStorage remainder = product % scale;
-
-        // Half-Even rounding on the division by scale.
-        const UStorage half = scale / 2;
-        if (remainder > half || (remainder == half && (quotient & 1) != 0)) {
-            ++quotient;
-        }
-
-        if (quotient > static_cast<UStorage>(kInt128Max)) {
-            return std::unexpected(DomainError::overflow("multiply result out of range"));
-        }
-
-        Storage signed_result = static_cast<Storage>(quotient);
-        return Decimal(negative ? -signed_result : signed_result);
+    const UStorage lhs = unsigned_magnitude(value_);
+    const UStorage rhs = unsigned_magnitude(other.value_);
+    if (lhs == 0 || rhs == 0) {
+        return Decimal(0);
     }
 
-    return Decimal(0);
+    const UStorage scale = static_cast<UStorage>(kScaleFactor);
+    const UStorage lhs_whole = lhs / scale;
+    const UStorage lhs_fraction = lhs % scale;
+    const UStorage rhs_whole = rhs / scale;
+    const UStorage rhs_fraction = rhs % scale;
+
+    UStorage result = 0;
+    UStorage term = 0;
+    UStorage whole_product = 0;
+    if (!checked_umul_bounded(lhs_whole, rhs_whole,
+                              kSafeMagnitude / scale, whole_product)) {
+        return std::unexpected(DomainError::overflow("multiply"));
+    }
+    result = whole_product * scale;
+
+    auto add_product = [&](UStorage a, UStorage b) -> bool {
+        if (!checked_umul_bounded(a, b, kSafeMagnitude - result, term)) {
+            return false;
+        }
+        return checked_uadd_bounded(result, term, kSafeMagnitude, result);
+    };
+    if (!add_product(lhs_whole, rhs_fraction) ||
+        !add_product(rhs_whole, lhs_fraction)) {
+        return std::unexpected(DomainError::overflow("multiply"));
+    }
+
+    const UStorage fractional_product = lhs_fraction * rhs_fraction;
+    const UStorage fractional_quotient = fractional_product / scale;
+    const UStorage remainder = fractional_product % scale;
+    if (!checked_uadd_bounded(result, fractional_quotient,
+                              kSafeMagnitude, result)) {
+        return std::unexpected(DomainError::overflow("multiply"));
+    }
+
+    const UStorage half = scale / 2;
+    if (remainder > half || (remainder == half && (result & 1) != 0)) {
+        if (result == kSafeMagnitude) {
+            return std::unexpected(DomainError::overflow("multiply rounding"));
+        }
+        ++result;
+    }
+
+    Storage signed_result = 0;
+    if (!storage_from_magnitude(result, negative, signed_result)) {
+        return std::unexpected(DomainError::overflow("multiply"));
+    }
+    return Decimal(signed_result);
 }
 
 DomainResult<Decimal> Decimal::divide(const Decimal& other) const {
@@ -400,40 +430,47 @@ DomainResult<Decimal> Decimal::divide(const Decimal& other) const {
         return Decimal(0);
     }
 
-    // result = (a / b) * 10^s = (a * 10^s) / b, computed as
-    // (value_ * 10^s) / other.value_ with Half-Even rounding.
+    // Produce the ten fixed-point digits with long division. This avoids the
+    // potentially overflowing temporary num * 10^kScale.
     const bool negative = (value_ < 0) != (other.value_ < 0);
+    const UStorage numerator = unsigned_magnitude(value_);
+    const UStorage denominator = unsigned_magnitude(other.value_);
+    UStorage quotient = numerator / denominator;
+    UStorage remainder = numerator % denominator;
 
-    UStorage num = value_ < 0
-        ? static_cast<UStorage>(-value_)
-        : static_cast<UStorage>(value_);
-    UStorage den = other.value_ < 0
-        ? static_cast<UStorage>(-other.value_)
-        : static_cast<UStorage>(other.value_);
-
-    const UStorage scale = static_cast<UStorage>(kScaleFactor);
-
-    // Scale numerator by 10^s with overflow detection.
-    UStorage scaled_num = num * scale;
-    if (scaled_num / scale != num) {
-        return std::unexpected(DomainError::overflow("divide"));
+    for (std::int32_t i = 0; i < kScale; ++i) {
+        unsigned digit = 0;
+        UStorage next_remainder = 0;
+        for (unsigned multiple = 0; multiple < 10; ++multiple) {
+            if (next_remainder >= denominator - remainder) {
+                next_remainder -= denominator - remainder;
+                ++digit;
+            } else {
+                next_remainder += remainder;
+            }
+        }
+        if (quotient >
+            (kSafeMagnitude - static_cast<UStorage>(digit)) / 10) {
+            return std::unexpected(DomainError::overflow("divide"));
+        }
+        quotient = quotient * 10 + static_cast<UStorage>(digit);
+        remainder = next_remainder;
     }
 
-    UStorage quotient = scaled_num / den;
-    UStorage remainder = scaled_num % den;
-
-    // Half-Even rounding: compare 2*remainder to den.
-    UStorage twice_rem = remainder * 2;
-    if (twice_rem > den || (twice_rem == den && (quotient & 1) != 0)) {
+    const UStorage twice_remainder = remainder * 2;
+    if (twice_remainder > denominator ||
+        (twice_remainder == denominator && (quotient & 1) != 0)) {
+        if (quotient == kSafeMagnitude) {
+            return std::unexpected(DomainError::overflow("divide rounding"));
+        }
         ++quotient;
     }
 
-    if (quotient > static_cast<UStorage>(kInt128Max)) {
-        return std::unexpected(DomainError::overflow("divide result out of range"));
+    Storage signed_result = 0;
+    if (!storage_from_magnitude(quotient, negative, signed_result)) {
+        return std::unexpected(DomainError::overflow("divide"));
     }
-
-    Storage signed_result = static_cast<Storage>(quotient);
-    return Decimal(negative ? -signed_result : signed_result);
+    return Decimal(signed_result);
 }
 
 DomainResult<Decimal> Decimal::round_to_scale(
@@ -452,9 +489,7 @@ DomainResult<Decimal> Decimal::round_to_scale(
     }
 
     const bool negative = value_ < 0;
-    const UStorage magnitude = negative
-        ? static_cast<UStorage>(-(value_ + 1)) + 1
-        : static_cast<UStorage>(value_);
+    const UStorage magnitude = unsigned_magnitude(value_);
     const UStorage unsigned_factor = static_cast<UStorage>(factor);
     UStorage quotient = magnitude / unsigned_factor;
     const UStorage remainder = magnitude % unsigned_factor;
@@ -464,14 +499,16 @@ DomainResult<Decimal> Decimal::round_to_scale(
         ++quotient;
     }
 
-    const UStorage rounded_magnitude = quotient * unsigned_factor;
-    const UStorage signed_max =
-        static_cast<UStorage>(std::numeric_limits<Storage>::max());
-    if (rounded_magnitude > signed_max) {
+    UStorage rounded_magnitude = 0;
+    if (!checked_umul_bounded(quotient, unsigned_factor,
+                              kSafeMagnitude, rounded_magnitude)) {
         return std::unexpected(DomainError::overflow("round_to_scale"));
     }
-    const Storage rounded = static_cast<Storage>(rounded_magnitude);
-    return Decimal(negative ? -rounded : rounded);
+    Storage rounded = 0;
+    if (!storage_from_magnitude(rounded_magnitude, negative, rounded)) {
+        return std::unexpected(DomainError::overflow("round_to_scale"));
+    }
+    return Decimal(rounded);
 }
 
 namespace {
@@ -495,9 +532,7 @@ namespace {
 // digits and at most `precision - scale` integer digits.
 [[nodiscard]] bool fits_numeric(Storage value, std::int32_t precision,
                                 std::int32_t scale) noexcept {
-    const UStorage magnitude = (value < 0)
-        ? static_cast<UStorage>(-value)
-        : static_cast<UStorage>(value);
+    const UStorage magnitude = unsigned_magnitude(value);
 
     // Reject more fractional digits than the column allows (would round on write).
     if (fractional_digits_used(magnitude) > scale) {

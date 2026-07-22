@@ -16,6 +16,12 @@ Decimal make(std::string_view text) {
     EXPECT_TRUE(result.has_value()) << "Failed to parse: " << text;
     return result.value_or(Decimal{});
 }
+
+Decimal from_raw(Decimal::StorageType raw) {
+    auto result = Decimal::from_scaled(raw);
+    EXPECT_TRUE(result.has_value());
+    return result.value_or(Decimal{});
+}
 } // namespace
 
 // ---- Parsing: normal paths ----
@@ -303,8 +309,68 @@ TEST(Decimal, WhenFromScaled_RawValueRoundTrips) {
     // 12.34 at scale 10 -> raw 123400000000
     auto d = make("12.34");
     auto rebuilt = Decimal::from_scaled(d.raw_value());
-    EXPECT_EQ(rebuilt.to_string(), "12.34");
-    EXPECT_EQ(rebuilt, d);
+    ASSERT_TRUE(rebuilt.has_value());
+    EXPECT_EQ(rebuilt->to_string(), "12.34");
+    EXPECT_EQ(*rebuilt, d);
+}
+
+TEST(Decimal, WhenFromScaledAtSafeBounds_AcceptsBothSigns) {
+    auto maximum = Decimal::from_scaled(Decimal::kMaxRawValue);
+    auto minimum = Decimal::from_scaled(Decimal::kMinRawValue);
+
+    ASSERT_TRUE(maximum.has_value());
+    ASSERT_TRUE(minimum.has_value());
+    EXPECT_TRUE(maximum->raw_value() == Decimal::kMaxRawValue);
+    EXPECT_TRUE(minimum->raw_value() == Decimal::kMinRawValue);
+}
+
+TEST(Decimal, WhenFromScaledOutsideSafeBounds_ReturnsOverflow) {
+    auto above = Decimal::from_scaled(Decimal::kMaxRawValue + 1);
+    auto below = Decimal::from_scaled(Decimal::kMinRawValue - 1);
+
+    ASSERT_FALSE(above.has_value());
+    ASSERT_FALSE(below.has_value());
+    EXPECT_EQ(above.error().code, DomainErrorCode::Overflow);
+    EXPECT_EQ(below.error().code, DomainErrorCode::Overflow);
+}
+
+TEST(Decimal, WhenNegatingAndTakingAbsAtBounds_RemainsDefined) {
+    auto maximum = from_raw(Decimal::kMaxRawValue);
+    auto minimum = from_raw(Decimal::kMinRawValue);
+
+    EXPECT_TRUE(maximum.negated().raw_value() == Decimal::kMinRawValue);
+    EXPECT_TRUE(minimum.negated().raw_value() == Decimal::kMaxRawValue);
+    EXPECT_TRUE(minimum.abs().raw_value() == Decimal::kMaxRawValue);
+}
+
+TEST(Decimal, WhenSafeBoundsRoundTripThroughString_PreserveRawValues) {
+    auto maximum = from_raw(Decimal::kMaxRawValue);
+    auto minimum = from_raw(Decimal::kMinRawValue);
+
+    auto reparsed_maximum = Decimal::parse(maximum.to_string());
+    auto reparsed_minimum = Decimal::parse(minimum.to_string());
+
+    ASSERT_TRUE(reparsed_maximum.has_value());
+    ASSERT_TRUE(reparsed_minimum.has_value());
+    EXPECT_EQ(*reparsed_maximum, maximum);
+    EXPECT_EQ(*reparsed_minimum, minimum);
+}
+
+TEST(Decimal, WhenAddingOrSubtractingPastSafeBounds_ReturnsOverflow) {
+    auto maximum = from_raw(Decimal::kMaxRawValue);
+    auto minimum = from_raw(Decimal::kMinRawValue);
+    auto one_raw = from_raw(1);
+
+    auto positive_overflow = maximum.add(one_raw);
+    auto negative_overflow = minimum.subtract(one_raw);
+    auto doubled_minimum = minimum.add(minimum);
+
+    ASSERT_FALSE(positive_overflow.has_value());
+    ASSERT_FALSE(negative_overflow.has_value());
+    ASSERT_FALSE(doubled_minimum.has_value());
+    EXPECT_EQ(positive_overflow.error().code, DomainErrorCode::Overflow);
+    EXPECT_EQ(negative_overflow.error().code, DomainErrorCode::Overflow);
+    EXPECT_EQ(doubled_minimum.error().code, DomainErrorCode::Overflow);
 }
 
 TEST(Decimal, WhenRawValueOfOne_IsScaleFactor) {
@@ -324,15 +390,60 @@ TEST(Decimal, WhenMultiplyWithinRange_Succeeds) {
     EXPECT_EQ(r->to_string(), "1000000000000000000");
 }
 
-TEST(Decimal, WhenMultiplyIntermediateOverflows_ReturnsError) {
-    // Known limitation: the intermediate product carries scale^2, so two large
-    // operands overflow __int128 even when the true result (1e22) would fit.
-    // 1e11 * 1e11: (1e11*1e10)^2 = 1e42 > __int128 max (~1.7e38) -> overflow.
+TEST(Decimal, WhenMultiplyIntermediateExceeds128Bits_ComputesRepresentableResult) {
+    // The unscaled intermediate needs more than 128 bits, but decomposition
+    // around the fixed scale keeps the representable final result exact.
     auto a = make("100000000000");
     auto b = make("100000000000");
     auto r = a.multiply(b);
-    ASSERT_FALSE(r.has_value());
-    EXPECT_EQ(r.error().code, DomainErrorCode::Overflow);
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->to_string(), "10000000000000000000000");
+}
+
+TEST(Decimal, WhenMultiplyingAndDividingSafeBoundsByOne_PreservesValue) {
+    auto maximum = from_raw(Decimal::kMaxRawValue);
+    auto minimum = from_raw(Decimal::kMinRawValue);
+    auto one = make("1");
+
+    auto positive_product = maximum.multiply(one);
+    auto negative_product = minimum.multiply(one);
+    auto positive_quotient = maximum.divide(one);
+    auto negative_quotient = minimum.divide(one);
+
+    ASSERT_TRUE(positive_product.has_value());
+    ASSERT_TRUE(negative_product.has_value());
+    ASSERT_TRUE(positive_quotient.has_value());
+    ASSERT_TRUE(negative_quotient.has_value());
+    EXPECT_EQ(*positive_product, maximum);
+    EXPECT_EQ(*negative_product, minimum);
+    EXPECT_EQ(*positive_quotient, maximum);
+    EXPECT_EQ(*negative_quotient, minimum);
+}
+
+TEST(Decimal, WhenMultiplicationIsHalfway_RoundsToEvenSymmetrically) {
+    auto half_of_even = make("0.0000000001").multiply(make("0.5"));
+    auto half_of_odd = make("0.0000000003").multiply(make("0.5"));
+    auto negative_half_of_odd = make("-0.0000000003").multiply(make("0.5"));
+
+    ASSERT_TRUE(half_of_even.has_value());
+    ASSERT_TRUE(half_of_odd.has_value());
+    ASSERT_TRUE(negative_half_of_odd.has_value());
+    EXPECT_EQ(half_of_even->to_string(), "0");
+    EXPECT_EQ(half_of_odd->to_string(), "0.0000000002");
+    EXPECT_EQ(negative_half_of_odd->to_string(), "-0.0000000002");
+}
+
+TEST(Decimal, WhenDivisionIsHalfway_RoundsToEvenSymmetrically) {
+    auto half_of_even = make("0.0000000001").divide(make("2"));
+    auto half_of_odd = make("0.0000000003").divide(make("2"));
+    auto negative_half_of_odd = make("-0.0000000003").divide(make("2"));
+
+    ASSERT_TRUE(half_of_even.has_value());
+    ASSERT_TRUE(half_of_odd.has_value());
+    ASSERT_TRUE(negative_half_of_odd.has_value());
+    EXPECT_EQ(half_of_even->to_string(), "0");
+    EXPECT_EQ(half_of_odd->to_string(), "0.0000000002");
+    EXPECT_EQ(negative_half_of_odd->to_string(), "-0.0000000002");
 }
 
 // ---- Item 10: DB NUMERIC(20,8) / NUMERIC(20,10) boundary ----

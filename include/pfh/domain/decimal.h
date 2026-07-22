@@ -36,6 +36,12 @@ public:
     /// @brief Scale factor = 10^kScale.
     static constexpr StorageType kScaleFactor = static_cast<StorageType>(10000000000LL);
 
+    /// @brief Inclusive raw storage bounds. Keeping one sign bit of headroom
+    /// makes every valid value safe to negate without signed overflow.
+    static constexpr StorageType kMaxRawValue =
+        static_cast<StorageType>(1) << 126;
+    static constexpr StorageType kMinRawValue = -kMaxRawValue;
+
     /// @brief Default constructor creates zero.
     constexpr Decimal() noexcept : value_(0) {}
 
@@ -57,9 +63,9 @@ public:
     [[nodiscard]] static DomainResult<Decimal> from_integer(std::int64_t value);
 
     /// @brief Build a Decimal directly from a raw scaled 128-bit value.
-    [[nodiscard]] static constexpr Decimal from_scaled(StorageType scaled) noexcept {
-        return Decimal(scaled);
-    }
+    /// Values outside [kMinRawValue, kMaxRawValue] are rejected so callers
+    /// cannot bypass the type invariant.
+    [[nodiscard]] static DomainResult<Decimal> from_scaled(StorageType scaled);
 
     /// @brief Convert to canonical string (trailing zeros trimmed).
     [[nodiscard]] std::string to_string() const;
@@ -77,7 +83,8 @@ public:
     [[nodiscard]] DomainResult<Decimal> round_to_scale(
         std::int32_t fractional_digits) const;
 
-    // Unary operations (cannot overflow within valid range).
+    // Unary operations cannot overflow because all construction paths enforce
+    // the symmetric raw storage bounds above.
     [[nodiscard]] Decimal negated() const noexcept { return Decimal(-value_); }
     [[nodiscard]] Decimal abs() const noexcept { return value_ < 0 ? Decimal(-value_) : *this; }
 
