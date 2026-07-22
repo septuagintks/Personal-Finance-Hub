@@ -688,6 +688,9 @@ export interface components {
         /** @enum {string} */
         LocaleTag: "zh-CN" | "en-US";
         /** @enum {string} */
+        NumberFormat: "1,234.56" | "1.234,56" | "1 234,56";
+        ReportMonth: string;
+        /** @enum {string} */
         CategoryBoard: "income" | "expense";
         /**
          * @default active
@@ -706,6 +709,7 @@ export interface components {
             password: string;
             baseCurrency?: components["schemas"]["CurrencyCode"] | null;
             preferredLocale?: components["schemas"]["LocaleTag"] | null;
+            preferredTimezone?: string | null;
         };
         LoginRequest: {
             username: string;
@@ -858,13 +862,15 @@ export interface components {
             locale: components["schemas"]["LocaleTag"];
             timezone: string;
             dateFormat: string;
-            numberFormat: string;
+            numberFormat: components["schemas"]["NumberFormat"];
             /** @enum {string} */
             theme: "system" | "light" | "dark";
             /** @enum {string} */
             defaultHomePage: "dashboard" | "transactions" | "reports" | "accounts";
             /** @enum {string} */
             defaultReportPeriod: "current_month" | "last_month" | "last_3_months" | "current_year" | "custom";
+            customReportStartMonth: components["schemas"]["ReportMonth"] | null;
+            customReportEndMonth: components["schemas"]["ReportMonth"] | null;
         };
         CreateTransactionRequest: {
             accountId: components["schemas"]["Id"];
@@ -1066,15 +1072,20 @@ export interface components {
         BalanceCacheRebuildResponse: {
             accounts: components["schemas"]["BalanceCacheRebuildItem"][];
         };
+        BoundedCount: {
+            count: number;
+            saturated: boolean;
+        };
         OutboxCounts: {
-            pending: number;
-            processing: number;
-            published: number;
-            failed: number;
-            deadLetter: number;
+            pending: components["schemas"]["BoundedCount"];
+            processing: components["schemas"]["BoundedCount"];
+            published: components["schemas"]["BoundedCount"];
+            failed: components["schemas"]["BoundedCount"];
+            deadLetter: components["schemas"]["BoundedCount"];
         };
         HandlerReceiptSummary: {
             count: number;
+            saturated: boolean;
             /** Format: date-time */
             latestAt: string | null;
         };
@@ -1100,9 +1111,11 @@ export interface components {
         OperationsSummary: {
             /** Format: date-time */
             generatedAt: string;
+            /** Format: date-time */
+            windowStart: string;
             outbox: components["schemas"]["OutboxCounts"];
             handlerReceipts: components["schemas"]["HandlerReceiptSummary"];
-            expiredIdempotency: number;
+            expiredIdempotency: components["schemas"]["BoundedCount"];
             leases: components["schemas"]["OperationalLease"][];
             jobs: components["schemas"]["JobRuntime"][];
         };

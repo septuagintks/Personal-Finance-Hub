@@ -79,7 +79,9 @@ using TimePoint = std::chrono::system_clock::time_point;
         preference.number_format(),
         preference.theme(),
         preference.default_home_page(),
-        preference.default_report_period()};
+        preference.default_report_period(),
+        preference.custom_report_start_month(),
+        preference.custom_report_end_month()};
 }
 
 [[nodiscard]] std::string json_quoted(std::string_view value) {
@@ -166,7 +168,8 @@ using TimePoint = std::chrono::system_clock::time_point;
 [[nodiscard]] bool valid_preference_enums(
     domain::ThemeMode theme,
     domain::HomePage home_page,
-    domain::ReportPeriod report_period) noexcept {
+    domain::ReportPeriod report_period,
+    domain::NumberFormat number_format) noexcept {
     const bool valid_theme = theme == domain::ThemeMode::System ||
         theme == domain::ThemeMode::Light || theme == domain::ThemeMode::Dark;
     const bool valid_home = home_page == domain::HomePage::Dashboard ||
@@ -178,7 +181,29 @@ using TimePoint = std::chrono::system_clock::time_point;
         report_period == domain::ReportPeriod::Last3Months ||
         report_period == domain::ReportPeriod::CurrentYear ||
         report_period == domain::ReportPeriod::Custom;
-    return valid_theme && valid_home && valid_period;
+    const bool valid_number_format =
+        number_format == domain::NumberFormat::CommaDot ||
+        number_format == domain::NumberFormat::DotComma ||
+        number_format == domain::NumberFormat::SpaceComma;
+    return valid_theme && valid_home && valid_period && valid_number_format;
+}
+
+[[nodiscard]] bool valid_custom_report_months(
+    domain::ReportPeriod period,
+    std::optional<domain::ReportMonth> start,
+    std::optional<domain::ReportMonth> end) noexcept {
+    if (period != domain::ReportPeriod::Custom) {
+        return !start.has_value() && !end.has_value();
+    }
+    if (!start.has_value() || !end.has_value() || !start->ok() || !end->ok() ||
+        int(start->year()) < 1 || int(end->year()) < 1 || *start > *end) {
+        return false;
+    }
+    const auto ordinal = [](domain::ReportMonth value) {
+        return static_cast<std::int64_t>(int(value.year())) * 12 +
+            static_cast<std::int64_t>(unsigned(value.month())) - 1;
+    };
+    return ordinal(*end) - ordinal(*start) < 120;
 }
 
 [[nodiscard]] std::optional<std::string_view> required_value(
@@ -1421,11 +1446,15 @@ Result<UserPreferenceDto> UpdateUserPreferenceUseCase::execute(
         !supported_locale ||
         !valid_text(command.timezone, 64) ||
         !valid_text(command.date_format, 32) ||
-        !valid_text(command.number_format, 32) ||
         !valid_preference_enums(
             command.theme,
             command.default_home_page,
-            command.default_report_period)) {
+            command.default_report_period,
+            command.number_format) ||
+        !valid_custom_report_months(
+            command.default_report_period,
+            command.custom_report_start_month,
+            command.custom_report_end_month)) {
         return err(Error::validation("User preference fields are invalid"));
     }
     auto currency = domain::Currency::create(command.base_currency);
@@ -1441,7 +1470,8 @@ Result<UserPreferenceDto> UpdateUserPreferenceUseCase::execute(
     const domain::UserPreference preference(
         command.user_id, *currency, command.locale, command.timezone,
         command.date_format, command.number_format, command.theme,
-        command.default_home_page, command.default_report_period);
+        command.default_home_page, command.default_report_period,
+        command.custom_report_start_month, command.custom_report_end_month);
     const auto now = std::chrono::system_clock::now();
     auto write = uow_.execute_in_transaction(
         [&](domain::ITransactionContext& tx) -> domain::RepositoryVoidResult {

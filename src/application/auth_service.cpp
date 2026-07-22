@@ -144,6 +144,18 @@ Result<RegisterResultDto> AuthService::register_user(
     if (!is_locale_tag(command.preferred_locale) || !supported_locale) {
         return err(Error::validation("preferredLocale is invalid"));
     }
+    if (command.preferred_timezone.has_value()) {
+        if (command.preferred_timezone->empty() ||
+            command.preferred_timezone->size() > 64) {
+            return err(Error::validation("preferredTimezone is invalid"));
+        }
+        try {
+            (void)std::chrono::locate_zone(*command.preferred_timezone);
+        } catch (const std::exception&) {
+            return err(Error::validation(
+                "preferredTimezone is not available in the IANA database"));
+        }
+    }
     auto currency = domain::Currency::create(command.base_currency_code);
     if (!currency) {
         return err(from_domain(currency.error()));
@@ -179,7 +191,13 @@ Result<RegisterResultDto> AuthService::register_user(
                 return bound;
             }
             auto defaults = registration_defaults_.initialize(
-                tx, *created, *currency, command.preferred_locale);
+                tx,
+                *created,
+                *currency,
+                command.preferred_locale,
+                command.preferred_timezone.has_value()
+                    ? std::optional<std::string_view>(*command.preferred_timezone)
+                    : std::nullopt);
             if (!defaults) {
                 return std::unexpected(defaults.error());
             }

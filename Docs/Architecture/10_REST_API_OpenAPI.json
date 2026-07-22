@@ -2524,6 +2524,20 @@
           "en-US"
         ]
       },
+      "NumberFormat": {
+        "type": "string",
+        "enum": [
+          "1,234.56",
+          "1.234,56",
+          "1 234,56"
+        ]
+      },
+      "ReportMonth": {
+        "type": "string",
+        "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$",
+        "minLength": 7,
+        "maxLength": 7
+      },
       "CategoryBoard": {
         "type": "string",
         "enum": [
@@ -2601,6 +2615,17 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/LocaleTag"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "preferredTimezone": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 64
               },
               {
                 "type": "null"
@@ -3271,7 +3296,9 @@
           "numberFormat",
           "theme",
           "defaultHomePage",
-          "defaultReportPeriod"
+          "defaultReportPeriod",
+          "customReportStartMonth",
+          "customReportEndMonth"
         ],
         "properties": {
           "baseCurrency": {
@@ -3289,8 +3316,7 @@
             "maxLength": 32
           },
           "numberFormat": {
-            "type": "string",
-            "maxLength": 32
+            "$ref": "#/components/schemas/NumberFormat"
           },
           "theme": {
             "type": "string",
@@ -3317,6 +3343,26 @@
               "last_3_months",
               "current_year",
               "custom"
+            ]
+          },
+          "customReportStartMonth": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ReportMonth"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "customReportEndMonth": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ReportMonth"
+              },
+              {
+                "type": "null"
+              }
             ]
           }
         }
@@ -4299,6 +4345,24 @@
           }
         }
       },
+      "BoundedCount": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "count",
+          "saturated"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "saturated": {
+            "type": "boolean"
+          }
+        }
+      },
       "OutboxCounts": {
         "type": "object",
         "additionalProperties": false,
@@ -4311,24 +4375,19 @@
         ],
         "properties": {
           "pending": {
-            "type": "integer",
-            "minimum": 0
+            "$ref": "#/components/schemas/BoundedCount"
           },
           "processing": {
-            "type": "integer",
-            "minimum": 0
+            "$ref": "#/components/schemas/BoundedCount"
           },
           "published": {
-            "type": "integer",
-            "minimum": 0
+            "$ref": "#/components/schemas/BoundedCount"
           },
           "failed": {
-            "type": "integer",
-            "minimum": 0
+            "$ref": "#/components/schemas/BoundedCount"
           },
           "deadLetter": {
-            "type": "integer",
-            "minimum": 0
+            "$ref": "#/components/schemas/BoundedCount"
           }
         }
       },
@@ -4337,12 +4396,17 @@
         "additionalProperties": false,
         "required": [
           "count",
+          "saturated",
           "latestAt"
         ],
         "properties": {
           "count": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "saturated": {
+            "type": "boolean"
           },
           "latestAt": {
             "type": [
@@ -4437,6 +4501,7 @@
         "additionalProperties": false,
         "required": [
           "generatedAt",
+          "windowStart",
           "outbox",
           "handlerReceipts",
           "expiredIdempotency",
@@ -4448,6 +4513,10 @@
             "type": "string",
             "format": "date-time"
           },
+          "windowStart": {
+            "type": "string",
+            "format": "date-time"
+          },
           "outbox": {
             "$ref": "#/components/schemas/OutboxCounts"
           },
@@ -4455,8 +4524,7 @@
             "$ref": "#/components/schemas/HandlerReceiptSummary"
           },
           "expiredIdempotency": {
-            "type": "integer",
-            "minimum": 0
+            "$ref": "#/components/schemas/BoundedCount"
           },
           "leases": {
             "type": "array",

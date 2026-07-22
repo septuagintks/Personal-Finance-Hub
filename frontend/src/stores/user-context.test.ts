@@ -14,10 +14,12 @@ function preference(baseCurrency: string): UserPreference {
     locale: 'en-US',
     timezone: 'Asia/Shanghai',
     dateFormat: 'yyyy-MM-dd',
-    numberFormat: 'standard',
+    numberFormat: '1,234.56',
     theme: 'system' as const,
     defaultHomePage: 'dashboard' as const,
     defaultReportPeriod: 'current_month' as const,
+    customReportStartMonth: null,
+    customReportEndMonth: null,
   };
 }
 

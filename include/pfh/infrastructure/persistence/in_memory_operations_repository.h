@@ -19,7 +19,8 @@ public:
     [[nodiscard]] domain::RepositoryResult<application::ReadinessState>
     readiness(std::int64_t expected_migration_version) override {
         return application::ReadinessState{
-            true, expected_migration_version == 10};
+            true,
+            expected_migration_version == application::kExpectedMigrationVersion};
     }
 
     [[nodiscard]] domain::RepositoryResult<application::OperationalDataSummary>
@@ -27,34 +28,49 @@ public:
         std::scoped_lock lock(store_.mutex);
         application::OperationalDataSummary result;
         result.outbox_counts = {
-            {"pending", 0}, {"processing", 0}, {"published", 0},
-            {"failed", 0}, {"deadLetter", 0}};
+            {"pending", {}}, {"processing", {}}, {"published", {}},
+            {"failed", {}}, {"deadLetter", {}}};
+        result.window_start = now - std::chrono::hours(24 * 30);
+        const auto increment = [](application::OperationalBoundedCount& value) {
+            if (value.count < application::kOperationalCountLimit) {
+                ++value.count;
+            } else {
+                value.saturated = true;
+            }
+        };
         for (const auto& message : store_.outbox) {
             switch (message.status) {
             case application::OutboxStatus::Pending:
-                ++result.outbox_counts["pending"];
+                increment(result.outbox_counts["pending"]);
                 break;
             case application::OutboxStatus::Processing:
-                ++result.outbox_counts["processing"];
+                increment(result.outbox_counts["processing"]);
                 break;
             case application::OutboxStatus::Published:
-                ++result.outbox_counts["published"];
+                increment(result.outbox_counts["published"]);
                 break;
             case application::OutboxStatus::Failed:
-                ++result.outbox_counts["failed"];
+                increment(result.outbox_counts["failed"]);
                 break;
             case application::OutboxStatus::DeadLetter:
-                ++result.outbox_counts["deadLetter"];
+                increment(result.outbox_counts["deadLetter"]);
                 break;
             }
         }
-        result.handler_receipt_count = store_.outbox_handler_receipts.size();
+        result.handler_receipt_count = application::OperationalBoundedCount{
+            std::min(
+                store_.outbox_handler_receipts.size(),
+                application::kOperationalCountLimit),
+            store_.outbox_handler_receipts.size() >
+                application::kOperationalCountLimit};
         for (const auto& [name, lease] : store_.scheduled_job_leases) {
             result.leases.push_back(application::OperationalLeaseSummary{
                 name, lease.lease_until > now, lease.lease_until});
         }
         for (const auto& [_, record] : store_.idempotency) {
-            if (record.expires_at <= now) ++result.expired_idempotency_count;
+            if (record.expires_at <= now) {
+                increment(result.expired_idempotency_count);
+            }
         }
         return result;
     }

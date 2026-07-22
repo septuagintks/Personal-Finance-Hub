@@ -69,6 +69,8 @@ def main() -> int:
         "migrations/V9__transfer_corrections.sql"
     )
     operations_migration = read("migrations/V10__operations_and_roles.sql")
+    preference_migration = read("migrations/V11__complete_user_preferences.sql")
+    english_templates = read("migrations/V12__seed_en_us_category_templates.sql")
     all_migrations = "\n".join(
         path.read_text(encoding="utf-8")
         for path in sorted((ROOT / "migrations").glob("V*.sql"))
@@ -567,6 +569,32 @@ def main() -> int:
         failures,
     )
     require(
+        "ADD COLUMN custom_report_start_month DATE" in preference_migration
+        and "chk_user_preferences_number_format" in preference_migration
+        and "chk_user_preferences_custom_report_months" in preference_migration
+        and "LIMIT 10001" in preference_migration
+        and "idx_outbox_published_retention" in preference_migration,
+        "V11 preference and bounded operations invariants are incomplete",
+        failures,
+    )
+    require(
+        "'en-US'" in english_templates
+        and "'Food'" in english_templates
+        and "'Cash Gifts'" in english_templates
+        and "'Platform Rewards'" in english_templates
+        and "child_template" in english_templates,
+        "V12 must provide the complete en-US category tree",
+        failures,
+    )
+    require(
+        "custom_report_start_month" in preference
+        and "parseNumberFormat" in preference
+        and "preferred_timezone" in registration_defaults
+        and "template.locale = $2" in registration_defaults,
+        "Preference and registration adapters do not consume the V11/V12 contract",
+        failures,
+    )
+    require(
         "pfh_cleanup_expired_request_idempotency" in idempotency_cleanup
         and "request_db_" in composition
         and "background_db_" not in idempotency_cleanup,
@@ -583,6 +611,13 @@ def main() -> int:
         and "'operator'::audit_actor_type" in operations
         and "'retry'::audit_action" in operations,
         "Operations adapter must keep cursors stable, sanitize dead letters, and retry atomically",
+        failures,
+    )
+    require(
+        "LIMIT 10001" in operations
+        and "OperationalBoundedCount" in operations
+        and "handled_at >= $1" in operations,
+        "Operations counters must use bounded samples and a receipt window",
         failures,
     )
     require(

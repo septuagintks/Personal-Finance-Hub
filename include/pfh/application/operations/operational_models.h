@@ -14,6 +14,9 @@
 
 namespace pfh::application {
 
+inline constexpr std::int64_t kExpectedMigrationVersion = 12;
+inline constexpr std::size_t kOperationalCountLimit = 10'000;
+
 enum class JobLastResult {
     NeverRun,
     Succeeded,
@@ -38,11 +41,17 @@ struct OperationalLeaseSummary {
     std::chrono::system_clock::time_point lease_until{};
 };
 
+struct OperationalBoundedCount {
+    std::size_t count = 0;
+    bool saturated = false;
+};
+
 struct OperationalDataSummary {
-    std::map<std::string, std::size_t> outbox_counts;
-    std::size_t handler_receipt_count = 0;
+    std::map<std::string, OperationalBoundedCount> outbox_counts;
+    OperationalBoundedCount handler_receipt_count;
     std::optional<std::chrono::system_clock::time_point> latest_receipt_at;
-    std::size_t expired_idempotency_count = 0;
+    OperationalBoundedCount expired_idempotency_count;
+    std::chrono::system_clock::time_point window_start{};
     std::vector<OperationalLeaseSummary> leases;
 };
 

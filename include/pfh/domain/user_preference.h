@@ -11,6 +11,7 @@
 #include "pfh/domain/currency.h"
 #include "pfh/domain/user.h"
 #include <chrono>
+#include <optional>
 #include <string>
 
 namespace pfh::domain {
@@ -39,6 +40,15 @@ enum class ReportPeriod {
     Custom
 };
 
+/// @brief Supported grouping and decimal separator combinations for amounts.
+enum class NumberFormat {
+    CommaDot,
+    DotComma,
+    SpaceComma
+};
+
+using ReportMonth = std::chrono::year_month;
+
 /// @brief User preferences domain object.
 ///
 /// Combines the default base currency (from users.base_currency_code) and
@@ -56,10 +66,12 @@ public:
         std::string locale = "zh-CN",
         std::string timezone = "Asia/Shanghai",
         std::string date_format = "YYYY-MM-DD",
-        std::string number_format = "1,234.56",
+        NumberFormat number_format = NumberFormat::CommaDot,
         ThemeMode theme = ThemeMode::System,
         HomePage default_home_page = HomePage::Dashboard,
-        ReportPeriod default_report_period = ReportPeriod::CurrentMonth)
+        ReportPeriod default_report_period = ReportPeriod::CurrentMonth,
+        std::optional<ReportMonth> custom_report_start_month = std::nullopt,
+        std::optional<ReportMonth> custom_report_end_month = std::nullopt)
         : user_id_(user_id),
           base_currency_(std::move(base_currency)),
           locale_(std::move(locale)),
@@ -68,17 +80,25 @@ public:
           number_format_(std::move(number_format)),
           theme_(theme),
           default_home_page_(default_home_page),
-          default_report_period_(default_report_period) {}
+          default_report_period_(default_report_period),
+          custom_report_start_month_(custom_report_start_month),
+          custom_report_end_month_(custom_report_end_month) {}
 
     [[nodiscard]] UserId user_id() const noexcept { return user_id_; }
     [[nodiscard]] const Currency& base_currency() const noexcept { return base_currency_; }
     [[nodiscard]] const std::string& locale() const noexcept { return locale_; }
     [[nodiscard]] const std::string& timezone() const noexcept { return timezone_; }
     [[nodiscard]] const std::string& date_format() const noexcept { return date_format_; }
-    [[nodiscard]] const std::string& number_format() const noexcept { return number_format_; }
+    [[nodiscard]] NumberFormat number_format() const noexcept { return number_format_; }
     [[nodiscard]] ThemeMode theme() const noexcept { return theme_; }
     [[nodiscard]] HomePage default_home_page() const noexcept { return default_home_page_; }
     [[nodiscard]] ReportPeriod default_report_period() const noexcept { return default_report_period_; }
+    [[nodiscard]] std::optional<ReportMonth> custom_report_start_month() const noexcept {
+        return custom_report_start_month_;
+    }
+    [[nodiscard]] std::optional<ReportMonth> custom_report_end_month() const noexcept {
+        return custom_report_end_month_;
+    }
 
 private:
     UserId user_id_;
@@ -86,10 +106,12 @@ private:
     std::string locale_;
     std::string timezone_;
     std::string date_format_;
-    std::string number_format_;
+    NumberFormat number_format_;
     ThemeMode theme_;
     HomePage default_home_page_;
     ReportPeriod default_report_period_;
+    std::optional<ReportMonth> custom_report_start_month_;
+    std::optional<ReportMonth> custom_report_end_month_;
 };
 
 } // namespace pfh::domain

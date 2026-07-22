@@ -154,7 +154,8 @@ parse_register_command(const HttpRequest& request) {
     if (!body) return application::err(body.error());
     if (auto fields = JsonRequestParser::reject_unknown_fields(
             *body,
-            {"username", "password", "baseCurrency", "preferredLocale"});
+            {"username", "password", "baseCurrency", "preferredLocale",
+             "preferredTimezone"});
         !fields) {
         return application::err(fields.error());
     }
@@ -164,13 +165,16 @@ parse_register_command(const HttpRequest& request) {
         *body, "baseCurrency", 10);
     auto locale = JsonRequestParser::optional_string(
         *body, "preferredLocale", 16);
+    auto timezone = JsonRequestParser::optional_string(
+        *body, "preferredTimezone", 64);
     if (!username) return application::err(username.error());
     if (!password) return application::err(password.error());
     if (!base_currency) return application::err(base_currency.error());
     if (!locale) return application::err(locale.error());
+    if (!timezone) return application::err(timezone.error());
     return application::RegisterCommand{
         *username, *password, base_currency->value_or("CNY"),
-        locale->value_or("zh-CN")};
+        locale->value_or("zh-CN"), *timezone};
 }
 
 [[nodiscard]] application::Result<application::LoginCommand>
@@ -198,7 +202,8 @@ HttpResponse AuthController::register_user(const HttpRequest& request) {
     }
     if (auto fields = JsonRequestParser::reject_unknown_fields(
             *body,
-            {"username", "password", "baseCurrency", "preferredLocale"});
+            {"username", "password", "baseCurrency", "preferredLocale",
+             "preferredTimezone"});
         !fields) {
         return HttpResponseMapper::error(fields.error(), request.trace_id);
     }
@@ -208,16 +213,20 @@ HttpResponse AuthController::register_user(const HttpRequest& request) {
         *body, "baseCurrency", 10);
     auto locale = JsonRequestParser::optional_string(
         *body, "preferredLocale", 16);
+    auto timezone = JsonRequestParser::optional_string(
+        *body, "preferredTimezone", 64);
     if (!username) return HttpResponseMapper::error(username.error(), request.trace_id);
     if (!password) return HttpResponseMapper::error(password.error(), request.trace_id);
     if (!base_currency) return HttpResponseMapper::error(base_currency.error(), request.trace_id);
     if (!locale) return HttpResponseMapper::error(locale.error(), request.trace_id);
+    if (!timezone) return HttpResponseMapper::error(timezone.error(), request.trace_id);
 
     application::RegisterCommand command;
     command.username = *username;
     command.password = *password;
     command.base_currency_code = base_currency->value_or("CNY");
     command.preferred_locale = locale->value_or("zh-CN");
+    command.preferred_timezone = *timezone;
     auto result = auth_.register_user(command);
     if (!result) {
         return HttpResponseMapper::error(result.error(), request.trace_id);

@@ -40,6 +40,10 @@ require_identity(const HttpRequest& request) {
 
 [[nodiscard]] Json overview_json(
     const application::OperationalOverview& overview) {
+    const auto bounded_count_json = [](
+        const application::OperationalBoundedCount& value) {
+        return Json{{"count", value.count}, {"saturated", value.saturated}};
+    };
     Json jobs = Json::array();
     for (const auto& job : overview.jobs) {
         jobs.push_back(Json{
@@ -63,16 +67,23 @@ require_identity(const HttpRequest& request) {
             {"active", lease.active},
             {"leaseUntil", TimeCodec::format_rfc3339(lease.lease_until)}});
     }
+    Json outbox = Json::object();
+    for (const auto& [status, count] : overview.data.outbox_counts) {
+        outbox[status] = bounded_count_json(count);
+    }
     return Json{
         {"generatedAt", TimeCodec::format_rfc3339(overview.generated_at)},
-        {"outbox", overview.data.outbox_counts},
+        {"windowStart", TimeCodec::format_rfc3339(overview.data.window_start)},
+        {"outbox", std::move(outbox)},
         {"handlerReceipts", Json{
-            {"count", overview.data.handler_receipt_count},
+            {"count", overview.data.handler_receipt_count.count},
+            {"saturated", overview.data.handler_receipt_count.saturated},
             {"latestAt", overview.data.latest_receipt_at.has_value()
                 ? Json(TimeCodec::format_rfc3339(
                       *overview.data.latest_receipt_at))
                 : Json(nullptr)}}},
-        {"expiredIdempotency", overview.data.expired_idempotency_count},
+        {"expiredIdempotency", bounded_count_json(
+            overview.data.expired_idempotency_count)},
         {"leases", std::move(leases)},
         {"jobs", std::move(jobs)}};
 }
@@ -140,17 +151,26 @@ HttpResponse OperationsController::metrics(const HttpRequest& request) {
         return HttpResponseMapper::error(result.error(), request.trace_id);
     }
     std::ostringstream output;
-    output << "# TYPE pfh_outbox_messages gauge\n";
+    output << "# TYPE pfh_outbox_messages gauge\n"
+           << "# TYPE pfh_outbox_messages_saturated gauge\n";
     for (const auto& [status, count] : result->data.outbox_counts) {
         output << "pfh_outbox_messages{status=\"" << status << "\"} "
-               << count << '\n';
+               << count.count << '\n'
+               << "pfh_outbox_messages_saturated{status=\"" << status
+               << "\"} " << (count.saturated ? 1 : 0) << '\n';
     }
     output << "# TYPE pfh_outbox_handler_receipts gauge\n"
            << "pfh_outbox_handler_receipts "
-           << result->data.handler_receipt_count << '\n'
+           << result->data.handler_receipt_count.count << '\n'
+           << "# TYPE pfh_outbox_handler_receipts_saturated gauge\n"
+           << "pfh_outbox_handler_receipts_saturated "
+           << (result->data.handler_receipt_count.saturated ? 1 : 0) << '\n'
            << "# TYPE pfh_expired_idempotency_records gauge\n"
            << "pfh_expired_idempotency_records "
-           << result->data.expired_idempotency_count << '\n'
+           << result->data.expired_idempotency_count.count << '\n'
+           << "# TYPE pfh_expired_idempotency_records_saturated gauge\n"
+           << "pfh_expired_idempotency_records_saturated "
+           << (result->data.expired_idempotency_count.saturated ? 1 : 0) << '\n'
            << "# TYPE pfh_background_job_running gauge\n";
     for (const auto& job : result->jobs) {
         output << "pfh_background_job_running{job=\"" << job.name << "\"} "

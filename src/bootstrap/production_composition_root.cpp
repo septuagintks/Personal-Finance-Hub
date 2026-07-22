@@ -493,7 +493,7 @@ application::VoidResult ProductionCompositionRoot::initialize() {
             *clock_,
             std::move(operation_jobs),
             config_.scheduler.enabled,
-            10);
+            application::kExpectedMigrationVersion);
     auth_controller_ = std::make_unique<presentation::AuthController>(
         *auth_service_);
     account_controller_ = std::make_unique<presentation::AccountController>(

@@ -207,7 +207,7 @@ TEST_F(UseCaseTest, ApplicationBoundariesRejectInvalidIdsAndEnums) {
     preference.locale = "en-US";
     preference.timezone = "UTC";
     preference.date_format = "YYYY-MM-DD";
-    preference.number_format = "1,234.56";
+    preference.number_format = NumberFormat::CommaDot;
     preference.theme = static_cast<ThemeMode>(999);
     auto invalid_preference = UpdateUserPreferenceUseCase(
         *pref_repo_, *audit_repo_, *uow_).execute(preference);

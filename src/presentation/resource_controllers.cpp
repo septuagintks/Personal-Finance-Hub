@@ -218,16 +218,36 @@ parse_metadata_status(const std::string& value) {
     return "current_month";
 }
 
+[[nodiscard]] std::string number_format_text(domain::NumberFormat value) {
+    switch (value) {
+    case domain::NumberFormat::CommaDot: return "1,234.56";
+    case domain::NumberFormat::DotComma: return "1.234,56";
+    case domain::NumberFormat::SpaceComma: return "1 234,56";
+    }
+    return "1,234.56";
+}
+
+[[nodiscard]] Json report_month_json(
+    std::optional<domain::ReportMonth> value) {
+    if (!value.has_value()) return nullptr;
+    std::ostringstream output;
+    output << std::setfill('0') << std::setw(4) << int(value->year())
+           << '-' << std::setw(2) << unsigned(value->month());
+    return output.str();
+}
+
 [[nodiscard]] Json preference_json(const application::UserPreferenceDto& value) {
     return Json{
         {"baseCurrency", value.base_currency},
         {"locale", value.locale},
         {"timezone", value.timezone},
         {"dateFormat", value.date_format},
-        {"numberFormat", value.number_format},
+        {"numberFormat", number_format_text(value.number_format)},
         {"theme", theme_text(value.theme)},
         {"defaultHomePage", home_page_text(value.default_home_page)},
-        {"defaultReportPeriod", report_period_text(value.default_report_period)}};
+        {"defaultReportPeriod", report_period_text(value.default_report_period)},
+        {"customReportStartMonth", report_month_json(value.custom_report_start_month)},
+        {"customReportEndMonth", report_month_json(value.custom_report_end_month)}};
 }
 
 template <typename Enum>
@@ -261,6 +281,43 @@ template <typename Enum>
     if (value == "current_year") return domain::ReportPeriod::CurrentYear;
     if (value == "custom") return domain::ReportPeriod::Custom;
     return invalid_enum<domain::ReportPeriod>("defaultReportPeriod");
+}
+
+[[nodiscard]] application::Result<domain::NumberFormat> parse_number_format(
+    const std::string& value) {
+    if (value == "1,234.56") return domain::NumberFormat::CommaDot;
+    if (value == "1.234,56") return domain::NumberFormat::DotComma;
+    if (value == "1 234,56") return domain::NumberFormat::SpaceComma;
+    return invalid_enum<domain::NumberFormat>("numberFormat");
+}
+
+[[nodiscard]] application::Result<std::optional<domain::ReportMonth>>
+parse_report_month(
+    const std::optional<std::string>& value,
+    std::string_view field) {
+    if (!value.has_value()) {
+        return std::optional<domain::ReportMonth>{};
+    }
+    int year = 0;
+    unsigned month = 0;
+    const auto& text = *value;
+    if (text.size() != 7 || text[4] != '-') {
+        return application::err(application::Error::validation(
+            std::string(field) + " must use YYYY-MM"));
+    }
+    const auto year_result = std::from_chars(text.data(), text.data() + 4, year);
+    const auto month_result = std::from_chars(
+        text.data() + 5, text.data() + text.size(), month);
+    const domain::ReportMonth parsed{
+        std::chrono::year{year}, std::chrono::month{month}};
+    if (year_result.ec != std::errc{} || year_result.ptr != text.data() + 4 ||
+        month_result.ec != std::errc{} ||
+        month_result.ptr != text.data() + text.size() || year < 1 ||
+        !parsed.ok()) {
+        return application::err(application::Error::validation(
+            std::string(field) + " must use a valid YYYY-MM"));
+    }
+    return std::optional<domain::ReportMonth>(parsed);
 }
 
 [[nodiscard]] application::Result<int> parse_confirmations(
@@ -732,9 +789,20 @@ HttpResponse PreferenceController::update(const HttpRequest& request) {
     if (auto fields = JsonRequestParser::reject_unknown_fields(
             *body,
             {"baseCurrency", "locale", "timezone", "dateFormat", "numberFormat",
-             "theme", "defaultHomePage", "defaultReportPeriod"});
+             "theme", "defaultHomePage", "defaultReportPeriod",
+             "customReportStartMonth", "customReportEndMonth"});
         !fields) {
         return HttpResponseMapper::error(fields.error(), request.trace_id);
+    }
+    for (const std::string_view field : {
+             "customReportStartMonth", "customReportEndMonth"}) {
+        if (!body->contains(std::string(field))) {
+            return HttpResponseMapper::error(
+                application::Error(
+                    application::ErrorCode::MissingRequiredField,
+                    std::string(field) + " is required"),
+                request.trace_id);
+        }
     }
     auto base = JsonRequestParser::required_string(*body, "baseCurrency", 10);
     auto locale = JsonRequestParser::required_string(*body, "locale", 16);
@@ -745,6 +813,10 @@ HttpResponse PreferenceController::update(const HttpRequest& request) {
     auto home_value = JsonRequestParser::required_string(*body, "defaultHomePage", 32);
     auto period_value = JsonRequestParser::required_string(
         *body, "defaultReportPeriod", 32);
+    auto custom_start_value = JsonRequestParser::optional_string(
+        *body, "customReportStartMonth", 7);
+    auto custom_end_value = JsonRequestParser::optional_string(
+        *body, "customReportEndMonth", 7);
     if (!base) return HttpResponseMapper::error(base.error(), request.trace_id);
     if (!locale) return HttpResponseMapper::error(locale.error(), request.trace_id);
     if (!timezone) return HttpResponseMapper::error(timezone.error(), request.trace_id);
@@ -753,14 +825,23 @@ HttpResponse PreferenceController::update(const HttpRequest& request) {
     if (!theme_value) return HttpResponseMapper::error(theme_value.error(), request.trace_id);
     if (!home_value) return HttpResponseMapper::error(home_value.error(), request.trace_id);
     if (!period_value) return HttpResponseMapper::error(period_value.error(), request.trace_id);
+    if (!custom_start_value) return HttpResponseMapper::error(custom_start_value.error(), request.trace_id);
+    if (!custom_end_value) return HttpResponseMapper::error(custom_end_value.error(), request.trace_id);
     auto theme = parse_theme(*theme_value);
     auto home = parse_home_page(*home_value);
     auto period = parse_report_period(*period_value);
+    auto number_format = parse_number_format(*number);
+    auto custom_start = parse_report_month(*custom_start_value, "customReportStartMonth");
+    auto custom_end = parse_report_month(*custom_end_value, "customReportEndMonth");
     if (!theme) return HttpResponseMapper::error(theme.error(), request.trace_id);
     if (!home) return HttpResponseMapper::error(home.error(), request.trace_id);
     if (!period) return HttpResponseMapper::error(period.error(), request.trace_id);
+    if (!number_format) return HttpResponseMapper::error(number_format.error(), request.trace_id);
+    if (!custom_start) return HttpResponseMapper::error(custom_start.error(), request.trace_id);
+    if (!custom_end) return HttpResponseMapper::error(custom_end.error(), request.trace_id);
     auto result = service_.update_preferences(application::UpdateUserPreferenceCommand{
-        *user, *base, *locale, *timezone, *date, *number, *theme, *home, *period});
+        *user, *base, *locale, *timezone, *date, *number_format, *theme, *home,
+        *period, *custom_start, *custom_end});
     return result ? HttpResponseMapper::json(200, preference_json(*result))
                   : HttpResponseMapper::error(result.error(), request.trace_id);
 }

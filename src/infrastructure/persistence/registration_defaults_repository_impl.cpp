@@ -68,7 +68,8 @@ RegistrationDefaultsRepositoryImpl::initialize(
     domain::ITransactionContext& tx_iface,
     domain::UserId user_id,
     const domain::Currency& base_currency,
-    std::string_view preferred_locale) {
+    std::string_view preferred_locale,
+    std::optional<std::string_view> preferred_timezone) {
     auto context = postgres::require_transaction(tx_iface, user_id);
     if (!context) {
         return std::unexpected(context.error());
@@ -91,7 +92,9 @@ RegistrationDefaultsRepositoryImpl::initialize(
             user_id.value(),
             base_currency.code(),
             *locale,
-            timezone_for(*locale));
+            preferred_timezone.has_value()
+                ? std::string(*preferred_timezone)
+                : timezone_for(*locale));
         if (preference.affectedRows() != 1) {
             return std::unexpected(domain::RepositoryError::conflict(
                 "Registration defaults already initialized"));

@@ -7,6 +7,7 @@
 #include "pfh/domain/repositories/repository_error.h"
 
 #include <string_view>
+#include <optional>
 
 namespace pfh::application {
 
@@ -19,7 +20,8 @@ public:
         domain::ITransactionContext& tx,
         domain::UserId user_id,
         const domain::Currency& base_currency,
-        std::string_view preferred_locale) = 0;
+        std::string_view preferred_locale,
+        std::optional<std::string_view> preferred_timezone) = 0;
 };
 
 } // namespace pfh::application

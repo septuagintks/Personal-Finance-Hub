@@ -35,13 +35,22 @@ const presentationLocale = computed(() => ({
   dateFormat: userContext.preference?.dateFormat,
 }));
 
+function boundedCount(value: { count: number; saturated: boolean } | undefined): string {
+  if (!value) return '0';
+  return value.saturated ? `${value.count}+` : String(value.count);
+}
+
 const statusMetrics = computed(() => {
   const outbox = summary.value?.outbox;
   return [
-    { label: 'Pending', value: outbox?.pending ?? 0, tone: 'neutral' },
-    { label: 'Retrying', value: outbox?.failed ?? 0, tone: 'warning' },
-    { label: 'Dead letter', value: outbox?.deadLetter ?? 0, tone: 'danger' },
-    { label: 'Expired idempotency', value: summary.value?.expiredIdempotency ?? 0, tone: 'teal' },
+    { label: 'Pending', value: boundedCount(outbox?.pending), tone: 'neutral' },
+    { label: 'Retrying', value: boundedCount(outbox?.failed), tone: 'warning' },
+    { label: 'Dead letter', value: boundedCount(outbox?.deadLetter), tone: 'danger' },
+    {
+      label: 'Expired idempotency',
+      value: boundedCount(summary.value?.expiredIdempotency),
+      tone: 'teal',
+    },
   ];
 });
 
@@ -237,11 +246,15 @@ onBeforeUnmount(() => {
         <dl v-if="summary" class="operations-facts">
           <div>
             <dt>Handler receipts</dt>
-            <dd>{{ summary.handlerReceipts.count }}</dd>
+            <dd>{{ boundedCount(summary.handlerReceipts) }}</dd>
           </div>
           <div>
             <dt>Latest receipt</dt>
             <dd>{{ displayTime(summary.handlerReceipts.latestAt) }}</dd>
+          </div>
+          <div>
+            <dt>Window start</dt>
+            <dd>{{ displayTime(summary.windowStart) }}</dd>
           </div>
           <div>
             <dt>Generated</dt>

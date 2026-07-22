@@ -122,7 +122,8 @@ protected:
           finance_(scopes_, clock_, request_hasher_),
           operations_repository_(store_),
           operations_service_(
-              operations_repository_, clock_, {}, false, 10),
+              operations_repository_, clock_, {}, false,
+              kExpectedMigrationVersion),
           auth_controller_(auth_service_),
           account_controller_(finance_),
           category_controller_(finance_),
@@ -655,11 +656,47 @@ TEST_F(ResourceApiTest, PreferencesValidateTimezoneAndCurrency) {
         {"timezone", "America/New_York"}, {"dateFormat", "YYYY-MM-DD"},
         {"numberFormat", "1,234.56"}, {"theme", "dark"},
         {"defaultHomePage", "accounts"},
-        {"defaultReportPeriod", "current_year"}};
+        {"defaultReportPeriod", "current_year"},
+        {"customReportStartMonth", nullptr},
+        {"customReportEndMonth", nullptr}};
     const auto updated = request(
         HttpMethod::Put, "/api/v1/users/me/preferences", body, token);
     ASSERT_EQ(updated.status, 200) << updated.body;
-    EXPECT_EQ(nlohmann::json::parse(updated.body)["baseCurrency"], "USD");
+    const auto updated_body = nlohmann::json::parse(updated.body);
+    EXPECT_EQ(updated_body["baseCurrency"], "USD");
+    EXPECT_EQ(updated_body["numberFormat"], "1,234.56");
+    EXPECT_TRUE(updated_body["customReportStartMonth"].is_null());
+
+    auto incomplete = body;
+    incomplete.erase("customReportEndMonth");
+    EXPECT_EQ(request(
+        HttpMethod::Put,
+        "/api/v1/users/me/preferences",
+        incomplete,
+        token).status, 400);
+
+    body["numberFormat"] = "standard";
+    EXPECT_EQ(request(
+        HttpMethod::Put, "/api/v1/users/me/preferences", body, token).status, 400);
+    body["numberFormat"] = "1.234,56";
+    body["defaultReportPeriod"] = "custom";
+    EXPECT_EQ(request(
+        HttpMethod::Put, "/api/v1/users/me/preferences", body, token).status, 400);
+    body["customReportStartMonth"] = "2025-01";
+    body["customReportEndMonth"] = "2025-06";
+    const auto custom = request(
+        HttpMethod::Put, "/api/v1/users/me/preferences", body, token);
+    ASSERT_EQ(custom.status, 200) << custom.body;
+    EXPECT_EQ(
+        nlohmann::json::parse(custom.body)["customReportEndMonth"],
+        "2025-06");
+
+    body["customReportEndMonth"] = "2035-01";
+    EXPECT_EQ(request(
+        HttpMethod::Put, "/api/v1/users/me/preferences", body, token).status, 400);
+    body["defaultReportPeriod"] = "current_year";
+    body["customReportStartMonth"] = nullptr;
+    body["customReportEndMonth"] = nullptr;
     body["timezone"] = "Not/A_Real_Zone";
     EXPECT_EQ(request(
         HttpMethod::Put, "/api/v1/users/me/preferences", body, token).status, 400);
@@ -2163,11 +2200,18 @@ TEST_F(ResourceApiTest, OperatorRoutesUseCurrentServerRoleAndSanitizeDeadLetters
         {},
         operator_token);
     ASSERT_EQ(summary.status, 200) << summary.body;
-    EXPECT_EQ(request(
+    const auto summary_body = nlohmann::json::parse(summary.body);
+    EXPECT_TRUE(summary_body["windowStart"].is_string());
+    EXPECT_TRUE(summary_body["outbox"]["failed"]["count"].is_number_unsigned());
+    EXPECT_TRUE(summary_body["outbox"]["failed"]["saturated"].is_boolean());
+    EXPECT_TRUE(summary_body["expiredIdempotency"]["saturated"].is_boolean());
+    const auto metrics = request(
         HttpMethod::Get,
         "/api/v1/operations/metrics",
         {},
-        operator_token).status, 200);
+        operator_token);
+    EXPECT_EQ(metrics.status, 200);
+    EXPECT_NE(metrics.body.find("pfh_outbox_messages_saturated"), std::string::npos);
 }
 
 } // namespace pfh::test

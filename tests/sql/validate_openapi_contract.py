@@ -233,6 +233,16 @@ def main() -> int:
     pagination = schemas.get("CursorPageMetadata", {})
     if pagination.get("properties", {}).get("nextCursor", {}).get("maxLength") != 512:
         failures.append("CursorPageMetadata must bound nextCursor to 512 characters")
+    bounded_count = schemas.get("BoundedCount", {})
+    if (
+        bounded_count.get("properties", {}).get("count", {}).get("maximum")
+        != 10000
+        or set(bounded_count.get("required", [])) != {"count", "saturated"}
+    ):
+        failures.append("BoundedCount must expose the operational saturation limit")
+    operations_summary = schemas.get("OperationsSummary", {})
+    if "windowStart" not in operations_summary.get("required", []):
+        failures.append("OperationsSummary must publish its bounded count window")
     decimal = schemas.get("DecimalString", {})
     positive = schemas.get("PositiveDecimalString", {})
     if decimal.get("type") != "string" or positive.get("type") != "string":
@@ -302,6 +312,13 @@ def main() -> int:
         for option in preferred_locale.get("oneOf", [])
     ):
         failures.append("RegisterRequest.preferredLocale must reference LocaleTag")
+    preferred_timezone = (
+        schemas.get("RegisterRequest", {})
+        .get("properties", {})
+        .get("preferredTimezone", {})
+    )
+    if preferred_timezone.get("oneOf", [{}])[0].get("maxLength") != 64:
+        failures.append("RegisterRequest.preferredTimezone must be bounded")
     preference_locale = (
         schemas.get("UserPreference", {})
         .get("properties", {})
@@ -309,6 +326,16 @@ def main() -> int:
     )
     if preference_locale.get("$ref") != "#/components/schemas/LocaleTag":
         failures.append("UserPreference.locale must reference LocaleTag")
+    number_format = schemas.get("NumberFormat", {})
+    if number_format.get("enum") != ["1,234.56", "1.234,56", "1 234,56"]:
+        failures.append("NumberFormat must expose the three supported formats")
+    preference_number_format = (
+        schemas.get("UserPreference", {})
+        .get("properties", {})
+        .get("numberFormat", {})
+    )
+    if preference_number_format.get("$ref") != "#/components/schemas/NumberFormat":
+        failures.append("UserPreference.numberFormat must reference NumberFormat")
 
     def allows_null(schema: dict) -> bool:
         raw_type = schema.get("type")
@@ -319,7 +346,9 @@ def main() -> int:
         return any(allows_null(option) for option in schema.get("oneOf", []))
 
     nullable_request_fields = {
-        "RegisterRequest": ("baseCurrency", "preferredLocale"),
+        "RegisterRequest": (
+            "baseCurrency", "preferredLocale", "preferredTimezone",
+        ),
         "CreateAccountRequest": ("description",),
         "CreateCategoryRequest": ("board", "name", "parentId", "templateId"),
         "CreateTransactionRequest": (
@@ -337,6 +366,12 @@ def main() -> int:
                 failures.append(
                     f"{schema_name}.{field} must accept explicit null like the parser"
                 )
+    preference = schemas.get("UserPreference", {})
+    for field in ("customReportStartMonth", "customReportEndMonth"):
+        if field not in preference.get("required", []):
+            failures.append(f"UserPreference.{field} must always be projected")
+        if not allows_null(preference.get("properties", {}).get(field, {})):
+            failures.append(f"UserPreference.{field} must be nullable")
 
     if failures:
         for failure in failures:

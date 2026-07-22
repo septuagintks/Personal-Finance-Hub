@@ -16,7 +16,8 @@ public:
         domain::ITransactionContext& tx,
         domain::UserId user_id,
         const domain::Currency& base_currency,
-        std::string_view preferred_locale) override;
+        std::string_view preferred_locale,
+        std::optional<std::string_view> preferred_timezone) override;
 };
 
 } // namespace pfh::infrastructure

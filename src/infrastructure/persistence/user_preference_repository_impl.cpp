@@ -9,6 +9,10 @@
 #include "pfh/infrastructure/persistence/postgres_repository_support.h"
 #include "pfh/infrastructure/persistence/postgres_result_set.h"
 
+#include <charconv>
+#include <iomanip>
+#include <sstream>
+
 namespace pfh::infrastructure {
 
 namespace {
@@ -16,6 +20,47 @@ namespace {
 domain::RepositoryError preference_not_found() {
     return domain::RepositoryError::not_found(
         "User preference owner not found");
+}
+
+[[nodiscard]] domain::ReportMonth parse_report_month(
+    const std::string& value) {
+    int year = 0;
+    unsigned month = 0;
+    if (value.size() != 7 || value[4] != '-') {
+        throw std::invalid_argument("Stored report month is invalid");
+    }
+    const auto year_result = std::from_chars(
+        value.data(), value.data() + 4, year);
+    const auto month_result = std::from_chars(
+        value.data() + 5, value.data() + value.size(), month);
+    const domain::ReportMonth result{
+        std::chrono::year{year}, std::chrono::month{month}};
+    if (year_result.ec != std::errc{} ||
+        year_result.ptr != value.data() + 4 ||
+        month_result.ec != std::errc{} ||
+        month_result.ptr != value.data() + value.size() || year < 1 ||
+        !result.ok()) {
+        throw std::invalid_argument("Stored report month is invalid");
+    }
+    return result;
+}
+
+[[nodiscard]] std::optional<domain::ReportMonth> optional_report_month(
+    const drogon::orm::Row& row,
+    std::size_t column) {
+    const auto value = pg::getOptionalString(row, column);
+    return value.has_value()
+        ? std::optional<domain::ReportMonth>(parse_report_month(*value))
+        : std::nullopt;
+}
+
+[[nodiscard]] std::optional<std::string> report_month_text(
+    std::optional<domain::ReportMonth> value) {
+    if (!value.has_value()) return std::nullopt;
+    std::ostringstream output;
+    output << std::setfill('0') << std::setw(4) << int(value->year())
+           << '-' << std::setw(2) << unsigned(value->month()) << "-01";
+    return output.str();
 }
 
 domain::RepositoryResult<domain::UserPreference> load_preference(
@@ -34,7 +79,9 @@ domain::RepositoryResult<domain::UserPreference> load_preference(
             p.number_format,
             p.theme::text,
             p.default_home_page::text,
-            p.default_report_period::text
+            p.default_report_period::text,
+            to_char(p.custom_report_start_month, 'YYYY-MM'),
+            to_char(p.custom_report_end_month, 'YYYY-MM')
         FROM users u
         LEFT JOIN user_preferences p ON p.user_id = u.id
         WHERE u.id = $1
@@ -65,10 +112,12 @@ domain::RepositoryResult<domain::UserPreference> load_preference(
             pg::getString(result[0], 3),
             pg::getString(result[0], 4),
             pg::getString(result[0], 5),
-            pg::getString(result[0], 6),
+            pg::parseNumberFormat(pg::getString(result[0], 6)),
             pg::parseThemeMode(pg::getString(result[0], 7)),
             pg::parseDefaultHomePage(pg::getString(result[0], 8)),
-            pg::parseReportPeriod(pg::getString(result[0], 9)));
+            pg::parseReportPeriod(pg::getString(result[0], 9)),
+            optional_report_month(result[0], 10),
+            optional_report_month(result[0], 11));
     } catch (const std::exception&) {
         return std::unexpected(domain::RepositoryError::database(
             "Stored user preference row is invalid"));
@@ -140,10 +189,12 @@ domain::RepositoryVoidResult UserPreferenceRepositoryImpl::save(
         constexpr const char* kUpsertSql = R"SQL(
             INSERT INTO user_preferences (
                 user_id, base_currency_code, locale, timezone, date_format,
-                number_format, theme, default_home_page, default_report_period)
+                number_format, theme, default_home_page, default_report_period,
+                custom_report_start_month, custom_report_end_month)
             VALUES (
                 $1, $2, $3, $4, $5, $6,
-                $7::theme_mode, $8::default_home_page, $9::report_period)
+                $7::theme_mode, $8::default_home_page, $9::report_period,
+                $10::date, $11::date)
             ON CONFLICT (user_id) DO UPDATE SET
                 base_currency_code = EXCLUDED.base_currency_code,
                 locale = EXCLUDED.locale,
@@ -153,6 +204,8 @@ domain::RepositoryVoidResult UserPreferenceRepositoryImpl::save(
                 theme = EXCLUDED.theme,
                 default_home_page = EXCLUDED.default_home_page,
                 default_report_period = EXCLUDED.default_report_period,
+                custom_report_start_month = EXCLUDED.custom_report_start_month,
+                custom_report_end_month = EXCLUDED.custom_report_end_month,
                 updated_at = NOW()
         )SQL";
         (*context)->transaction().execSqlSync(
@@ -162,10 +215,12 @@ domain::RepositoryVoidResult UserPreferenceRepositoryImpl::save(
             preference.locale(),
             preference.timezone(),
             preference.date_format(),
-            preference.number_format(),
+            pg::toSqlText(preference.number_format()),
             pg::toSqlText(preference.theme()),
             pg::toSqlText(preference.default_home_page()),
-            pg::toSqlText(preference.default_report_period()));
+            pg::toSqlText(preference.default_report_period()),
+            report_month_text(preference.custom_report_start_month()),
+            report_month_text(preference.custom_report_end_month()));
         return {};
     } catch (const drogon::orm::DrogonDbException& error) {
         return std::unexpected(

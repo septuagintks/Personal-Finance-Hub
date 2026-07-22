@@ -199,6 +199,27 @@ TEST_F(AuthApiTest, Register_ReturnsCreatedTokenPairWithoutSensitiveFields) {
     EXPECT_FALSE(body.contains("passwordHash"));
 }
 
+TEST_F(AuthApiTest, Register_PersistsPreferredTimezoneAndRejectsUnknownZone) {
+    const auto accepted = post(
+        "/api/v1/auth/register",
+        {{"username", "timezone@example.com"},
+         {"password", "correct horse battery staple"},
+         {"preferredLocale", "en-US"},
+         {"preferredTimezone", "Europe/Berlin"}});
+    ASSERT_EQ(accepted.status, 201) << accepted.body;
+    const auto user_id = nlohmann::json::parse(accepted.body)["userId"]
+                             .get<std::int64_t>();
+    ASSERT_TRUE(store_.preferences.contains(user_id));
+    EXPECT_EQ(store_.preferences.at(user_id).timezone(), "Europe/Berlin");
+
+    const auto rejected = post(
+        "/api/v1/auth/register",
+        {{"username", "bad-timezone@example.com"},
+         {"password", "correct horse battery staple"},
+         {"preferredTimezone", "Not/A_Real_Zone"}});
+    EXPECT_EQ(rejected.status, 400);
+}
+
 TEST_F(AuthApiTest, Register_RejectsClientSuppliedUserIdAndUnknownFields) {
     const auto response = post(
         "/api/v1/auth/register",

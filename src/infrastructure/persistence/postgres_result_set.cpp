@@ -352,6 +352,22 @@ std::string toSqlText(domain::ReportPeriod period) {
     throw std::invalid_argument("Invalid ReportPeriod enum value");
 }
 
+domain::NumberFormat parseNumberFormat(const std::string& value) {
+    if (value == "1,234.56") return domain::NumberFormat::CommaDot;
+    if (value == "1.234,56") return domain::NumberFormat::DotComma;
+    if (value == "1 234,56") return domain::NumberFormat::SpaceComma;
+    throw std::invalid_argument("Unknown number format: " + value);
+}
+
+std::string toSqlText(domain::NumberFormat value) {
+    switch (value) {
+        case domain::NumberFormat::CommaDot: return "1,234.56";
+        case domain::NumberFormat::DotComma: return "1.234,56";
+        case domain::NumberFormat::SpaceComma: return "1 234,56";
+    }
+    throw std::invalid_argument("Invalid NumberFormat enum value");
+}
+
 }  // namespace pfh::infrastructure::pg
 
 #endif  // PFH_HAS_POSTGRESQL

@@ -327,10 +327,12 @@ struct UserPreferenceDto {
     std::string locale;
     std::string timezone;
     std::string date_format;
-    std::string number_format;
+    domain::NumberFormat number_format = domain::NumberFormat::CommaDot;
     domain::ThemeMode theme = domain::ThemeMode::System;
     domain::HomePage default_home_page = domain::HomePage::Dashboard;
     domain::ReportPeriod default_report_period = domain::ReportPeriod::CurrentMonth;
+    std::optional<domain::ReportMonth> custom_report_start_month;
+    std::optional<domain::ReportMonth> custom_report_end_month;
 };
 
 struct UpdateUserPreferenceCommand {
@@ -339,10 +341,12 @@ struct UpdateUserPreferenceCommand {
     std::string locale;
     std::string timezone;
     std::string date_format;
-    std::string number_format;
+    domain::NumberFormat number_format = domain::NumberFormat::CommaDot;
     domain::ThemeMode theme = domain::ThemeMode::System;
     domain::HomePage default_home_page = domain::HomePage::Dashboard;
     domain::ReportPeriod default_report_period = domain::ReportPeriod::CurrentMonth;
+    std::optional<domain::ReportMonth> custom_report_start_month;
+    std::optional<domain::ReportMonth> custom_report_end_month;
 };
 
 struct CurrencyMetadataDto {

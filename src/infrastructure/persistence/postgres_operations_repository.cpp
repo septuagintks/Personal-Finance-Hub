@@ -41,6 +41,17 @@ namespace {
     return static_cast<std::int64_t>(limit + 1);
 }
 
+[[nodiscard]] application::OperationalBoundedCount bounded_count(
+    std::int64_t sampled_count) {
+    if (sampled_count < 0) {
+        throw std::invalid_argument("Operational count is invalid");
+    }
+    const auto raw = static_cast<std::size_t>(sampled_count);
+    return application::OperationalBoundedCount{
+        std::min(raw, application::kOperationalCountLimit),
+        raw > application::kOperationalCountLimit};
+}
+
 } // namespace
 
 domain::RepositoryResult<application::ReadinessState>
@@ -85,46 +96,56 @@ PostgresOperationsRepository::summary(
     try {
         application::OperationalDataSummary result;
         result.outbox_counts = {
-            {"pending", 0}, {"processing", 0}, {"published", 0},
-            {"failed", 0}, {"deadLetter", 0}};
+            {"pending", {}}, {"processing", {}}, {"published", {}},
+            {"failed", {}}, {"deadLetter", {}}};
+        result.window_start = now - std::chrono::hours(24 * 30);
         const auto counts = db_->execSqlSync(R"SQL(
-            SELECT status::text, count(*)
-            FROM domain_events_outbox
-            GROUP BY status
+            SELECT requested.label, count(sample.marker)
+            FROM (VALUES
+                ('pending', 'pending'::outbox_status),
+                ('processing', 'processing'::outbox_status),
+                ('published', 'published'::outbox_status),
+                ('failed', 'failed'::outbox_status),
+                ('deadLetter', 'dead_letter'::outbox_status)
+            ) AS requested(label, status)
+            LEFT JOIN LATERAL (
+                SELECT 1 AS marker
+                FROM domain_events_outbox AS event
+                WHERE event.status = requested.status
+                ORDER BY event.created_at DESC, event.id DESC
+                LIMIT 10001
+            ) AS sample ON TRUE
+            GROUP BY requested.label
         )SQL");
         for (const auto& row : counts) {
-            auto status = pg::getString(row, 0);
-            if (status == "dead_letter") status = "deadLetter";
+            const auto status = pg::getString(row, 0);
             if (result.outbox_counts.contains(status)) {
-                const auto count = pg::getBigInt(row, 1);
-                if (count < 0) {
-                    return std::unexpected(domain::RepositoryError::database(
-                        "Operational count is invalid"));
-                }
-                result.outbox_counts[status] = static_cast<std::size_t>(count);
+                result.outbox_counts[status] = bounded_count(
+                    pg::getBigInt(row, 1));
             }
         }
 
         const auto receipts = db_->execSqlSync(R"SQL(
             SELECT count(*), MAX(handled_at)
-            FROM outbox_handler_receipts
-        )SQL");
+            FROM (
+                SELECT handled_at
+                FROM outbox_handler_receipts
+                WHERE handled_at >= $1
+                ORDER BY handled_at DESC
+                LIMIT 10001
+            ) AS recent_receipts
+        )SQL", result.window_start);
         if (receipts.size() == 1) {
-            const auto count = pg::getBigInt(receipts[0], 0);
-            if (count >= 0) {
-                result.handler_receipt_count = static_cast<std::size_t>(count);
-            }
+            result.handler_receipt_count = bounded_count(
+                pg::getBigInt(receipts[0], 0));
             result.latest_receipt_at = pg::getOptionalTimestamp(receipts[0], 1);
         }
 
         const auto expired = db_->execSqlSync(
             "SELECT pfh_count_expired_request_idempotency()");
         if (expired.size() == 1) {
-            const auto count = pg::getBigInt(expired[0], 0);
-            if (count >= 0) {
-                result.expired_idempotency_count =
-                    static_cast<std::size_t>(count);
-            }
+            result.expired_idempotency_count = bounded_count(
+                pg::getBigInt(expired[0], 0));
         }
 
         const auto leases = db_->execSqlSync(R"SQL(

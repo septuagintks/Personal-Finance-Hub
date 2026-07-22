@@ -111,7 +111,8 @@ public:
         ITransactionContext&,
         UserId,
         const Currency&,
-        std::string_view) override {
+        std::string_view,
+        std::optional<std::string_view>) override {
         return std::unexpected(RepositoryError::database(
             "injected defaults failure"));
     }
@@ -170,7 +171,7 @@ TEST_F(AuthServiceTest, RegisterUser_CommitsIdentityDefaultsSessionAuditAndOutbo
               "alice@example.com");
     EXPECT_TRUE(store_.users.at(result.user_id.value()).categories_initialized);
     EXPECT_TRUE(store_.preferences.contains(result.user_id.value()));
-    EXPECT_FALSE(store_.categories.empty());
+    EXPECT_EQ(store_.categories.size(), 55U);
     ASSERT_EQ(store_.refresh_tokens.size(), 1U);
     EXPECT_NE(result.tokens.refresh_token.find("opaque-32-"), std::string::npos);
     ASSERT_EQ(store_.audit_logs.size(), 1U);
@@ -187,7 +188,8 @@ TEST_F(AuthServiceTest, RegisterUser_WhenDuplicate_RollsBackEveryNewFact) {
     const auto outbox_before = store_.outbox.size();
 
     RegisterCommand duplicate{
-        "ALICE@example.com", "another secure password", "USD", "en-US"};
+        "ALICE@example.com", "another secure password", "USD", "en-US",
+        std::nullopt};
     const auto result = service_.register_user(duplicate);
 
     ASSERT_FALSE(result.has_value());
@@ -214,7 +216,8 @@ TEST_F(AuthServiceTest, RegisterUser_WhenDefaultsFail_RollsBackCreatedUser) {
         "alice@example.com",
         "correct horse battery staple",
         "USD",
-        "en-US"};
+        "en-US",
+        std::nullopt};
 
     const auto result = failing_service.register_user(command);
 
@@ -226,6 +229,36 @@ TEST_F(AuthServiceTest, RegisterUser_WhenDefaultsFail_RollsBackCreatedUser) {
     EXPECT_TRUE(store_.refresh_tokens.empty());
     EXPECT_TRUE(store_.audit_logs.empty());
     EXPECT_TRUE(store_.outbox.empty());
+}
+
+TEST_F(AuthServiceTest, RegisterUser_PersistsValidPreferredTimezone) {
+    RegisterCommand command;
+    command.username = "timezone@example.com";
+    command.password = "correct horse battery staple";
+    command.base_currency_code = "USD";
+    command.preferred_locale = "en-US";
+    command.preferred_timezone = "Europe/Berlin";
+
+    const auto result = service_.register_user(command);
+
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    ASSERT_TRUE(store_.preferences.contains(result->user_id.value()));
+    EXPECT_EQ(
+        store_.preferences.at(result->user_id.value()).timezone(),
+        "Europe/Berlin");
+}
+
+TEST_F(AuthServiceTest, RegisterUser_RejectsUnavailablePreferredTimezone) {
+    RegisterCommand command;
+    command.username = "timezone@example.com";
+    command.password = "correct horse battery staple";
+    command.preferred_timezone = "Not/A_Real_Zone";
+
+    const auto result = service_.register_user(command);
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::ValidationError);
+    EXPECT_TRUE(store_.users.empty());
 }
 
 TEST_F(AuthServiceTest, Login_RejectsWrongPasswordWithoutLeakingIdentityState) {

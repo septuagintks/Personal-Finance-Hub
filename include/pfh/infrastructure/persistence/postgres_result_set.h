@@ -117,6 +117,12 @@ namespace pg {
 /// @brief Map a domain::ReportPeriod to its canonical SQL text form.
 [[nodiscard]] std::string toSqlText(domain::ReportPeriod period);
 
+/// @brief Map a persisted number format to the closed domain enum.
+[[nodiscard]] domain::NumberFormat parseNumberFormat(const std::string& value);
+
+/// @brief Map a domain number format to its canonical persisted text.
+[[nodiscard]] std::string toSqlText(domain::NumberFormat value);
+
 }  // namespace pg
 
 }  // namespace pfh::infrastructure

@@ -416,8 +416,10 @@ TEST_F(PostgreSQLIntegrationTest, CoreRepositoriesRoundTripAndEnforceTenantIsola
                 tx,
                 UserPreference(
                     alice.user, ccy("CNY"), "en-US", "UTC", "YYYY-MM-DD",
-                    "1,234.56", ThemeMode::Dark, HomePage::Reports,
-                    ReportPeriod::CurrentYear));
+                    NumberFormat::DotComma, ThemeMode::Dark, HomePage::Reports,
+                    ReportPeriod::Custom,
+                    ReportMonth{std::chrono::year{2025}, std::chrono::January},
+                    ReportMonth{std::chrono::year{2025}, std::chrono::June}));
             if (!preference) return preference;
 
             auto root = categories.save(
@@ -492,6 +494,13 @@ TEST_F(PostgreSQLIntegrationTest, CoreRepositoriesRoundTripAndEnforceTenantIsola
     ASSERT_TRUE(stored_preference.has_value()) << stored_preference.error().message;
     EXPECT_EQ(stored_preference->base_currency().code(), "CNY");
     EXPECT_EQ(stored_preference->theme(), ThemeMode::Dark);
+    EXPECT_EQ(stored_preference->number_format(), NumberFormat::DotComma);
+    EXPECT_EQ(
+        stored_preference->custom_report_start_month(),
+        (ReportMonth{std::chrono::year{2025}, std::chrono::January}));
+    EXPECT_EQ(
+        stored_preference->custom_report_end_month(),
+        (ReportMonth{std::chrono::year{2025}, std::chrono::June}));
     auto root = categories.resolve_root_id_for_user(child_id, alice.user);
     ASSERT_TRUE(root.has_value()) << root.error().message;
     EXPECT_EQ(*root, root_id);

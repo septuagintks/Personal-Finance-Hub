@@ -55,6 +55,7 @@ struct RegisterCommand {
     std::string password;
     std::string base_currency_code = "CNY";
     std::string preferred_locale = "zh-CN";
+    std::optional<std::string> preferred_timezone;
 };
 
 struct LoginCommand {

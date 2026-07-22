@@ -47,6 +47,8 @@ const preferenceForm = reactive<UserPreference>({
   theme: 'system',
   defaultHomePage: 'dashboard',
   defaultReportPeriod: 'current_month',
+  customReportStartMonth: null,
+  customReportEndMonth: null,
 });
 
 const zh = computed(() => userContext.preference?.locale === 'zh-CN');
