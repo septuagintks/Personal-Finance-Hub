@@ -53,6 +53,7 @@ enum class ErrorCode {
     CrossCurrencyWithoutRate,
     CategoryBoardMismatch,
     ArchivedAccountOperation,
+    ResourceLimitExceeded,
 
     // Infrastructure errors (500)
     InfrastructureFailure,

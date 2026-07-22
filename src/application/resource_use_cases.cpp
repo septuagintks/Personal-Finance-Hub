@@ -17,6 +17,8 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace pfh::application {
@@ -696,12 +698,21 @@ Result<std::vector<CategoryTreeDto>> ListCategoriesUseCase::execute(
         return status == MetadataListStatus::Deleted && !category.is_deleted();
     });
 
-    std::map<std::int64_t, const domain::Category*> by_id;
+    std::unordered_map<std::int64_t, const domain::Category*> by_id;
+    std::unordered_map<
+        std::int64_t, std::vector<const domain::Category*>> children_by_parent;
+    by_id.reserve(categories->size());
+    children_by_parent.reserve(categories->size());
     for (const auto& category : *categories) {
         by_id.emplace(category.id().value(), &category);
+        if (category.parent_id().has_value()) {
+            children_by_parent[category.parent_id()->value()].push_back(&category);
+        }
     }
-    std::set<std::int64_t> active_path;
-    std::set<std::int64_t> completed;
+    std::unordered_set<std::int64_t> active_path;
+    std::unordered_set<std::int64_t> completed;
+    active_path.reserve(categories->size());
+    completed.reserve(categories->size());
     std::function<Result<CategoryTreeDto>(const domain::Category&, int)> build =
         [&](const domain::Category& category, int depth)
             -> Result<CategoryTreeDto> {
@@ -712,10 +723,10 @@ Result<std::vector<CategoryTreeDto>> ListCategoriesUseCase::execute(
         }
         CategoryTreeDto node;
         static_cast<CategoryDto&>(node) = category_dto(category);
-        for (const auto& candidate : *categories) {
-            if (candidate.parent_id() ==
-                std::optional<domain::CategoryId>(category.id())) {
-                auto child = build(candidate, depth + 1);
+        if (const auto children = children_by_parent.find(category.id().value());
+            children != children_by_parent.end()) {
+            for (const auto* candidate : children->second) {
+                auto child = build(*candidate, depth + 1);
                 if (!child) {
                     active_path.erase(category.id().value());
                     return err(child.error());
@@ -861,6 +872,24 @@ Result<CategoryDto> CreateCategoryUseCase::execute_impl(
                     return {};
                 }
             }
+            auto existing = categories_.find_identity_for_update(
+                tx, command.user_id, *board, command.parent_id, name,
+                command.template_id);
+            if (existing) {
+                if (!existing->is_deleted()) {
+                    return std::unexpected(domain::RepositoryError::conflict(
+                        "Category already exists under the same parent"));
+                }
+                persisted_category = domain::Category(
+                    existing->id(), existing->owner(), existing->name(),
+                    existing->board(), existing->parent_id(), existing->source(),
+                    existing->template_id(), existing->sort_order(), std::nullopt,
+                    existing->created_at(), now);
+                restored = true;
+            } else if (existing.error().status != domain::RepositoryStatus::NotFound) {
+                return std::unexpected(existing.error());
+            }
+
             if (category_template.has_value()) {
                 const bool template_has_parent =
                     category_template->parent_id.has_value();
@@ -898,24 +927,6 @@ Result<CategoryDto> CreateCategoryUseCase::execute_impl(
                     return std::unexpected(domain::RepositoryError::validation(
                         "Category board mismatch"));
                 }
-            }
-
-            auto existing = categories_.find_identity_for_update(
-                tx, command.user_id, *board, command.parent_id, name,
-                command.template_id);
-            if (existing) {
-                if (!existing->is_deleted()) {
-                    return std::unexpected(domain::RepositoryError::conflict(
-                        "Category already exists under the same parent"));
-                }
-                persisted_category = domain::Category(
-                    existing->id(), existing->owner(), existing->name(),
-                    existing->board(), existing->parent_id(), existing->source(),
-                    existing->template_id(), existing->sort_order(), std::nullopt,
-                    existing->created_at(), now);
-                restored = true;
-            } else if (existing.error().status != domain::RepositoryStatus::NotFound) {
-                return std::unexpected(existing.error());
             }
 
             auto saved = categories_.save(tx, persisted_category);

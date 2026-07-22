@@ -16,10 +16,13 @@
 #include "pfh/domain/repositories/i_transaction_repository.h"
 #include "pfh/domain/repositories/i_user_preference_repository.h"
 #include "pfh/domain/repositories/i_user_repository.h"
+#include "pfh/domain/resource_limits.h"
 #include "pfh/domain/transfer_domain_service.h"
 #include "pfh/infrastructure/persistence/in_memory_account_repository.h"
+#include "pfh/infrastructure/persistence/in_memory_category_repository.h"
 #include "pfh/infrastructure/persistence/in_memory_exchange_rate_repository.h"
 #include "pfh/infrastructure/persistence/in_memory_store.h"
+#include "pfh/infrastructure/persistence/in_memory_tag_repository.h"
 #include "pfh/infrastructure/persistence/in_memory_transaction_repository.h"
 #include "pfh/infrastructure/persistence/in_memory_unit_of_work.h"
 #include "pfh/infrastructure/persistence/in_memory_user_repository.h"
@@ -305,6 +308,118 @@ TEST_F(RepositoryIntegrationTest, AccountRepository_WhenVersionMismatch_ReturnsC
     });
     ASSERT_FALSE(stale.has_value());
     EXPECT_EQ(stale.error().status, RepositoryStatus::Conflict);
+}
+
+TEST_F(RepositoryIntegrationTest, UserResourceQuotasCountRetainedHistoryAndAllowUpdates) {
+    const auto ids = seed_user_with_accounts();
+    const auto now = sample_time();
+
+    while (store_->accounts.size() < kMaximumAccountsPerUser) {
+        const auto id = AccountId(store_->next_account_id++);
+        const bool archived = store_->accounts.size() + 1U ==
+            kMaximumAccountsPerUser;
+        store_->accounts.emplace(
+            id.value(),
+            Account(
+                id, ids.user, "Account " + id.to_string(), AccountType::Other,
+                "quota", ccy("USD"), {}, archived,
+                archived ? std::optional(now) : std::nullopt, now, now));
+    }
+    auto account_overflow = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            auto saved = account_repo_->save(
+                tx, Account(
+                    AccountId{}, ids.user, "Overflow", AccountType::Other,
+                    "quota", ccy("USD")));
+            return saved ? RepositoryVoidResult{}
+                         : RepositoryVoidResult(std::unexpected(saved.error()));
+        });
+    ASSERT_FALSE(account_overflow.has_value());
+    EXPECT_EQ(
+        account_overflow.error().status,
+        RepositoryStatus::ResourceLimitExceeded);
+
+    InMemoryCategoryRepository categories(*store_);
+    CategoryId deleted_category_id;
+    while (store_->categories.size() < kMaximumCategoriesPerUser) {
+        const auto id = CategoryId(store_->next_category_id++);
+        const bool deleted = store_->categories.size() + 1U ==
+            kMaximumCategoriesPerUser;
+        if (deleted) deleted_category_id = id;
+        store_->categories.emplace(
+            id.value(),
+            Category(
+                id, ids.user, "Category " + id.to_string(),
+                CategoryBoard::Expense, std::nullopt, CategorySource::User,
+                std::nullopt, 0,
+                deleted ? std::optional(now) : std::nullopt, now, now));
+    }
+    auto category_overflow = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            auto saved = categories.save(
+                tx, Category(
+                    CategoryId{}, ids.user, "Overflow",
+                    CategoryBoard::Expense));
+            return saved ? RepositoryVoidResult{}
+                         : RepositoryVoidResult(std::unexpected(saved.error()));
+        });
+    ASSERT_FALSE(category_overflow.has_value());
+    EXPECT_EQ(
+        category_overflow.error().status,
+        RepositoryStatus::ResourceLimitExceeded);
+    const auto deleted_category =
+        store_->categories.at(deleted_category_id.value());
+    auto category_restore = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            auto saved = categories.save(
+                tx, Category(
+                    deleted_category.id(), deleted_category.owner(),
+                    deleted_category.name(), deleted_category.board(),
+                    deleted_category.parent_id(), deleted_category.source(),
+                    deleted_category.template_id(), deleted_category.sort_order(),
+                    std::nullopt, deleted_category.created_at(), now));
+            return saved ? RepositoryVoidResult{}
+                         : RepositoryVoidResult(std::unexpected(saved.error()));
+        });
+    ASSERT_TRUE(category_restore.has_value())
+        << category_restore.error().message;
+    EXPECT_FALSE(
+        store_->categories.at(deleted_category_id.value()).is_deleted());
+
+    InMemoryTagRepository tags(*store_);
+    TagId deleted_tag_id;
+    while (store_->tags.size() < kMaximumTagsPerUser) {
+        const auto id = TagId(store_->next_tag_id++);
+        const bool deleted = store_->tags.size() + 1U == kMaximumTagsPerUser;
+        if (deleted) deleted_tag_id = id;
+        store_->tags.emplace(
+            id.value(),
+            Tag(
+                id, ids.user, "Tag " + id.to_string(),
+                deleted ? std::optional(now) : std::nullopt, now, now));
+    }
+    auto tag_overflow = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            auto saved = tags.save(
+                tx, Tag(TagId{}, ids.user, "Overflow"));
+            return saved ? RepositoryVoidResult{}
+                         : RepositoryVoidResult(std::unexpected(saved.error()));
+        });
+    ASSERT_FALSE(tag_overflow.has_value());
+    EXPECT_EQ(
+        tag_overflow.error().status, RepositoryStatus::ResourceLimitExceeded);
+    const auto deleted_tag = store_->tags.at(deleted_tag_id.value());
+    auto tag_restore = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            auto saved = tags.save(
+                tx, Tag(
+                    deleted_tag.id(), deleted_tag.owner(), deleted_tag.name(),
+                    std::nullopt, deleted_tag.created_at(), now));
+            return saved ? RepositoryVoidResult{}
+                         : RepositoryVoidResult(std::unexpected(saved.error()));
+        });
+    ASSERT_TRUE(tag_restore.has_value()) << tag_restore.error().message;
+    EXPECT_FALSE(store_->tags.at(deleted_tag_id.value()).is_deleted());
 }
 
 // ---- Balance cache rebuild ----

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "pfh/domain/repositories/i_tag_repository.h"
+#include "pfh/domain/resource_limits.h"
 #include "pfh/infrastructure/persistence/in_memory_store.h"
 
 #include <algorithm>
@@ -149,6 +150,15 @@ public:
             }
             store_.staged_tags.insert_or_assign(tag.id().value(), tag);
             return tag.id();
+        }
+        const auto tags = merged_tags();
+        const auto count = std::count_if(
+            tags.begin(), tags.end(), [&](const auto& item) {
+                return item.second.owner() == tag.owner();
+            });
+        if (static_cast<std::size_t>(count) >= domain::kMaximumTagsPerUser) {
+            return std::unexpected(domain::RepositoryError::resource_limit(
+                "Tag limit reached for user"));
         }
         const auto id = domain::TagId(store_.next_tag_id++);
         store_.staged_tags.emplace(

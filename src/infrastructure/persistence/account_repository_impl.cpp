@@ -8,6 +8,7 @@
 
 #include "pfh/infrastructure/persistence/postgres_repository_support.h"
 #include "pfh/infrastructure/persistence/postgres_result_set.h"
+#include "pfh/domain/resource_limits.h"
 
 #include <nlohmann/json.hpp>
 
@@ -527,7 +528,9 @@ domain::RepositoryResult<domain::AccountId> AccountRepositoryImpl::save(
 
     try {
         const auto owner_result = transaction.execSqlSync(
-            "SELECT 1 FROM users WHERE id = $1",
+            account.id().is_valid()
+                ? "SELECT 1 FROM users WHERE id = $1"
+                : "SELECT 1 FROM users WHERE id = $1 FOR UPDATE",
             account.owner().value());
         if (owner_result.empty()) {
             return std::unexpected(domain::RepositoryError::not_found(
@@ -535,6 +538,18 @@ domain::RepositoryResult<domain::AccountId> AccountRepositoryImpl::save(
         }
 
         if (!account.id().is_valid()) {
+            const auto count = transaction.execSqlSync(
+                "SELECT COUNT(*) FROM accounts WHERE user_id = $1",
+                account.owner().value());
+            if (count.empty()) {
+                return std::unexpected(domain::RepositoryError::database(
+                    "Account count returned no row"));
+            }
+            if (static_cast<std::size_t>(pg::getBigInt(count[0], 0)) >=
+                domain::kMaximumAccountsPerUser) {
+                return std::unexpected(domain::RepositoryError::resource_limit(
+                    "Account limit reached for user"));
+            }
             constexpr const char* kInsertSql = R"SQL(
                 INSERT INTO accounts (
                     user_id, name, type, subtype, category, currency_code,

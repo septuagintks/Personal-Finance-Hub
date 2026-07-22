@@ -52,6 +52,7 @@ int HttpResponseMapper::status_for(application::ErrorCode code) noexcept {
     case ErrorCode::CrossCurrencyWithoutRate:
     case ErrorCode::CategoryBoardMismatch:
     case ErrorCode::ArchivedAccountOperation:
+    case ErrorCode::ResourceLimitExceeded:
         return 422;
     case ErrorCode::ExternalServiceError:
         return 502;
@@ -96,6 +97,7 @@ std::string HttpResponseMapper::code_for(application::ErrorCode code) {
     case ErrorCode::CrossCurrencyWithoutRate: return "CROSS_CURRENCY_WITHOUT_RATE";
     case ErrorCode::CategoryBoardMismatch: return "CATEGORY_BOARD_MISMATCH";
     case ErrorCode::ArchivedAccountOperation: return "ARCHIVED_ACCOUNT_OPERATION";
+    case ErrorCode::ResourceLimitExceeded: return "RESOURCE_LIMIT_EXCEEDED";
     case ErrorCode::ExternalServiceError: return "EXTERNAL_SERVICE_ERROR";
     case ErrorCode::InfrastructureFailure: return "INFRASTRUCTURE_FAILURE";
     case ErrorCode::DatabaseError: return "DATABASE_ERROR";

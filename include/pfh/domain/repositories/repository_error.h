@@ -16,6 +16,7 @@ namespace pfh::domain {
 enum class RepositoryStatus {
     NotFound,
     ValidationError,
+    ResourceLimitExceeded,
     Conflict,
     DatabaseError
 };
@@ -33,6 +34,11 @@ struct RepositoryError {
 
     [[nodiscard]] static RepositoryError validation(std::string message) {
         return RepositoryError(RepositoryStatus::ValidationError, std::move(message));
+    }
+
+    [[nodiscard]] static RepositoryError resource_limit(std::string message) {
+        return RepositoryError(
+            RepositoryStatus::ResourceLimitExceeded, std::move(message));
     }
 
     [[nodiscard]] static RepositoryError conflict(std::string message) {

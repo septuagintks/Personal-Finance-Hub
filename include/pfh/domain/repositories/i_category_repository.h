@@ -48,8 +48,11 @@ public:
         CategoryId id,
         UserId user_id) = 0;
 
-    /// @brief Lock the identity used by create-or-restore. System categories
-    /// match by template id; user categories match by board, parent and name.
+    /// @brief Lock the owning user quota row and the identity used by
+    /// create-or-restore. System categories match by template id; user
+    /// categories match by board, parent and name. Create use cases must call
+    /// this before locking a parent so all category creates share one lock
+    /// order.
     [[nodiscard]] virtual RepositoryResult<Category> find_identity_for_update(
         ITransactionContext& tx,
         UserId user_id,

@@ -37,6 +37,9 @@ public:
         TagId tag_id,
         UserId user_id) = 0;
 
+    /// @brief Lock the owning user quota row and the tag identity used by
+    /// create-or-restore. Create use cases call this before save so concurrent
+    /// new identities cannot exceed the per-user quota.
     [[nodiscard]] virtual RepositoryResult<Tag> find_by_name_for_update(
         ITransactionContext& tx,
         UserId user_id,

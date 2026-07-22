@@ -9,6 +9,7 @@
 #pragma once
 
 #include "pfh/domain/repositories/i_category_repository.h"
+#include "pfh/domain/resource_limits.h"
 #include "pfh/infrastructure/persistence/in_memory_store.h"
 #include <algorithm>
 #include <optional>
@@ -263,6 +264,17 @@ public:
 
         // Create path: invalid id => assign a new one.
         if (!category.id().is_valid()) {
+            const auto categories = merged();
+            const auto count = std::count_if(
+                categories.begin(), categories.end(),
+                [&](const auto& item) {
+                    return item.second.owner() == category.owner();
+                });
+            if (static_cast<std::size_t>(count) >=
+                domain::kMaximumCategoriesPerUser) {
+                return std::unexpected(domain::RepositoryError::resource_limit(
+                    "Category limit reached for user"));
+            }
             const auto id_value = store_.next_category_id++;
             domain::Category created(
                 domain::CategoryId(id_value),

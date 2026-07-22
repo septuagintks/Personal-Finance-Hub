@@ -2,6 +2,7 @@
 
 #include "pfh/application/services/auth_service.h"
 #include "pfh/application/services/finance_application_service.h"
+#include "pfh/domain/resource_limits.h"
 #include "pfh/infrastructure/persistence/in_memory_audit_log_repository.h"
 #include "pfh/infrastructure/persistence/in_memory_auth_session_repository.h"
 #include "pfh/infrastructure/persistence/in_memory_registration_defaults_repository.h"
@@ -1789,6 +1790,135 @@ TEST_F(ResourceApiTest, NonFinancialCreatesReplayExactlyOncePerTenant) {
         tag_key);
     ASSERT_EQ(tag.status, 201) << tag.body;
     EXPECT_EQ(tag.body, tag_replay.body);
+}
+
+TEST_F(ResourceApiTest, UserResourceQuotasAreStableAndIdempotent) {
+    const auto registered = register_user("resource-quota@example.com");
+    const auto token = registered["accessToken"].get<std::string>();
+    const auto user_id = UserId(registered["userId"].get<std::int64_t>());
+    const auto now = clock_.now();
+
+    const nlohmann::json account_request{
+        {"name", "Quota Wallet"}, {"type", "digital_wallet"},
+        {"subtype", "wallet"}, {"currencyCode", "CNY"},
+        {"description", ""}};
+    const std::map<std::string, std::string> account_key{
+        {"Idempotency-Key", "quota-account"}};
+    const auto account = request(
+        HttpMethod::Post, "/api/v1/accounts", account_request, token, {},
+        account_key);
+    ASSERT_EQ(account.status, 201) << account.body;
+
+    const nlohmann::json category_request{
+        {"board", "expense"}, {"name", "Quota Category"}};
+    const std::map<std::string, std::string> category_key{
+        {"Idempotency-Key", "quota-category"}};
+    const auto category = request(
+        HttpMethod::Post, "/api/v1/categories", category_request, token, {},
+        category_key);
+    ASSERT_EQ(category.status, 201) << category.body;
+    const auto category_id =
+        nlohmann::json::parse(category.body)["id"].get<std::int64_t>();
+
+    const nlohmann::json tag_request{{"name", "Quota Tag"}};
+    const std::map<std::string, std::string> tag_key{
+        {"Idempotency-Key", "quota-tag"}};
+    const auto tag = request(
+        HttpMethod::Post, "/api/v1/tags", tag_request, token, {}, tag_key);
+    ASSERT_EQ(tag.status, 201) << tag.body;
+    const auto tag_id = nlohmann::json::parse(tag.body)["id"].get<std::int64_t>();
+
+    const auto owned_accounts = [&] {
+        return std::ranges::count_if(store_.accounts, [&](const auto& item) {
+            return item.second.owner() == user_id;
+        });
+    };
+    while (static_cast<std::size_t>(owned_accounts()) <
+           kMaximumAccountsPerUser) {
+        const auto id = AccountId(store_.next_account_id++);
+        store_.accounts.emplace(
+            id.value(),
+            Account(
+                id, user_id, "Quota Account " + id.to_string(),
+                AccountType::Other, "quota", ccy("CNY"), {}, true, now,
+                now, now));
+    }
+    const auto owned_categories = [&] {
+        return std::ranges::count_if(store_.categories, [&](const auto& item) {
+            return item.second.owner() == user_id;
+        });
+    };
+    while (static_cast<std::size_t>(owned_categories()) <
+           kMaximumCategoriesPerUser) {
+        const auto id = CategoryId(store_.next_category_id++);
+        store_.categories.emplace(
+            id.value(),
+            Category(
+                id, user_id, "Quota Category " + id.to_string(),
+                CategoryBoard::Expense, std::nullopt, CategorySource::User,
+                std::nullopt, 0, now, now, now));
+    }
+    const auto owned_tags = [&] {
+        return std::ranges::count_if(store_.tags, [&](const auto& item) {
+            return item.second.owner() == user_id;
+        });
+    };
+    while (static_cast<std::size_t>(owned_tags()) < kMaximumTagsPerUser) {
+        const auto id = TagId(store_.next_tag_id++);
+        store_.tags.emplace(
+            id.value(),
+            Tag(id, user_id, "Quota Tag " + id.to_string(), now, now, now));
+    }
+
+    const auto account_replay = request(
+        HttpMethod::Post, "/api/v1/accounts", account_request, token, {},
+        account_key);
+    const auto category_replay = request(
+        HttpMethod::Post, "/api/v1/categories", category_request, token, {},
+        category_key);
+    const auto tag_replay = request(
+        HttpMethod::Post, "/api/v1/tags", tag_request, token, {},
+        tag_key);
+    ASSERT_EQ(account_replay.status, 201) << account_replay.body;
+    ASSERT_EQ(category_replay.status, 201) << category_replay.body;
+    ASSERT_EQ(tag_replay.status, 201) << tag_replay.body;
+    EXPECT_EQ(account_replay.body, account.body);
+    EXPECT_EQ(category_replay.body, category.body);
+    EXPECT_EQ(tag_replay.body, tag.body);
+
+    const auto expect_limit = [&](const HttpResponse& response) {
+        ASSERT_EQ(response.status, 422) << response.body;
+        EXPECT_EQ(
+            nlohmann::json::parse(response.body)["error_code"],
+            "RESOURCE_LIMIT_EXCEEDED");
+    };
+    auto another_account = account_request;
+    another_account["name"] = "One Too Many";
+    expect_limit(request(
+        HttpMethod::Post, "/api/v1/accounts", another_account, token));
+    expect_limit(request(
+        HttpMethod::Post, "/api/v1/categories",
+        {{"board", "expense"}, {"name", "One Too Many"}}, token));
+    expect_limit(request(
+        HttpMethod::Post, "/api/v1/tags", {{"name", "One Too Many"}},
+        token));
+
+    ASSERT_EQ(request(
+        HttpMethod::Delete,
+        "/api/v1/categories/" + std::to_string(category_id), {}, token).status,
+        204);
+    ASSERT_EQ(request(
+        HttpMethod::Delete, "/api/v1/tags/" + std::to_string(tag_id), {},
+        token).status, 204);
+    const auto restored_category = request(
+        HttpMethod::Post, "/api/v1/categories", category_request, token);
+    const auto restored_tag = request(
+        HttpMethod::Post, "/api/v1/tags", tag_request, token);
+    ASSERT_EQ(restored_category.status, 201) << restored_category.body;
+    ASSERT_EQ(restored_tag.status, 201) << restored_tag.body;
+    EXPECT_EQ(
+        nlohmann::json::parse(restored_category.body)["id"], category_id);
+    EXPECT_EQ(nlohmann::json::parse(restored_tag.body)["id"], tag_id);
 }
 
 TEST_F(ResourceApiTest, MaintenanceAuditAndBalanceRebuildStayTenantScoped) {

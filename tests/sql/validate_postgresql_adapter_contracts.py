@@ -304,6 +304,27 @@ def main() -> int:
         "S09 historical balances must use an ordered tenant-scoped batch aggregation",
         failures,
     )
+    require(
+        "kMaximumAccountsPerUser" in account
+        and "SELECT COUNT(*) FROM accounts WHERE user_id = $1" in account
+        and "SELECT 1 FROM users WHERE id = $1 FOR UPDATE" in account,
+        "Account creates must serialize and enforce the per-user quota",
+        failures,
+    )
+    require(
+        "kMaximumCategoriesPerUser" in category
+        and "SELECT COUNT(*) FROM categories WHERE user_id = $1" in category
+        and "SELECT 1 FROM users WHERE id = $1 FOR UPDATE" in category,
+        "Category creates must serialize and enforce the per-user quota",
+        failures,
+    )
+    require(
+        "kMaximumTagsPerUser" in tag
+        and "SELECT COUNT(*) FROM transaction_tags WHERE user_id = $1" in tag
+        and "SELECT 1 FROM users WHERE id = $1 FOR UPDATE" in tag,
+        "Tag creates must serialize and enforce the per-user quota",
+        failures,
+    )
     transfer_page_start = transaction.find(
         "TransactionRepositoryImpl::find_transfer_page"
     )

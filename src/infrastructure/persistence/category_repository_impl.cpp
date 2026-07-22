@@ -8,6 +8,7 @@
 
 #include "pfh/infrastructure/persistence/postgres_repository_support.h"
 #include "pfh/infrastructure/persistence/postgres_result_set.h"
+#include "pfh/domain/resource_limits.h"
 
 #include <limits>
 #include <optional>
@@ -189,6 +190,12 @@ CategoryRepositoryImpl::find_identity_for_update(
     const std::optional<std::int64_t> parent_value = parent_id.has_value()
         ? std::optional<std::int64_t>(parent_id->value()) : std::nullopt;
     try {
+        const auto owner = (*context)->transaction().execSqlSync(
+            "SELECT 1 FROM users WHERE id = $1 FOR UPDATE", user_id.value());
+        if (owner.empty()) {
+            return std::unexpected(domain::RepositoryError::not_found(
+                "Category owner not found"));
+        }
         const auto result = [&]() {
             if (template_id.has_value()) {
                 const std::string sql = std::string("SELECT ") + kCategoryColumns +
@@ -434,7 +441,9 @@ domain::RepositoryResult<domain::CategoryId> CategoryRepositoryImpl::save(
 
     try {
         const auto owner_result = (*context)->transaction().execSqlSync(
-            "SELECT 1 FROM users WHERE id = $1",
+            category.id().is_valid()
+                ? "SELECT 1 FROM users WHERE id = $1"
+                : "SELECT 1 FROM users WHERE id = $1 FOR UPDATE",
             category.owner().value());
         if (owner_result.empty()) {
             return std::unexpected(domain::RepositoryError::not_found(
@@ -519,6 +528,18 @@ domain::RepositoryResult<domain::CategoryId> CategoryRepositoryImpl::save(
         }
 
         if (!category.id().is_valid()) {
+            const auto count = (*context)->transaction().execSqlSync(
+                "SELECT COUNT(*) FROM categories WHERE user_id = $1",
+                category.owner().value());
+            if (count.empty()) {
+                return std::unexpected(domain::RepositoryError::database(
+                    "Category count returned no row"));
+            }
+            if (static_cast<std::size_t>(pg::getBigInt(count[0], 0)) >=
+                domain::kMaximumCategoriesPerUser) {
+                return std::unexpected(domain::RepositoryError::resource_limit(
+                    "Category limit reached for user"));
+            }
             constexpr const char* kInsertSql = R"SQL(
                 INSERT INTO categories (
                     user_id, name, parent_id, board, source, template_id,

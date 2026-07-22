@@ -14,6 +14,7 @@
 #include "pfh/application/persistence/i_bootstrap_unit_of_work.h"
 #include "pfh/domain/repositories/i_account_repository.h"
 #include "pfh/domain/repositories/i_transaction_repository.h"
+#include "pfh/domain/resource_limits.h"
 #include "pfh/infrastructure/persistence/in_memory_store.h"
 #include <algorithm>
 #include <map>
@@ -372,6 +373,14 @@ public:
 
         // Create path: invalid id means assign new id.
         if (!account.id().is_valid()) {
+            auto existing = find_by_user(account.owner(), std::nullopt);
+            if (!existing) {
+                return std::unexpected(existing.error());
+            }
+            if (existing->size() >= domain::kMaximumAccountsPerUser) {
+                return std::unexpected(domain::RepositoryError::resource_limit(
+                    "Account limit reached for user"));
+            }
             const auto id_value = store_.next_account_id++;
             domain::Account created(
                 domain::AccountId(id_value),

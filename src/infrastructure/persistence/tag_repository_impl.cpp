@@ -6,6 +6,7 @@
 
 #include "pfh/infrastructure/persistence/postgres_repository_support.h"
 #include "pfh/infrastructure/persistence/postgres_result_set.h"
+#include "pfh/domain/resource_limits.h"
 
 #include <nlohmann/json.hpp>
 
@@ -162,6 +163,12 @@ domain::RepositoryResult<domain::Tag> TagRepositoryImpl::find_by_name_for_update
     auto context = postgres::require_transaction(tx_iface, tenant_user_id_);
     if (!context) return std::unexpected(context.error());
     try {
+        const auto owner = (*context)->transaction().execSqlSync(
+            "SELECT 1 FROM users WHERE id = $1 FOR UPDATE", user_id.value());
+        if (owner.empty()) {
+            return std::unexpected(domain::RepositoryError::not_found(
+                "Tag owner not found"));
+        }
         const std::string sql = std::string("SELECT ") + kTagColumns +
             " FROM transaction_tags WHERE user_id = $1 AND name = $2 "
             "FOR UPDATE NOWAIT";
@@ -247,6 +254,25 @@ domain::RepositoryResult<domain::TagId> TagRepositoryImpl::save(
                 return std::unexpected(tag_not_found());
             }
             return tag.id();
+        }
+        const auto owner = (*context)->transaction().execSqlSync(
+            "SELECT 1 FROM users WHERE id = $1 FOR UPDATE",
+            tag.owner().value());
+        if (owner.empty()) {
+            return std::unexpected(domain::RepositoryError::not_found(
+                "Tag owner not found"));
+        }
+        const auto count = (*context)->transaction().execSqlSync(
+            "SELECT COUNT(*) FROM transaction_tags WHERE user_id = $1",
+            tag.owner().value());
+        if (count.empty()) {
+            return std::unexpected(domain::RepositoryError::database(
+                "Tag count returned no row"));
+        }
+        if (static_cast<std::size_t>(pg::getBigInt(count[0], 0)) >=
+            domain::kMaximumTagsPerUser) {
+            return std::unexpected(domain::RepositoryError::resource_limit(
+                "Tag limit reached for user"));
         }
         const auto rows = (*context)->transaction().execSqlSync(
             "INSERT INTO transaction_tags "

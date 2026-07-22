@@ -51,6 +51,8 @@ namespace pfh::application {
         return Error(ErrorCode::NotFound, e.message);
     case RepositoryStatus::ValidationError:
         return Error::validation(e.message);
+    case RepositoryStatus::ResourceLimitExceeded:
+        return Error(ErrorCode::ResourceLimitExceeded, e.message);
     case RepositoryStatus::Conflict:
         return Error::conflict(e.message);
     case RepositoryStatus::DatabaseError:

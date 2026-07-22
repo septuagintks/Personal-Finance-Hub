@@ -18,6 +18,7 @@
 #include "pfh/infrastructure/persistence/in_memory_transaction_repository.h"
 #include "pfh/infrastructure/persistence/in_memory_unit_of_work.h"
 #include "pfh/infrastructure/persistence/in_memory_user_repository.h"
+#include "pfh/domain/resource_limits.h"
 #include "test_support.h"
 #include <gtest/gtest.h>
 #include <functional>
@@ -1636,6 +1637,65 @@ private:
         std::nullopt, false, {}, std::nullopt, std::nullopt};
     result.tags = std::move(tags);
     return result;
+}
+
+TEST_F(UseCaseTest, ResourceQuotaFailuresKeepDedicatedApplicationError) {
+    const auto seeded = seed();
+
+    while (store_->accounts.size() < kMaximumAccountsPerUser) {
+        const auto id = AccountId(store_->next_account_id++);
+        store_->accounts.emplace(
+            id.value(),
+            Account(
+                id, seeded.user, "Account " + id.to_string(),
+                AccountType::Other, "quota", ccy("USD")));
+    }
+    CreateAccountCommand account;
+    account.user_id = seeded.user;
+    account.name = "Overflow account";
+    account.type = AccountType::Other;
+    account.subtype = "quota";
+    account.currency_code = "USD";
+    auto account_result = CreateAccountUseCase(
+        *account_repo_, *audit_repo_, *uow_).execute(account);
+    ASSERT_FALSE(account_result.has_value());
+    EXPECT_EQ(
+        account_result.error().code, ErrorCode::ResourceLimitExceeded);
+
+    while (store_->categories.size() < kMaximumCategoriesPerUser) {
+        const auto id = CategoryId(store_->next_category_id++);
+        store_->categories.emplace(
+            id.value(),
+            Category(
+                id, seeded.user, "Category " + id.to_string(),
+                CategoryBoard::Expense));
+    }
+    CreateCategoryCommand category;
+    category.user_id = seeded.user;
+    category.name = "Overflow category";
+    category.board = CategoryBoard::Expense;
+    auto category_result = CreateCategoryUseCase(
+        *category_repo_, *pref_repo_, *audit_repo_, *uow_).execute(category);
+    ASSERT_FALSE(category_result.has_value());
+    EXPECT_EQ(
+        category_result.error().code, ErrorCode::ResourceLimitExceeded);
+
+    InMemoryTagRepository tags(*store_);
+    while (store_->tags.size() < kMaximumTagsPerUser) {
+        const auto id = TagId(store_->next_tag_id++);
+        store_->tags.emplace(
+            id.value(), Tag(id, seeded.user, "Tag " + id.to_string()));
+    }
+    CreateTagCommand tag;
+    tag.user_id = seeded.user;
+    tag.name = "Overflow tag";
+    auto tag_result = CreateTagUseCase(
+        tags, *audit_repo_, *uow_).execute(tag);
+    ASSERT_FALSE(tag_result.has_value());
+    EXPECT_EQ(tag_result.error().code, ErrorCode::ResourceLimitExceeded);
+    EXPECT_EQ(store_->accounts.size(), kMaximumAccountsPerUser);
+    EXPECT_EQ(store_->categories.size(), kMaximumCategoriesPerUser);
+    EXPECT_EQ(store_->tags.size(), kMaximumTagsPerUser);
 }
 
 using ReportRowFactory =
