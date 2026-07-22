@@ -10,6 +10,14 @@ namespace pfh::application {
 inline constexpr std::size_t kMaxDecimalInputLength = 128;
 inline constexpr std::size_t kMaxDescriptionLength = 4096;
 inline constexpr std::size_t kMaxLocaleTagLength = 16;
+inline constexpr std::size_t kReportPageSize = 200;
+inline constexpr std::size_t kMaximumAggregateReportRows = 100'000;
+inline constexpr std::size_t kMaximumDetailedReportRows = 10'000;
+inline constexpr std::size_t kMaximumReportInputBytes = 64U * 1024U * 1024U;
+inline constexpr std::size_t kMaximumCsvOutputBytes = 32U * 1024U * 1024U;
+inline constexpr std::size_t kMaximumBreakdownBuckets = 10'000;
+inline constexpr std::size_t kMaximumBreakdownExpansions = 100'000;
+inline constexpr std::size_t kMaximumReportMetadataItems = 10'000;
 
 /// Locale tags use a deliberately small ASCII subset at the public boundary:
 /// non-empty alphanumeric segments separated by single hyphens. This accepts

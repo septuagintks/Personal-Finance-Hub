@@ -20,6 +20,7 @@
 #include "pfh/infrastructure/persistence/in_memory_user_repository.h"
 #include "test_support.h"
 #include <gtest/gtest.h>
+#include <functional>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <set>
@@ -1379,6 +1380,9 @@ public:
 
 class CountingTransactionRepository final : public ITransactionRepository {
 public:
+    using PageHandler = std::function<RepositoryResult<TransactionPageResult>(
+        const TransactionPageQuery&)>;
+
     explicit CountingTransactionRepository(ITransactionRepository& delegate)
         : delegate_(delegate) {}
 
@@ -1391,6 +1395,9 @@ public:
     }
     RepositoryResult<TransactionPageResult> find_page(
         const TransactionPageQuery& query) override {
+        ++page_calls;
+        page_queries.push_back(query);
+        if (page_handler) return page_handler(query);
         return delegate_.find_page(query);
     }
     RepositoryResult<Transaction> find_by_id_for_update(
@@ -1483,6 +1490,9 @@ public:
 
     std::size_t find_by_user_calls = 0;
     std::size_t range_calls = 0;
+    std::size_t page_calls = 0;
+    std::vector<TransactionPageQuery> page_queries;
+    PageHandler page_handler;
 
 private:
     ITransactionRepository& delegate_;
@@ -1518,6 +1528,7 @@ public:
         std::chrono::system_clock::time_point from,
         std::chrono::system_clock::time_point to) override {
         ++history_calls;
+        history_ranges.emplace_back(from, to);
         return delegate_.find_history_for_pair(base, target, from, to);
     }
 
@@ -1525,10 +1536,58 @@ public:
     std::size_t historical_calls = 0;
     std::size_t all_calls = 0;
     std::size_t history_calls = 0;
+    std::vector<std::pair<
+        std::chrono::system_clock::time_point,
+        std::chrono::system_clock::time_point>> history_ranges;
 
 private:
     IExchangeRateRepository& delegate_;
 };
+
+[[nodiscard]] TransactionReadModel make_report_row(
+    std::int64_t id,
+    UserId user_id,
+    AccountId account_id,
+    std::chrono::system_clock::time_point occurred_at,
+    std::string description = {},
+    std::string_view currency = "USD",
+    TransactionType type = TransactionType::Income,
+    std::vector<Tag> tags = {}) {
+    TransactionReadModel result{Transaction(
+        TransactionId(id), user_id, account_id, money("1", currency), type,
+        occurred_at, std::move(description)),
+        std::nullopt, false, {}, std::nullopt, std::nullopt};
+    result.tags = std::move(tags);
+    return result;
+}
+
+using ReportRowFactory =
+    std::function<TransactionReadModel(std::int64_t)>;
+
+[[nodiscard]] CountingTransactionRepository::PageHandler
+make_report_page_handler(
+    std::int64_t total_rows,
+    ReportRowFactory factory) {
+    return [total_rows, factory = std::move(factory)](
+               const TransactionPageQuery& query)
+        -> RepositoryResult<TransactionPageResult> {
+        const auto first_id = query.before.has_value()
+            ? query.before->id.value() - 1
+            : total_rows;
+        const auto available = first_id > 0
+            ? static_cast<std::size_t>(first_id)
+            : 0U;
+        const auto count = std::min(query.limit, available);
+        TransactionPageResult page;
+        page.items.reserve(count);
+        for (std::size_t index = 0; index < count; ++index) {
+            page.items.push_back(factory(
+                first_id - static_cast<std::int64_t>(index)));
+        }
+        page.has_more = available > count;
+        return page;
+    };
+}
 } // namespace
 
 TEST_F(UseCaseTest, NetWorth_WhenRateRepositoryFails_ReturnsInfrastructureFailure) {
@@ -1586,7 +1645,8 @@ TEST_F(UseCaseTest, ReportsBatchTransactionsAndCacheRateHistoryPerRequest) {
     const auto now = sample_time() + std::chrono::days(1);
     auto dashboard = reports.dashboard_summary(s.user, now);
     ASSERT_TRUE(dashboard.has_value()) << dashboard.error().message;
-    EXPECT_EQ(transactions.range_calls, 1U);
+    EXPECT_EQ(transactions.page_calls, 1U);
+    EXPECT_EQ(transactions.range_calls, 0U);
     EXPECT_EQ(transactions.find_by_user_calls, 0U);
     EXPECT_EQ(rates.history_calls, 2U);
     EXPECT_EQ(rates.historical_calls, 0U);
@@ -1595,9 +1655,188 @@ TEST_F(UseCaseTest, ReportsBatchTransactionsAndCacheRateHistoryPerRequest) {
 
     auto trend = reports.cash_flow_trend(s.user, 2024, 6, 2024, 6);
     ASSERT_TRUE(trend.has_value()) << trend.error().message;
-    EXPECT_EQ(transactions.range_calls, 2U);
+    EXPECT_EQ(transactions.page_calls, 2U);
+    EXPECT_EQ(transactions.range_calls, 0U);
     EXPECT_EQ(transactions.find_by_user_calls, 0U);
     EXPECT_EQ(rates.history_calls, 4U);
+}
+
+TEST_F(UseCaseTest, ReportsScanTransactionsWithBoundedKeysetPages) {
+    const auto seeded = seed();
+    CountingTransactionRepository transactions(*tx_repo_);
+    transactions.page_handler = make_report_page_handler(
+        401,
+        [=](std::int64_t id) {
+            return make_report_row(
+                id, seeded.user, seeded.cash, sample_time());
+        });
+    ReportQueryService reports(
+        *account_repo_, transactions, *rate_repo_, *pref_repo_);
+
+    auto result = reports.cash_flow(
+        seeded.user, sample_time() - std::chrono::hours(1),
+        sample_time() + std::chrono::hours(1));
+
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->income_total, "401");
+    EXPECT_EQ(transactions.page_calls, 3U);
+    EXPECT_EQ(transactions.range_calls, 0U);
+    ASSERT_EQ(transactions.page_queries.size(), 3U);
+    EXPECT_FALSE(transactions.page_queries[0].before.has_value());
+    ASSERT_TRUE(transactions.page_queries[1].before.has_value());
+    ASSERT_TRUE(transactions.page_queries[2].before.has_value());
+    EXPECT_EQ(transactions.page_queries[1].before->id, TransactionId(202));
+    EXPECT_EQ(transactions.page_queries[2].before->id, TransactionId(2));
+    for (const auto& query : transactions.page_queries) {
+        EXPECT_EQ(query.limit, kReportPageSize);
+    }
+}
+
+TEST_F(UseCaseTest, ReportAnalysisRejectsRowsBeyondDetailedBudget) {
+    const auto seeded = seed();
+    CountingTransactionRepository transactions(*tx_repo_);
+    transactions.page_handler = make_report_page_handler(
+        static_cast<std::int64_t>(kMaximumDetailedReportRows + 1U),
+        [=](std::int64_t id) {
+            return make_report_row(
+                id, seeded.user, seeded.cash, sample_time());
+        });
+    ReportQueryService reports(
+        *account_repo_, transactions, *rate_repo_, *pref_repo_);
+
+    auto result = reports.analysis(ReportAnalysisQuery{
+        seeded.user, 2024, 6, 2024, 6, ReportDimension::Account},
+        sample_time() + std::chrono::days(1));
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::ValidationError);
+    EXPECT_NE(result.error().message.find("row limit"), std::string::npos);
+    EXPECT_EQ(transactions.range_calls, 0U);
+}
+
+TEST_F(UseCaseTest, CashFlowRejectsAggregateInputBeyondByteBudget) {
+    const auto seeded = seed();
+    const std::string description(kMaxDescriptionLength, 'x');
+    CountingTransactionRepository transactions(*tx_repo_);
+    transactions.page_handler = make_report_page_handler(
+        17'000,
+        [=](std::int64_t id) {
+            return make_report_row(
+                id, seeded.user, seeded.cash, sample_time(), description);
+        });
+    ReportQueryService reports(
+        *account_repo_, transactions, *rate_repo_, *pref_repo_);
+
+    auto result = reports.cash_flow(
+        seeded.user, sample_time() - std::chrono::hours(1),
+        sample_time() + std::chrono::hours(1));
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::ValidationError);
+    EXPECT_NE(result.error().message.find("input byte"), std::string::npos);
+}
+
+TEST_F(UseCaseTest, TagBreakdownRejectsExpansionBeyondBudget) {
+    const auto seeded = seed();
+    std::vector<Tag> tags;
+    tags.reserve(kMaxTagsPerTransaction);
+    for (std::size_t index = 0; index < kMaxTagsPerTransaction; ++index) {
+        tags.emplace_back(
+            TagId(static_cast<std::int64_t>(index + 1U)), seeded.user,
+            "tag-" + std::to_string(index + 1U));
+    }
+    const auto row_count =
+        kMaximumBreakdownExpansions / kMaxTagsPerTransaction + 1U;
+    CountingTransactionRepository transactions(*tx_repo_);
+    transactions.page_handler = make_report_page_handler(
+        static_cast<std::int64_t>(row_count),
+        [=](std::int64_t id) {
+            return make_report_row(
+                id, seeded.user, seeded.cash, sample_time(), {}, "USD",
+                TransactionType::Income, tags);
+        });
+    ReportQueryService reports(
+        *account_repo_, transactions, *rate_repo_, *pref_repo_);
+
+    auto result = reports.analysis(ReportAnalysisQuery{
+        seeded.user, 2024, 6, 2024, 6, ReportDimension::Tag},
+        sample_time() + std::chrono::days(1));
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::ValidationError);
+    EXPECT_NE(result.error().message.find("tag expansion"), std::string::npos);
+}
+
+TEST_F(UseCaseTest, CsvExportRejectsActualOutputBeyondByteBudget) {
+    const auto seeded = seed();
+    const std::string description(kMaxDescriptionLength, '"');
+    CountingTransactionRepository transactions(*tx_repo_);
+    transactions.page_handler = make_report_page_handler(
+        4'200,
+        [=](std::int64_t id) {
+            return make_report_row(
+                id, seeded.user, seeded.cash, sample_time(), description);
+        });
+    ReportQueryService reports(
+        *account_repo_, transactions, *rate_repo_, *pref_repo_);
+    TransactionListQuery query;
+    query.user_id = seeded.user;
+    query.occurred_from = sample_time() - std::chrono::hours(1);
+    query.occurred_to = sample_time() + std::chrono::hours(1);
+
+    auto result = reports.export_transactions_csv(query);
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::ValidationError);
+    EXPECT_NE(result.error().message.find("CSV output byte"), std::string::npos);
+}
+
+TEST_F(UseCaseTest, HistoricalRateCacheLoadsAtMostOneCalendarMonthPerQuery) {
+    namespace ch = std::chrono;
+    const auto seeded = seed();
+    const auto january = ch::time_point_cast<ch::system_clock::duration>(
+        ch::sys_days{ch::year{2015} / ch::month{1} / ch::day{15}} +
+        ch::hours(12));
+    const auto december = ch::time_point_cast<ch::system_clock::duration>(
+        ch::sys_days{ch::year{2024} / ch::month{12} / ch::day{15}} +
+        ch::hours(12));
+    auto rates_written = uow_->execute_in_transaction(
+        [&](ITransactionContext& tx) -> RepositoryVoidResult {
+            for (const auto at : {january, december}) {
+                auto value = ExchangeRate::create(
+                    ccy("USD"), ccy("CNY"), dec("7"),
+                    at - ch::days(1), "Test");
+                if (!value) {
+                    return std::unexpected(RepositoryError::validation(
+                        value.error().message));
+                }
+                auto appended = rate_repo_->append(tx, *value);
+                if (!appended) return std::unexpected(appended.error());
+            }
+            return {};
+        });
+    ASSERT_TRUE(rates_written.has_value()) << rates_written.error().message;
+
+    CountingTransactionRepository transactions(*tx_repo_);
+    transactions.page_handler = make_report_page_handler(
+        2,
+        [=](std::int64_t id) {
+            return make_report_row(
+                id, seeded.user, seeded.cny_wallet,
+                id == 2 ? december : january, {}, "CNY");
+        });
+    CountingRateRepository rates(*rate_repo_);
+    ReportQueryService reports(
+        *account_repo_, transactions, rates, *pref_repo_);
+
+    auto result = reports.cash_flow_trend(
+        seeded.user, 2015, 1, 2024, 12);
+
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    ASSERT_FALSE(rates.history_ranges.empty());
+    for (const auto& [from, to] : rates.history_ranges) {
+        EXPECT_LE(to - from, ch::days(32));
+    }
 }
 
 // Item 4: a transaction stamped exactly at next-month 00:00 belongs to the

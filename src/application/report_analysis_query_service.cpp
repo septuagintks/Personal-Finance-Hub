@@ -21,8 +21,6 @@ namespace pfh::application {
 
 namespace {
 
-constexpr std::size_t kReportPageSize = 200;
-constexpr std::size_t kMaximumReportRows = 10'000;
 constexpr int kMaximumReportMonths = 120;
 constexpr auto kMaximumExportRange = std::chrono::days(366);
 
@@ -32,85 +30,6 @@ struct BreakdownTotals {
     domain::Decimal income;
     domain::Decimal expense;
 };
-
-[[nodiscard]] bool valid_transaction_type(domain::TransactionType type) {
-    switch (type) {
-    case domain::TransactionType::Income:
-    case domain::TransactionType::Expense:
-    case domain::TransactionType::Transfer:
-    case domain::TransactionType::Adjustment:
-        return true;
-    }
-    return false;
-}
-
-[[nodiscard]] Result<std::vector<domain::TransactionReadModel>> load_report_rows(
-    domain::ITransactionRepository& transactions,
-    const TransactionListQuery& query,
-    bool enforce_export_range) {
-    if (!query.user_id.is_valid() ||
-        (query.account_id.has_value() && !query.account_id->is_valid()) ||
-        (query.category_id.has_value() && !query.category_id->is_valid()) ||
-        (query.tag_id.has_value() && !query.tag_id->is_valid()) ||
-        (query.type.has_value() && !valid_transaction_type(*query.type))) {
-        return err(Error::validation("Report filters are invalid"));
-    }
-    if (query.keyword.size() > 128U) {
-        return err(Error::validation("keyword exceeds 128 characters"));
-    }
-    if (!query.occurred_from.has_value() || !query.occurred_to.has_value()) {
-        return err(Error::validation("from and to are required"));
-    }
-    if (query.occurred_from.has_value() && query.occurred_to.has_value()) {
-        if (*query.occurred_from > *query.occurred_to) {
-            return err(Error::validation("from cannot be later than to"));
-        }
-        if (enforce_export_range &&
-            *query.occurred_to - *query.occurred_from > kMaximumExportRange) {
-            return err(Error::validation(
-                "Report transaction range cannot exceed 366 days"));
-        }
-    }
-
-    domain::TransactionPageQuery page_query;
-    page_query.user_id = query.user_id;
-    page_query.account_id = query.account_id;
-    page_query.type = query.type;
-    page_query.category_id = query.category_id;
-    page_query.tag_id = query.tag_id;
-    page_query.occurred_from = query.occurred_from;
-    page_query.occurred_to = query.occurred_to;
-    page_query.keyword = query.keyword;
-    page_query.limit = kReportPageSize;
-
-    std::vector<domain::TransactionReadModel> rows;
-    while (true) {
-        auto page = transactions.find_page(page_query);
-        if (!page) return err(from_repository(page.error()));
-        if (rows.size() + page->items.size() > kMaximumReportRows ||
-            (rows.size() + page->items.size() == kMaximumReportRows &&
-             page->has_more)) {
-            return err(Error::validation(
-                "Report exceeds 10000 rows; narrow the requested range"));
-        }
-        if (page->has_more && page->items.empty()) {
-            return err(Error::infrastructure_failure(
-                "Report pagination did not advance"));
-        }
-        const auto has_more = page->has_more;
-        std::optional<domain::TransactionPageCursor> next;
-        if (has_more) {
-            const auto& last = page->items.back().transaction;
-            next = domain::TransactionPageCursor{
-                last.occurred_at(), last.id()};
-        }
-        std::move(
-            page->items.begin(), page->items.end(), std::back_inserter(rows));
-        if (!has_more) break;
-        page_query.before = *next;
-    }
-    return rows;
-}
 
 [[nodiscard]] std::string transaction_type_text(domain::TransactionType type) {
     switch (type) {
@@ -140,16 +59,31 @@ struct BreakdownTotals {
     return value;
 }
 
-[[nodiscard]] std::string csv_cell(std::string_view value) {
-    std::string result;
-    result.reserve(value.size() + 2U);
-    result.push_back('"');
-    for (const char character : value) {
-        if (character == '"') result.push_back('"');
-        result.push_back(character);
+[[nodiscard]] bool append_csv_cell(
+    std::string& output,
+    std::string_view value,
+    bool prepend_comma) {
+    const auto quotes = static_cast<std::size_t>(
+        std::count(value.begin(), value.end(), '"'));
+    const std::size_t punctuation = prepend_comma ? 3U : 2U;
+    if (value.size() > kMaximumCsvOutputBytes ||
+        quotes > kMaximumCsvOutputBytes - value.size() ||
+        punctuation > kMaximumCsvOutputBytes - value.size() - quotes) {
+        return false;
     }
-    result.push_back('"');
-    return result;
+    const auto required = value.size() + quotes + punctuation;
+    if (output.size() > kMaximumCsvOutputBytes ||
+        required > kMaximumCsvOutputBytes - output.size()) {
+        return false;
+    }
+    if (prepend_comma) output.push_back(',');
+    output.push_back('"');
+    for (const char character : value) {
+        if (character == '"') output.push_back('"');
+        output.push_back(character);
+    }
+    output.push_back('"');
+    return true;
 }
 
 [[nodiscard]] std::string local_rfc3339(
@@ -247,28 +181,27 @@ Result<ReportAnalysisDto> ReportQueryService::analysis(
     row_query.user_id = query.user_id;
     row_query.occurred_from = windows.front().first;
     row_query.occurred_to = std::min(windows.back().second, valuation_at);
-    auto rows = load_report_rows(transactions_, row_query, false);
-    if (!rows) return err(rows.error());
 
     auto all_accounts = accounts_.find_by_user(query.user_id, std::nullopt);
     if (!all_accounts) return err(from_repository(all_accounts.error()));
+    if (all_accounts->size() > kMaximumReportMetadataItems) {
+        return err(Error::validation(
+            "Report account metadata limit exceeded"));
+    }
     std::map<std::int64_t, domain::Account> account_by_id;
     for (auto& account : *all_accounts) {
-        account_by_id.emplace(account.id().value(), std::move(account));
-    }
-
-    std::map<std::int64_t, domain::Category> category_by_id;
-    if (categories_ != nullptr) {
-        auto categories =
-            categories_->find_all_for_user_including_deleted(query.user_id);
-        if (!categories) return err(from_repository(categories.error()));
-        for (auto& category : *categories) {
-            category_by_id.emplace(category.id().value(), std::move(category));
+        const auto [_, inserted] = account_by_id.emplace(
+            account.id().value(), std::move(account));
+        if (!inserted) {
+            return err(Error::infrastructure_failure(
+                "Duplicate account metadata was returned"));
         }
     }
 
-    const auto cache_end = std::max(valuation_at, windows.back().second);
-    HistoricalRateCache rates(rates_, windows.front().first, cache_end);
+    auto categories = load_report_categories(query.user_id);
+    if (!categories) return err(categories.error());
+
+    HistoricalRateCache rates(rates_);
     ReportAnalysisDto result;
     result.base_currency = preference->base_currency().code();
     result.valuation_at = valuation_at;
@@ -318,13 +251,23 @@ Result<ReportAnalysisDto> ReportQueryService::analysis(
     auto zero = domain::Decimal::from_integer(0);
     if (!zero) return err(from_domain(zero.error()));
     std::map<std::string, BreakdownTotals> totals;
+    std::size_t breakdown_expansions = 0;
     const auto add_bucket = [&](
         const std::string& key,
         const std::string& label,
         const domain::Decimal& amount,
         bool income) -> VoidResult {
-        auto [position, inserted] = totals.try_emplace(
-            key, BreakdownTotals{key, label, *zero, *zero});
+        auto position = totals.find(key);
+        bool inserted = false;
+        if (position == totals.end()) {
+            if (totals.size() >= kMaximumBreakdownBuckets) {
+                return err(Error::validation(
+                    "Report breakdown bucket limit exceeded"));
+            }
+            position = totals.emplace(
+                key, BreakdownTotals{key, label, *zero, *zero}).first;
+            inserted = true;
+        }
         if (!inserted && position->second.label.empty()) {
             position->second.label = label;
         }
@@ -338,9 +281,13 @@ Result<ReportAnalysisDto> ReportQueryService::analysis(
     };
 
     rates.reset_evidence();
-    for (const auto& row : *rows) {
+    auto visited = visit_transaction_pages(
+        row_query,
+        kMaximumDetailedReportRows,
+        kMaximumReportInputBytes,
+        [&](const domain::TransactionReadModel& row) -> VoidResult {
         const auto& transaction = row.transaction;
-        if (transaction.type() == domain::TransactionType::Transfer) continue;
+        if (transaction.type() == domain::TransactionType::Transfer) return ok();
         auto converted = convert_to_base(
             transaction.amount(), preference->base_currency(),
             transaction.occurred_at(), rates);
@@ -351,78 +298,87 @@ Result<ReportAnalysisDto> ReportQueryService::analysis(
         const bool expense = transaction.type() == domain::TransactionType::Expense ||
             (transaction.type() == domain::TransactionType::Adjustment &&
              converted->is_negative());
-        if (!income && !expense) continue;
+        if (!income && !expense) return ok();
         const auto magnitude = converted->is_negative()
             ? converted->amount().negated() : converted->amount();
 
-        std::vector<std::pair<std::string, std::string>> buckets;
         if (query.dimension == ReportDimension::Account) {
             const auto account = account_by_id.find(
                 transaction.account_id().value());
-            buckets.emplace_back(
+            ++breakdown_expansions;
+            return add_bucket(
                 "account:" + transaction.account_id().to_string(),
                 account == account_by_id.end()
                     ? transaction.account_id().to_string()
-                    : account->second.name());
-        } else if (query.dimension == ReportDimension::Tag) {
+                    : account->second.name(),
+                magnitude, income);
+        }
+        if (query.dimension == ReportDimension::Tag) {
+            const auto expansion_count = std::max<std::size_t>(1U, row.tags.size());
+            if (breakdown_expansions > kMaximumBreakdownExpansions ||
+                expansion_count >
+                    kMaximumBreakdownExpansions - breakdown_expansions) {
+                return err(Error::validation(
+                    "Report tag expansion limit exceeded"));
+            }
+            breakdown_expansions += expansion_count;
             if (row.tags.empty()) {
-                buckets.emplace_back("tag:untagged", "Untagged");
+                return add_bucket(
+                    "tag:untagged", "Untagged", magnitude, income);
+            }
+            for (const auto& tag : row.tags) {
+                if (auto added = add_bucket(
+                        "tag:" + tag.id().to_string(), tag.name(),
+                        magnitude, income);
+                    !added) {
+                    return added;
+                }
+            }
+            return ok();
+        }
+
+        ++breakdown_expansions;
+        std::optional<domain::CategoryId> root = transaction.category_id();
+        std::string label = "Uncategorized";
+        if (root.has_value() && categories_ != nullptr) {
+            auto current = categories->find(root->value());
+            if (current == categories->end()) {
+                root = std::nullopt;
             } else {
-                for (const auto& tag : row.tags) {
-                    buckets.emplace_back(
-                        "tag:" + tag.id().to_string(), tag.name());
-                }
-            }
-        } else {
-            std::optional<domain::CategoryId> root = transaction.category_id();
-            std::string label = "Uncategorized";
-            if (root.has_value() && categories_ != nullptr) {
-                auto current = category_by_id.find(root->value());
-                if (current == category_by_id.end()) {
-                    root = std::nullopt;
-                } else {
-                    std::set<std::int64_t> visited;
-                    bool resolved = false;
-                    for (int depth = 0;
-                         depth < domain::kMaxCategoryTreeDepth;
-                         ++depth) {
-                        const auto& category = current->second;
-                        if (!visited.insert(category.id().value()).second) {
-                            return err(Error::infrastructure_failure(
-                                "Category parent cycle detected"));
-                        }
-                        if (category.is_root()) {
-                            root = category.id();
-                            label = category.name();
-                            resolved = true;
-                            break;
-                        }
-                        current = category_by_id.find(
-                            category.parent_id()->value());
-                        if (current == category_by_id.end()) {
-                            return err(Error::infrastructure_failure(
-                                "Category parent chain is broken"));
-                        }
-                    }
-                    if (!resolved) {
+                std::set<std::int64_t> parent_ids;
+                bool resolved = false;
+                for (int depth = 0; depth < domain::kMaxCategoryTreeDepth; ++depth) {
+                    const auto& category = current->second;
+                    if (!parent_ids.insert(category.id().value()).second) {
                         return err(Error::infrastructure_failure(
-                            "Category parent chain exceeds 64 levels"));
+                            "Category parent cycle detected"));
+                    }
+                    if (category.is_root()) {
+                        root = category.id();
+                        label = category.name();
+                        resolved = true;
+                        break;
+                    }
+                    current = categories->find(category.parent_id()->value());
+                    if (current == categories->end()) {
+                        return err(Error::infrastructure_failure(
+                            "Category parent chain is broken"));
                     }
                 }
-            } else if (root.has_value()) {
-                label = root->to_string();
+                if (!resolved) {
+                    return err(Error::infrastructure_failure(
+                        "Category parent chain exceeds the supported depth"));
+                }
             }
-            buckets.emplace_back(
-                root.has_value() ? "category:" + root->to_string()
-                                 : "category:uncategorized",
-                label);
+        } else if (root.has_value()) {
+            label = root->to_string();
         }
-        for (const auto& [key, label] : buckets) {
-            if (auto added = add_bucket(
-                    key, label, magnitude, income);
-                !added) return err(added.error());
-        }
-    }
+        return add_bucket(
+            root.has_value() ? "category:" + root->to_string()
+                             : "category:uncategorized",
+            label, magnitude, income);
+    });
+    if (!visited) return err(visited.error());
     any_historical = any_historical ||
         rates.rate_status() == ReportRateStatus::Historical ||
         windows.front().second + ch::hours(24) < valuation_at;
@@ -462,8 +418,16 @@ Result<ReportAnalysisDto> ReportQueryService::analysis(
 
 Result<CsvExportDto> ReportQueryService::export_transactions_csv(
     TransactionListQuery query) {
-    auto rows = load_report_rows(transactions_, query, true);
-    if (!rows) return err(rows.error());
+    if (!query.occurred_from.has_value() || !query.occurred_to.has_value()) {
+        return err(Error::validation("from and to are required"));
+    }
+    if (*query.occurred_from > *query.occurred_to) {
+        return err(Error::validation("from cannot be later than to"));
+    }
+    if (*query.occurred_to - *query.occurred_from > kMaximumExportRange) {
+        return err(Error::validation(
+            "Report transaction range cannot exceed 366 days"));
+    }
     auto preference = preferences_.find_by_user(query.user_id);
     if (!preference) return err(from_repository(preference.error()));
 
@@ -479,7 +443,13 @@ Result<CsvExportDto> ReportQueryService::export_transactions_csv(
 
     std::string csv = "\xEF\xBB\xBF";
     csv += "id,occurred_at,type,account_id,amount,currency_code,category,tags,description,transfer_group_id\r\n";
-    for (const auto& row : *rows) {
+    csv.reserve(64U * 1024U);
+    std::size_t row_count = 0;
+    auto visited = visit_transaction_pages(
+        query,
+        kMaximumDetailedReportRows,
+        kMaximumReportInputBytes,
+        [&](const domain::TransactionReadModel& row) -> VoidResult {
         const auto transaction = to_transaction_dto(row);
         std::string tags;
         for (std::size_t index = 0; index < transaction.tags.size(); ++index) {
@@ -500,11 +470,20 @@ Result<CsvExportDto> ReportQueryService::export_transactions_csv(
             protect_csv_text(transaction.description),
             group};
         for (std::size_t index = 0; index < cells.size(); ++index) {
-            if (index != 0) csv.push_back(',');
-            csv += csv_cell(cells[index]);
+            if (!append_csv_cell(csv, cells[index], index != 0)) {
+                return err(Error::validation(
+                    "CSV output byte limit exceeded; narrow the requested range"));
+            }
+        }
+        if (csv.size() > kMaximumCsvOutputBytes - 2U) {
+            return err(Error::validation(
+                "CSV output byte limit exceeded; narrow the requested range"));
         }
         csv += "\r\n";
-    }
+        ++row_count;
+        return ok();
+    });
+    if (!visited) return err(visited.error());
 
     const auto export_end = *query.occurred_to > *query.occurred_from
         ? *query.occurred_to - std::chrono::seconds(1)
@@ -513,7 +492,7 @@ Result<CsvExportDto> ReportQueryService::export_transactions_csv(
         "transactions-" + local_date(*query.occurred_from, *zone) + "-" +
             local_date(export_end, *zone) + ".csv",
         std::move(csv),
-        rows->size()};
+        row_count};
 }
 
 } // namespace pfh::application

@@ -12,6 +12,7 @@
 #include "pfh/application/dto.h"
 #include "pfh/application/error.h"
 #include "pfh/application/error_mapping.h"
+#include "pfh/application/input_constraints.h"
 #include "pfh/domain/currency_conversion_service.h"
 #include "pfh/domain/repositories/i_account_repository.h"
 #include "pfh/domain/repositories/i_category_repository.h"
@@ -21,6 +22,7 @@
 #include <algorithm>
 #include <chrono>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <optional>
 #include <set>
@@ -36,23 +38,22 @@ private:
 
     class HistoricalRateCache {
     public:
-        HistoricalRateCache(
-            domain::IExchangeRateRepository& rates,
-            TimePoint from,
-            TimePoint to)
-            : rates_(rates),
-              from_(std::min(from, to)),
-              to_(std::max(from, to)) {}
+        explicit HistoricalRateCache(domain::IExchangeRateRepository& rates)
+            : rates_(rates) {}
 
         [[nodiscard]] Result<std::optional<domain::ExchangeRate>> find(
             const domain::Currency& base,
             const domain::Currency& target,
             TimePoint at) {
             const auto key = std::pair{base.code(), target.code()};
-            auto found = histories_.find(key);
-            if (found == histories_.end()) {
+            const auto [chunk_from, chunk_to] = month_chunk(at);
+            auto found = chunks_.find(key);
+            if (found == chunks_.end() ||
+                found->second.from != chunk_from ||
+                found->second.to != chunk_to) {
                 auto history = rates_.find_history_for_pair(
-                    base, target, from_, to_);
+                    base, target, chunk_from,
+                    chunk_to - std::chrono::microseconds(1));
                 if (!history) {
                     return err(from_repository(history.error()));
                 }
@@ -61,10 +62,11 @@ private:
                     [](const auto& lhs, const auto& rhs) {
                         return lhs.fetched_at() < rhs.fetched_at();
                     });
-                found = histories_.emplace(key, std::move(*history)).first;
+                Chunk chunk{chunk_from, chunk_to, std::move(*history)};
+                found = chunks_.insert_or_assign(key, std::move(chunk)).first;
             }
 
-            const auto& history = found->second;
+            const auto& history = found->second.history;
             const auto after = std::upper_bound(
                 history.begin(), history.end(), at,
                 [](TimePoint value, const domain::ExchangeRate& rate) {
@@ -91,12 +93,29 @@ private:
         }
 
     private:
+        struct Chunk {
+            TimePoint from;
+            TimePoint to;
+            std::vector<domain::ExchangeRate> history;
+        };
+
+        [[nodiscard]] static std::pair<TimePoint, TimePoint> month_chunk(
+            TimePoint at) {
+            namespace ch = std::chrono;
+            const auto day = ch::floor<ch::days>(at);
+            const ch::year_month_day date(day);
+            const ch::year_month month{date.year(), date.month()};
+            const ch::sys_days start{month / ch::day{1}};
+            const ch::sys_days next{(month + ch::months{1}) / ch::day{1}};
+            return {
+                ch::time_point_cast<TimePoint::duration>(start),
+                ch::time_point_cast<TimePoint::duration>(next)};
+        }
+
         domain::IExchangeRateRepository& rates_;
-        TimePoint from_;
-        TimePoint to_;
         std::map<
             std::pair<std::string, std::string>,
-            std::vector<domain::ExchangeRate>> histories_;
+            Chunk> chunks_;
         bool used_historical_rate_ = false;
     };
 
@@ -108,6 +127,15 @@ private:
     struct AccountValue {
         domain::AccountType type;
         domain::Money balance;
+    };
+
+    struct ExpenseCategoryAccumulator {
+        std::vector<std::optional<domain::CategoryId>> order;
+        std::map<std::int64_t, domain::Decimal> amounts;
+        std::map<std::int64_t, std::string> names;
+        std::map<std::int64_t, std::pair<TimePoint, domain::TransactionId>>
+            earliest_transactions;
+        domain::Decimal total;
     };
 
 public:
@@ -138,19 +166,32 @@ public:
         if (!pref) {
             return err(from_repository(pref.error()));
         }
-        auto txs = transactions_.find_by_user_in_range(
-            user_id, from, to, false);
-        if (!txs) {
-            return err(from_repository(txs.error()));
-        }
-        const auto bounds = transaction_time_bounds(*txs);
-        HistoricalRateCache rate_cache(rates_, bounds.first, bounds.second);
-        auto converted = convert_transactions(
-            *txs, pref->base_currency(), rate_cache);
-        if (!converted) {
-            return err(converted.error());
-        }
-        return aggregate_cash_flow(*converted, pref->base_currency());
+        auto zero = domain::Decimal::from_integer(0);
+        if (!zero) return err(from_domain(zero.error()));
+        domain::Money income(*zero, pref->base_currency());
+        domain::Money expense(*zero, pref->base_currency());
+        HistoricalRateCache rate_cache(rates_);
+        TransactionListQuery query;
+        query.user_id = user_id;
+        query.occurred_from = from;
+        query.occurred_to = to;
+        auto visited = visit_transaction_pages(
+            query,
+            kMaximumAggregateReportRows,
+            kMaximumReportInputBytes,
+            [&](const domain::TransactionReadModel& row) -> VoidResult {
+                if (row.transaction.type() == domain::TransactionType::Transfer) {
+                    return ok();
+                }
+                auto converted = convert_to_base(
+                    row.transaction.amount(), pref->base_currency(),
+                    row.transaction.occurred_at(), rate_cache);
+                if (!converted) return err(converted.error());
+                const ConvertedTransaction value{&row.transaction, std::move(*converted)};
+                return add_cash_flow(value, income, expense);
+            });
+        if (!visited) return err(visited.error());
+        return cash_flow_from_totals(income, expense, pref->base_currency());
     }
 
     [[nodiscard]] Result<NetWorthDto> net_worth(
@@ -169,7 +210,7 @@ public:
             return err(from_repository(accounts.error()));
         }
 
-        HistoricalRateCache rate_cache(rates_, now, now);
+        HistoricalRateCache rate_cache(rates_);
         auto balances = load_account_values(
             *accounts, pref->base_currency(), now, rate_cache);
         if (!balances) {
@@ -205,40 +246,51 @@ public:
         if (!accounts) {
             return err(from_repository(accounts.error()));
         }
-        auto transactions = transactions_.find_by_user_in_range(
-            user_id, period_start, period_end, false);
-        if (!transactions) {
-            return err(from_repository(transactions.error()));
-        }
-
-        const auto bounds = transaction_time_bounds(*transactions);
-        const auto rate_from = transactions->empty()
-            ? now
-            : std::min(now, bounds.first);
-        const auto rate_to = transactions->empty()
-            ? now
-            : std::max(now, bounds.second);
-        HistoricalRateCache rate_cache(rates_, rate_from, rate_to);
+        HistoricalRateCache rate_cache(rates_);
         auto account_values = load_account_values(
             *accounts, preference->base_currency(), now, rate_cache);
         if (!account_values) {
             return err(account_values.error());
-        }
-        auto converted_transactions = convert_transactions(
-            *transactions, preference->base_currency(), rate_cache);
-        if (!converted_transactions) {
-            return err(converted_transactions.error());
         }
         auto net_worth = aggregate_net_worth(
             *account_values, preference->base_currency(), now);
         if (!net_worth) {
             return err(net_worth.error());
         }
-        auto cash_flow = aggregate_cash_flow(
-            *converted_transactions, preference->base_currency());
-        if (!cash_flow) {
-            return err(cash_flow.error());
-        }
+        auto zero = domain::Decimal::from_integer(0);
+        if (!zero) return err(from_domain(zero.error()));
+        domain::Money income(*zero, preference->base_currency());
+        domain::Money expense(*zero, preference->base_currency());
+        auto categories = load_report_categories(user_id);
+        if (!categories) return err(categories.error());
+        ExpenseCategoryAccumulator category_totals;
+        TransactionListQuery transaction_query;
+        transaction_query.user_id = user_id;
+        transaction_query.occurred_from = period_start;
+        transaction_query.occurred_to = period_end;
+        auto visited = visit_transaction_pages(
+            transaction_query,
+            kMaximumAggregateReportRows,
+            kMaximumReportInputBytes,
+            [&](const domain::TransactionReadModel& row) -> VoidResult {
+                if (row.transaction.type() == domain::TransactionType::Transfer) {
+                    return ok();
+                }
+                auto converted = convert_to_base(
+                    row.transaction.amount(), preference->base_currency(),
+                    row.transaction.occurred_at(), rate_cache);
+                if (!converted) return err(converted.error());
+                const ConvertedTransaction value{&row.transaction, std::move(*converted)};
+                if (auto added = add_cash_flow(value, income, expense); !added) {
+                    return added;
+                }
+                return add_expense_category(
+                    value, *categories, category_totals);
+            });
+        if (!visited) return err(visited.error());
+        auto cash_flow = cash_flow_from_totals(
+            income, expense, preference->base_currency());
+        if (!cash_flow) return err(cash_flow.error());
 
         DashboardSummaryDto dto;
         dto.currency_code = net_worth->currency_code;
@@ -263,8 +315,7 @@ public:
         dto.asset_distribution = std::move(*dist);
 
         // Top expense categories over the current-month window.
-        auto cats = top_expense_categories(
-            user_id, *converted_transactions);
+        auto cats = finalize_expense_categories(category_totals);
         if (!cats) {
             return err(cats.error());
         }
@@ -321,19 +372,6 @@ public:
             periods.push_back(std::move(period));
         }
 
-        auto transactions = transactions_.find_by_user_in_range(
-            user_id, windows.front().first, windows.back().second, false);
-        if (!transactions) {
-            return err(from_repository(transactions.error()));
-        }
-        const auto bounds = transaction_time_bounds(*transactions);
-        HistoricalRateCache rate_cache(rates_, bounds.first, bounds.second);
-        auto converted = convert_transactions(
-            *transactions, preference->base_currency(), rate_cache);
-        if (!converted) {
-            return err(converted.error());
-        }
-
         auto zero = domain::Decimal::from_integer(0);
         if (!zero) {
             return err(from_domain(zero.error()));
@@ -347,25 +385,41 @@ public:
             expenses.emplace_back(*zero, preference->base_currency());
         }
 
-        std::size_t bucket = 0;
-        for (const auto& transaction : *converted) {
-            const auto occurred_at = transaction.transaction->occurred_at();
-            while (bucket < windows.size() &&
-                   occurred_at >= windows[bucket].second) {
-                ++bucket;
-            }
-            if (bucket >= windows.size()) {
-                break;
-            }
-            if (occurred_at < windows[bucket].first) {
-                continue;
-            }
-            auto added = add_cash_flow(
-                transaction, incomes[bucket], expenses[bucket]);
-            if (!added) {
-                return err(added.error());
-            }
-        }
+        HistoricalRateCache rate_cache(rates_);
+        TransactionListQuery transaction_query;
+        transaction_query.user_id = user_id;
+        transaction_query.occurred_from = windows.front().first;
+        transaction_query.occurred_to = windows.back().second;
+        auto visited = visit_transaction_pages(
+            transaction_query,
+            kMaximumAggregateReportRows,
+            kMaximumReportInputBytes,
+            [&](const domain::TransactionReadModel& row) -> VoidResult {
+                const auto& transaction = row.transaction;
+                if (transaction.type() == domain::TransactionType::Transfer) {
+                    return ok();
+                }
+                const auto occurred_at = transaction.occurred_at();
+                auto after = std::upper_bound(
+                    windows.begin(), windows.end(), occurred_at,
+                    [](TimePoint value, const auto& window) {
+                        return value < window.first;
+                    });
+                if (after == windows.begin()) return ok();
+                const auto window = std::prev(after);
+                if (occurred_at < window->first || occurred_at >= window->second) {
+                    return ok();
+                }
+                const auto bucket = static_cast<std::size_t>(
+                    std::distance(windows.begin(), window));
+                auto converted = convert_to_base(
+                    transaction.amount(), preference->base_currency(),
+                    occurred_at, rate_cache);
+                if (!converted) return err(converted.error());
+                const ConvertedTransaction value{&transaction, std::move(*converted)};
+                return add_cash_flow(value, incomes[bucket], expenses[bucket]);
+            });
+        if (!visited) return err(visited.error());
 
         CashFlowTrendDto result;
         result.base_currency = preference->base_currency().code();
@@ -391,40 +445,141 @@ public:
         TransactionListQuery query);
 
 private:
-    [[nodiscard]] static std::pair<TimePoint, TimePoint> transaction_time_bounds(
-        const std::vector<domain::Transaction>& transactions) {
-        if (transactions.empty()) {
-            return {TimePoint{}, TimePoint{}};
+    using CategoryMap = std::map<std::int64_t, domain::Category>;
+
+    [[nodiscard]] static bool valid_transaction_type(
+        domain::TransactionType type) noexcept {
+        switch (type) {
+        case domain::TransactionType::Income:
+        case domain::TransactionType::Expense:
+        case domain::TransactionType::Transfer:
+        case domain::TransactionType::Adjustment:
+            return true;
         }
-        auto earliest = transactions.front().occurred_at();
-        auto latest = earliest;
-        for (const auto& transaction : transactions) {
-            earliest = std::min(earliest, transaction.occurred_at());
-            latest = std::max(latest, transaction.occurred_at());
-        }
-        return {earliest, latest};
+        return false;
     }
 
-    [[nodiscard]] Result<std::vector<ConvertedTransaction>> convert_transactions(
-        const std::vector<domain::Transaction>& transactions,
-        const domain::Currency& base,
-        HistoricalRateCache& rate_cache) const {
-        std::vector<ConvertedTransaction> result;
-        result.reserve(transactions.size());
-        for (const auto& transaction : transactions) {
-            if (transaction.type() == domain::TransactionType::Transfer) {
-                continue;
+    [[nodiscard]] static Result<std::size_t> estimated_transaction_bytes(
+        const domain::TransactionReadModel& row) {
+        std::size_t total = sizeof(domain::TransactionReadModel);
+        const auto add = [&total](std::size_t value) -> bool {
+            if (value > std::numeric_limits<std::size_t>::max() - total) {
+                return false;
             }
-            auto converted = convert_to_base(
-                transaction.amount(), base, transaction.occurred_at(),
-                rate_cache);
-            if (!converted) {
-                return err(converted.error());
-            }
-            result.push_back(ConvertedTransaction{
-                &transaction, std::move(*converted)});
+            total += value;
+            return true;
+        };
+        if (!add(row.transaction.description().size()) ||
+            (row.category_name.has_value() &&
+             !add(row.category_name->size()))) {
+            return err(Error::validation(
+                "Report input size exceeds the supported budget"));
         }
-        return result;
+        for (const auto& tag : row.tags) {
+            if (!add(sizeof(domain::Tag)) || !add(tag.name().size())) {
+                return err(Error::validation(
+                    "Report input size exceeds the supported budget"));
+            }
+        }
+        return total;
+    }
+
+    template <typename Visitor>
+    [[nodiscard]] VoidResult visit_transaction_pages(
+        const TransactionListQuery& query,
+        std::size_t maximum_rows,
+        std::size_t maximum_bytes,
+        Visitor&& visitor) {
+        if (!query.user_id.is_valid() ||
+            (query.account_id.has_value() && !query.account_id->is_valid()) ||
+            (query.category_id.has_value() && !query.category_id->is_valid()) ||
+            (query.tag_id.has_value() && !query.tag_id->is_valid()) ||
+            (query.type.has_value() && !valid_transaction_type(*query.type))) {
+            return err(Error::validation("Report filters are invalid"));
+        }
+        if (query.keyword.size() > 128U) {
+            return err(Error::validation("keyword exceeds 128 characters"));
+        }
+        if (query.occurred_from.has_value() &&
+            query.occurred_to.has_value() &&
+            *query.occurred_from > *query.occurred_to) {
+            return err(Error::validation("from cannot be later than to"));
+        }
+
+        domain::TransactionPageQuery page_query;
+        page_query.user_id = query.user_id;
+        page_query.account_id = query.account_id;
+        page_query.type = query.type;
+        page_query.category_id = query.category_id;
+        page_query.tag_id = query.tag_id;
+        page_query.occurred_from = query.occurred_from;
+        page_query.occurred_to = query.occurred_to;
+        page_query.keyword = query.keyword;
+        page_query.limit = kReportPageSize;
+
+        std::size_t row_count = 0;
+        std::size_t input_bytes = 0;
+        while (true) {
+            auto page = transactions_.find_page(page_query);
+            if (!page) return err(from_repository(page.error()));
+            if (page->items.size() > page_query.limit) {
+                return err(Error::infrastructure_failure(
+                    "Report repository exceeded the requested page size"));
+            }
+            if (page->has_more && page->items.empty()) {
+                return err(Error::infrastructure_failure(
+                    "Report pagination did not advance"));
+            }
+            if (row_count > maximum_rows ||
+                page->items.size() > maximum_rows - row_count ||
+                (row_count + page->items.size() == maximum_rows &&
+                 page->has_more)) {
+                return err(Error::validation(
+                    "Report row limit exceeded; narrow the requested range"));
+            }
+
+            std::size_t page_bytes = 0;
+            for (const auto& row : page->items) {
+                auto estimated = estimated_transaction_bytes(row);
+                if (!estimated) return err(estimated.error());
+                if (input_bytes > maximum_bytes ||
+                    page_bytes > maximum_bytes - input_bytes ||
+                    *estimated > maximum_bytes - input_bytes - page_bytes) {
+                    return err(Error::validation(
+                        "Report input byte limit exceeded; narrow the requested range"));
+                }
+                page_bytes += *estimated;
+            }
+
+            std::optional<domain::TransactionPageCursor> next_cursor;
+            if (page->has_more) {
+                const auto& last = page->items.back().transaction;
+                next_cursor = domain::TransactionPageCursor{
+                    last.occurred_at(), last.id()};
+                if (page_query.before.has_value()) {
+                    const auto& previous = *page_query.before;
+                    const bool advanced =
+                        next_cursor->occurred_at < previous.occurred_at ||
+                        (next_cursor->occurred_at == previous.occurred_at &&
+                         next_cursor->id < previous.id);
+                    if (!advanced) {
+                        return err(Error::infrastructure_failure(
+                            "Report pagination did not advance"));
+                    }
+                }
+            }
+
+            row_count += page->items.size();
+            input_bytes += page_bytes;
+            for (const auto& row : page->items) {
+                if (auto consumed = visitor(row); !consumed) {
+                    return consumed;
+                }
+            }
+            if (!page->has_more) break;
+            page_query.before = *next_cursor;
+        }
+        return ok();
     }
 
     [[nodiscard]] static VoidResult add_cash_flow(
@@ -470,24 +625,6 @@ private:
             income.amount().to_string(),
             expense.amount().to_string(),
             net->amount().to_string()};
-    }
-
-    [[nodiscard]] static Result<CashFlowDto> aggregate_cash_flow(
-        const std::vector<ConvertedTransaction>& transactions,
-        const domain::Currency& base) {
-        auto zero = domain::Decimal::from_integer(0);
-        if (!zero) {
-            return err(from_domain(zero.error()));
-        }
-        domain::Money income(*zero, base);
-        domain::Money expense(*zero, base);
-        for (const auto& transaction : transactions) {
-            auto added = add_cash_flow(transaction, income, expense);
-            if (!added) {
-                return err(added.error());
-            }
-        }
-        return cash_flow_from_totals(income, expense, base);
     }
 
     [[nodiscard]] Result<std::vector<AccountValue>> load_account_values(
@@ -751,154 +888,140 @@ private:
         return result;
     }
 
-    // Aggregate already-converted expense rows by first-level category. The
-    // complete historical tree is loaded once so soft-deleted categories remain
-    // nameable without a per-transaction recursive repository query.
-    [[nodiscard]] Result<std::vector<CategoryBreakdownDto>> top_expense_categories(
-        domain::UserId user_id,
-        const std::vector<ConvertedTransaction>& transactions) {
-        std::map<std::int64_t, domain::Category> category_by_id;
-        if (categories_ != nullptr) {
-            auto categories =
-                categories_->find_all_for_user_including_deleted(user_id);
-            if (!categories) {
-                return err(from_repository(categories.error()));
-            }
-            for (auto& category : *categories) {
-                category_by_id.emplace(category.id().value(), std::move(category));
+    [[nodiscard]] Result<CategoryMap> load_report_categories(
+        domain::UserId user_id) {
+        CategoryMap result;
+        if (categories_ == nullptr) return result;
+        auto categories =
+            categories_->find_all_for_user_including_deleted(user_id);
+        if (!categories) return err(from_repository(categories.error()));
+        if (categories->size() > kMaximumReportMetadataItems) {
+            return err(Error::validation(
+                "Report category metadata limit exceeded"));
+        }
+        for (auto& category : *categories) {
+            const auto [_, inserted] = result.emplace(
+                category.id().value(), std::move(category));
+            if (!inserted) {
+                return err(Error::infrastructure_failure(
+                    "Duplicate category metadata was returned"));
             }
         }
+        return result;
+    }
 
-        auto zero = domain::Decimal::from_integer(0);
-        if (!zero) {
-            return err(from_domain(zero.error()));
-        }
+    [[nodiscard]] VoidResult add_expense_category(
+        const ConvertedTransaction& converted,
+        const CategoryMap& category_by_id,
+        ExpenseCategoryAccumulator& totals) const {
+        const auto& transaction = *converted.transaction;
+        const bool outflow =
+            transaction.type() == domain::TransactionType::Expense ||
+            (transaction.type() == domain::TransactionType::Adjustment &&
+             converted.amount.is_negative());
+        if (!outflow) return ok();
 
-        // Preserve first-seen order for determinism, keyed by the ROLLED-UP
-        // (root) category id value, or -1 for uncategorized.
-        std::vector<std::optional<domain::CategoryId>> order;
-        std::map<std::int64_t, domain::Decimal> by_cat;
-        std::map<std::int64_t, std::string> name_of;
-        domain::Decimal expense_total = *zero;
-
-        auto key_of = [](const std::optional<domain::CategoryId>& c) -> std::int64_t {
-            return c.has_value() ? c->value() : -1;
-        };
-
-        for (const auto& converted : transactions) {
-            const auto& tx = *converted.transaction;
-            // Expense breakdown counts outflows only: every Expense, and
-            // NEGATIVE adjustments (fees/corrections). A positive adjustment is
-            // an inflow and does not belong in a spend breakdown. Income and
-            // transfers are excluded.
-            const bool is_expense = tx.type() == domain::TransactionType::Expense;
-            const bool is_outflow_adjustment =
-                tx.type() == domain::TransactionType::Adjustment;
-            if (!is_expense && !is_outflow_adjustment) {
-                continue;
-            }
-            // Skip positive (inflow) adjustments; they are not spend.
-            if (tx.type() == domain::TransactionType::Adjustment &&
-                !converted.amount.is_negative()) {
-                continue;
-            }
-            auto abs_amt =
-                converted.amount.is_negative()
-                    ? converted.amount.negated()
-                    : converted.amount;
-
-            // Roll the transaction's category up to its first-level parent.
-            std::optional<domain::CategoryId> bucket = tx.category_id();
-            std::string bucket_name;
-            if (categories_ != nullptr && tx.category_id().has_value()) {
-                auto current = category_by_id.find(tx.category_id()->value());
-                if (current == category_by_id.end()) {
-                    // A physically missing historical category cannot be named,
-                    // but the amount still belongs in the report.
-                    bucket = std::nullopt;
-                } else {
-                    std::set<std::int64_t> visited;
-                    bool reached_root = false;
-                    for (int depth = 0;
-                         depth < domain::kMaxCategoryTreeDepth;
-                         ++depth) {
-                        const auto& node = current->second;
-                        if (!visited.insert(node.id().value()).second) {
-                            return err(from_repository(
-                                domain::RepositoryError::database(
-                                    "Category parent cycle detected")));
-                        }
-                        if (node.is_root()) {
-                            bucket = node.id();
-                            bucket_name = node.name();
-                            reached_root = true;
-                            break;
-                        }
-                        current = category_by_id.find(
-                            node.parent_id()->value());
-                        if (current == category_by_id.end()) {
-                            return err(from_repository(
-                                domain::RepositoryError::database(
-                                    "Category parent chain is broken")));
-                        }
+        const auto magnitude = converted.amount.is_negative()
+            ? converted.amount.negated()
+            : converted.amount;
+        std::optional<domain::CategoryId> bucket = transaction.category_id();
+        std::string bucket_name;
+        if (categories_ != nullptr && bucket.has_value()) {
+            auto current = category_by_id.find(bucket->value());
+            if (current == category_by_id.end()) {
+                bucket = std::nullopt;
+            } else {
+                std::set<std::int64_t> visited;
+                bool resolved = false;
+                for (int depth = 0; depth < domain::kMaxCategoryTreeDepth; ++depth) {
+                    const auto& category = current->second;
+                    if (!visited.insert(category.id().value()).second) {
+                        return err(Error::infrastructure_failure(
+                            "Category parent cycle detected"));
                     }
-                    if (!reached_root) {
-                        return err(from_repository(
-                            domain::RepositoryError::database(
-                                "Category parent chain exceeds 64 levels")));
+                    if (category.is_root()) {
+                        bucket = category.id();
+                        bucket_name = category.name();
+                        resolved = true;
+                        break;
+                    }
+                    current = category_by_id.find(category.parent_id()->value());
+                    if (current == category_by_id.end()) {
+                        return err(Error::infrastructure_failure(
+                            "Category parent chain is broken"));
                     }
                 }
+                if (!resolved) {
+                    return err(Error::infrastructure_failure(
+                        "Category parent chain exceeds the supported depth"));
+                }
             }
-
-            const auto k = key_of(bucket);
-            if (by_cat.find(k) == by_cat.end()) {
-                by_cat.emplace(k, *zero);
-                order.push_back(bucket);
-                name_of.emplace(k, bucket_name);
-            }
-            auto sum = by_cat.at(k).add(abs_amt.amount());
-            if (!sum) {
-                return err(from_domain(sum.error()));
-            }
-            by_cat.at(k) = *sum;
-
-            auto tsum = expense_total.add(abs_amt.amount());
-            if (!tsum) {
-                return err(from_domain(tsum.error()));
-            }
-            expense_total = *tsum;
         }
 
+        const auto key = bucket.has_value() ? bucket->value() : -1;
+        auto found = totals.amounts.find(key);
+        if (found == totals.amounts.end()) {
+            if (totals.order.size() >= kMaximumBreakdownBuckets) {
+                return err(Error::validation(
+                    "Report category bucket limit exceeded"));
+            }
+            totals.order.push_back(bucket);
+            totals.names.emplace(key, std::move(bucket_name));
+            found = totals.amounts.emplace(key, domain::Decimal{}).first;
+        }
+        const auto occurrence = std::pair{
+            transaction.occurred_at(), transaction.id()};
+        auto earliest = totals.earliest_transactions.find(key);
+        if (earliest == totals.earliest_transactions.end()) {
+            totals.earliest_transactions.emplace(key, occurrence);
+        } else if (occurrence < earliest->second) {
+            earliest->second = occurrence;
+        }
+        auto sum = found->second.add(magnitude.amount());
+        if (!sum) return err(from_domain(sum.error()));
+        found->second = *sum;
+        auto total = totals.total.add(magnitude.amount());
+        if (!total) return err(from_domain(total.error()));
+        totals.total = *total;
+        return ok();
+    }
+
+    [[nodiscard]] static Result<std::vector<CategoryBreakdownDto>>
+    finalize_expense_categories(const ExpenseCategoryAccumulator& totals) {
         std::vector<CategoryBreakdownDto> result;
-        result.reserve(order.size());
-        for (const auto& cat : order) {
-            const auto k = key_of(cat);
-            const auto amount = by_cat.at(k);
-            auto pct = format_percentage(amount, expense_total);
-            if (!pct) {
-                return err(pct.error());
+        result.reserve(totals.order.size());
+        for (const auto& category : totals.order) {
+            const auto key = category.has_value() ? category->value() : -1;
+            const auto amount = totals.amounts.find(key);
+            const auto name = totals.names.find(key);
+            if (amount == totals.amounts.end() || name == totals.names.end()) {
+                return err(Error::infrastructure_failure(
+                    "Report category aggregation is inconsistent"));
             }
-            CategoryBreakdownDto dto;
-            dto.category_id = cat;
-            // Prefer the resolved root name; fall back to the id string.
-            const auto& resolved = name_of.at(k);
-            dto.category_name =
-                !resolved.empty() ? resolved
-                                  : (cat.has_value() ? cat->to_string() : "");
-            dto.amount = amount.to_string();
-            dto.percentage = *pct;
-            result.push_back(std::move(dto));
+            auto percentage = format_percentage(amount->second, totals.total);
+            if (!percentage) return err(percentage.error());
+            result.push_back(CategoryBreakdownDto{
+                category,
+                !name->second.empty()
+                    ? name->second
+                    : (category.has_value() ? category->to_string() : ""),
+                amount->second.to_string(),
+                std::move(*percentage)});
         }
-        // Largest amount first. Compare by parsed Decimal to avoid string order.
         std::stable_sort(
             result.begin(), result.end(),
-            [](const CategoryBreakdownDto& a, const CategoryBreakdownDto& b) {
-                auto da = domain::Decimal::parse(a.amount);
-                auto db = domain::Decimal::parse(b.amount);
-                if (!da || !db) {
-                    return false;
+            [&totals](const auto& left, const auto& right) {
+                const auto left_key = left.category_id.has_value()
+                    ? left.category_id->value() : -1;
+                const auto right_key = right.category_id.has_value()
+                    ? right.category_id->value() : -1;
+                const auto& left_amount = totals.amounts.at(left_key);
+                const auto& right_amount = totals.amounts.at(right_key);
+                if (left_amount != right_amount) {
+                    return left_amount > right_amount;
                 }
-                return *da > *db;
+                return totals.earliest_transactions.at(left_key) <
+                    totals.earliest_transactions.at(right_key);
             });
         return result;
     }
@@ -913,9 +1036,9 @@ private:
     //   5. USD triangulation           -> USD->from & USD->base, cross-rate
     //   6. otherwise                    -> error (missing rate; NOT latest)
     //
-    // Reproducibility: the request-local cache contains an anchor at-or-before
-    // the report window plus all snapshots inside it. It never falls back to a
-    // future/latest rate.
+    // Reproducibility: the request-local cache loads one UTC calendar-month
+    // chunk at a time, including the latest anchor at-or-before the chunk start.
+    // It never falls back to a future/latest rate.
     [[nodiscard]] Result<domain::Money> convert_to_base(
         const domain::Money& amount,
         const domain::Currency& base,
