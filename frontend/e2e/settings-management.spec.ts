@@ -96,6 +96,7 @@ function installApi(page: Page): void {
     }
     if (path === '/api/v1/categories' && method === 'POST') {
       const body = request.postDataJSON() as { name: string; board: 'income' | 'expense' };
+      await new Promise((resolve) => setTimeout(resolve, 100));
       const created = resource(2, body.name, body.board);
       categories.push(created);
       await json(route, created, 201);
@@ -184,6 +185,8 @@ for (const viewport of [
     const categoryDialog = page.getByRole('dialog', { name: 'New category' });
     await categoryDialog.getByLabel('Name').fill('Travel');
     await categoryDialog.getByRole('button', { name: 'Save' }).click();
+    await expect(categoryDialog.getByRole('button', { name: 'Save' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'New category' })).toBeDisabled();
     const categoryRow = page.locator('.settings-row').filter({
       has: page.locator('strong').filter({ hasText: /^Travel$/ }),
     });

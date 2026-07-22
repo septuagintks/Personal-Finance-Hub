@@ -1,4 +1,4 @@
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
 import {
   createCategory,
@@ -18,17 +18,32 @@ import {
 } from '../services/metadata-api';
 import { createIntentKeyTracker } from '../services/idempotency';
 
+type MetadataResource = 'categories' | 'tags';
+
+interface QueuedMutation {
+  generation: number;
+  resource: MetadataResource;
+  execute(signal: AbortSignal): Promise<unknown>;
+  confirm?: () => void;
+  resolve(value: unknown): void;
+  reject(reason: unknown): void;
+}
+
 export const useMetadataStore = defineStore('metadata', () => {
   const categories = ref<CategoryTree[]>([]);
   const tags = ref<Tag[]>([]);
   const categoryState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const tagState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const mutationCount = ref(0);
+  const mutationPending = computed(() => mutationCount.value > 0);
   let lifecycle = 0;
   let categoryRequest = 0;
   let tagRequest = 0;
   let categoryController: AbortController | null = null;
   let tagController: AbortController | null = null;
-  let actionController: AbortController | null = null;
+  let currentMutationController: AbortController | null = null;
+  let drainingMutations = false;
+  const mutationQueue: QueuedMutation[] = [];
   const categoryCreateIntent = createIntentKeyTracker('category');
   const tagCreateIntent = createIntentKeyTracker('tag');
 
@@ -94,107 +109,159 @@ export const useMetadataStore = defineStore('metadata', () => {
     }
   }
 
-  function beginAction(): { lifecycle: number; controller: AbortController } {
-    actionController?.abort();
-    const controller = new AbortController();
-    actionController = controller;
-    return { lifecycle, controller };
+  function cancelledMutation(): DOMException {
+    return new DOMException('Metadata request belongs to an expired session.', 'AbortError');
   }
 
-  function ensureCurrent(action: { lifecycle: number; controller: AbortController }): void {
+  function ensureMutationCurrent(task: QueuedMutation, controller: AbortController): void {
     if (
-      action.lifecycle !== lifecycle ||
-      actionController !== action.controller ||
-      action.controller.signal.aborted
+      task.generation !== lifecycle ||
+      currentMutationController !== controller ||
+      controller.signal.aborted
     ) {
-      throw new DOMException('Metadata request is no longer current.', 'AbortError');
+      throw cancelledMutation();
     }
-    actionController = null;
   }
 
-  function releaseFailedAction(action: { controller: AbortController }): void {
-    if (actionController === action.controller) actionController = null;
+  async function reloadMutationResource(
+    task: QueuedMutation,
+    controller: AbortController,
+  ): Promise<void> {
+    const load = task.resource === 'categories' ? loadCategories : loadTags;
+    let loaded = await load();
+    ensureMutationCurrent(task, controller);
+    if (!loaded) {
+      loaded = await load();
+      ensureMutationCurrent(task, controller);
+    }
+    if (!loaded) throw cancelledMutation();
   }
 
-  async function createCategoryItem(payload: CreateCategoryRequest): Promise<Category> {
-    const action = beginAction();
-    const intentKey = categoryCreateIntent.keyFor(payload);
-    let result: Category;
+  function finishMutation(): void {
+    mutationCount.value = Math.max(0, mutationCount.value - 1);
+  }
+
+  async function drainMutationQueue(): Promise<void> {
+    if (drainingMutations) return;
+    drainingMutations = true;
     try {
-      result = await createCategory(payload, intentKey, action.controller.signal);
-    } catch (error) {
-      releaseFailedAction(action);
-      throw error;
+      while (mutationQueue.length) {
+        const task = mutationQueue.shift();
+        if (!task) continue;
+        if (task.generation !== lifecycle) {
+          task.reject(cancelledMutation());
+          finishMutation();
+          continue;
+        }
+
+        const controller = new AbortController();
+        currentMutationController = controller;
+        let mutationSucceeded = false;
+        let result: unknown;
+        try {
+          result = await task.execute(controller.signal);
+          ensureMutationCurrent(task, controller);
+          mutationSucceeded = true;
+          await reloadMutationResource(task, controller);
+          task.confirm?.();
+          task.resolve(result);
+        } catch (error) {
+          if (
+            task.generation === lifecycle &&
+            currentMutationController === controller &&
+            !controller.signal.aborted
+          ) {
+            try {
+              await reloadMutationResource(task, controller);
+              if (mutationSucceeded) {
+                task.confirm?.();
+                task.resolve(result);
+                continue;
+              }
+            } catch {
+              // Preserve the original mutation error; the resource state records reload failure.
+            }
+          }
+          task.reject(error);
+        } finally {
+          if (currentMutationController === controller) currentMutationController = null;
+          finishMutation();
+        }
+      }
+    } finally {
+      drainingMutations = false;
+      if (mutationQueue.length) void drainMutationQueue();
     }
-    ensureCurrent(action);
-    categoryCreateIntent.complete(intentKey);
-    await loadCategories();
-    return result;
   }
 
-  async function updateCategoryItem(
-    id: number,
-    name: string,
-    sortOrder: number,
-  ): Promise<Category> {
-    const action = beginAction();
-    const result = await updateCategory(id, { name, sortOrder }, action.controller.signal);
-    ensureCurrent(action);
-    await loadCategories();
-    return result;
+  function enqueueMutation<T>(
+    resource: MetadataResource,
+    execute: (signal: AbortSignal) => Promise<T>,
+    confirm?: () => void,
+  ): Promise<T> {
+    const generation = lifecycle;
+    mutationCount.value += 1;
+    const pending = new Promise<T>((resolve, reject) => {
+      mutationQueue.push({
+        generation,
+        resource,
+        execute,
+        confirm,
+        resolve: (value) => resolve(value as T),
+        reject,
+      });
+    });
+    void drainMutationQueue();
+    return pending;
   }
 
-  async function deleteCategoryItem(id: number): Promise<void> {
-    const action = beginAction();
-    await deleteCategory(id, action.controller.signal);
-    ensureCurrent(action);
-    await loadCategories();
+  function createCategoryItem(payload: CreateCategoryRequest): Promise<Category> {
+    const intentKey = categoryCreateIntent.keyFor(payload);
+    return enqueueMutation(
+      'categories',
+      (signal) => createCategory(payload, intentKey, signal),
+      () => categoryCreateIntent.complete(intentKey),
+    );
   }
 
-  async function restoreCategoryItem(id: number): Promise<void> {
-    const action = beginAction();
-    await restoreCategory(id, action.controller.signal);
-    ensureCurrent(action);
-    await loadCategories();
+  function updateCategoryItem(id: number, name: string, sortOrder: number): Promise<Category> {
+    return enqueueMutation('categories', (signal) =>
+      updateCategory(id, { name, sortOrder }, signal),
+    );
   }
 
-  async function createTagItem(name: string): Promise<Tag> {
-    const action = beginAction();
+  function deleteCategoryItem(id: number): Promise<void> {
+    return enqueueMutation('categories', (signal) => deleteCategory(id, signal));
+  }
+
+  function restoreCategoryItem(id: number): Promise<void> {
+    return enqueueMutation('categories', async (signal) => {
+      await restoreCategory(id, signal);
+    });
+  }
+
+  function createTagItem(name: string): Promise<Tag> {
     const payload = { name };
     const intentKey = tagCreateIntent.keyFor(payload);
-    let result: Tag;
-    try {
-      result = await createTag(payload, intentKey, action.controller.signal);
-    } catch (error) {
-      releaseFailedAction(action);
-      throw error;
-    }
-    ensureCurrent(action);
-    tagCreateIntent.complete(intentKey);
-    await loadTags();
-    return result;
+    return enqueueMutation(
+      'tags',
+      (signal) => createTag(payload, intentKey, signal),
+      () => tagCreateIntent.complete(intentKey),
+    );
   }
 
-  async function updateTagItem(id: number, name: string): Promise<Tag> {
-    const action = beginAction();
-    const result = await updateTag(id, { name }, action.controller.signal);
-    ensureCurrent(action);
-    await loadTags();
-    return result;
+  function updateTagItem(id: number, name: string): Promise<Tag> {
+    return enqueueMutation('tags', (signal) => updateTag(id, { name }, signal));
   }
 
-  async function deleteTagItem(id: number): Promise<void> {
-    const action = beginAction();
-    await deleteTag(id, action.controller.signal);
-    ensureCurrent(action);
-    await loadTags();
+  function deleteTagItem(id: number): Promise<void> {
+    return enqueueMutation('tags', (signal) => deleteTag(id, signal));
   }
 
-  async function restoreTagItem(id: number): Promise<void> {
-    const action = beginAction();
-    await restoreTag(id, action.controller.signal);
-    ensureCurrent(action);
-    await loadTags();
+  function restoreTagItem(id: number): Promise<void> {
+    return enqueueMutation('tags', async (signal) => {
+      await restoreTag(id, signal);
+    });
   }
 
   function clear(): void {
@@ -203,12 +270,17 @@ export const useMetadataStore = defineStore('metadata', () => {
     tagRequest += 1;
     categoryController?.abort();
     tagController?.abort();
-    actionController?.abort();
+    currentMutationController?.abort();
+    const cancelled = cancelledMutation();
+    for (const task of mutationQueue.splice(0)) {
+      task.reject(cancelled);
+      finishMutation();
+    }
     categoryCreateIntent.clear();
     tagCreateIntent.clear();
     categoryController = null;
     tagController = null;
-    actionController = null;
+    currentMutationController = null;
     categories.value = [];
     tags.value = [];
     categoryState.value = 'idle';
@@ -220,6 +292,7 @@ export const useMetadataStore = defineStore('metadata', () => {
     tags,
     categoryState,
     tagState,
+    mutationPending,
     loadCategories,
     loadTags,
     createCategoryItem,

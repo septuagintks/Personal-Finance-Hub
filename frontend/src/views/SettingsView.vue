@@ -33,7 +33,8 @@ const board = ref<CategoryBoard>('expense');
 const showDeleted = ref(false);
 const pageError = ref('');
 const preferenceValidationError = ref('');
-const pending = ref(false);
+const preferencePending = ref(false);
+const pending = computed(() => preferencePending.value || metadata.mutationPending);
 
 const categoryDialogOpen = ref(false);
 const editingCategory = ref<CategoryRow | null>(null);
@@ -105,7 +106,6 @@ function openCategoryEdit(item: CategoryRow): void {
 }
 
 async function submitCategory(): Promise<void> {
-  pending.value = true;
   pageError.value = '';
   try {
     if (editingCategory.value) {
@@ -124,8 +124,6 @@ async function submitCategory(): Promise<void> {
     categoryDialogOpen.value = false;
   } catch (error) {
     pageError.value = errorMessage(error);
-  } finally {
-    pending.value = false;
   }
 }
 
@@ -160,7 +158,6 @@ function openTagEdit(id: number, name: string): void {
 }
 
 async function submitTag(): Promise<void> {
-  pending.value = true;
   pageError.value = '';
   try {
     if (editingTagId.value) await metadata.updateTagItem(editingTagId.value, tagName.value);
@@ -168,8 +165,6 @@ async function submitTag(): Promise<void> {
     tagDialogOpen.value = false;
   } catch (error) {
     pageError.value = errorMessage(error);
-  } finally {
-    pending.value = false;
   }
 }
 
@@ -210,7 +205,7 @@ async function savePreferences(): Promise<void> {
       return;
     }
   }
-  pending.value = true;
+  preferencePending.value = true;
   pageError.value = '';
   try {
     await userContext.update({
@@ -227,7 +222,7 @@ async function savePreferences(): Promise<void> {
   } catch (error) {
     pageError.value = errorMessage(error);
   } finally {
-    pending.value = false;
+    preferencePending.value = false;
   }
 }
 
@@ -266,7 +261,12 @@ onBeforeUnmount(() => {
         <h1>{{ translate('settings.title') }}</h1>
         <p class="content-header__copy">{{ translate('settings.subtitle') }}</p>
       </div>
-      <button class="button button--quiet" type="button" @click="loadMetadata">
+      <button
+        class="button button--quiet"
+        type="button"
+        :disabled="metadata.mutationPending"
+        @click="loadMetadata"
+      >
         <RefreshCw :size="16" /> {{ translate('common.refresh') }}
       </button>
     </div>
@@ -343,7 +343,12 @@ onBeforeUnmount(() => {
           <input v-model="showDeleted" type="checkbox" />
           <span>{{ translate('settings.showDeleted') }}</span>
         </label>
-        <button class="button button--small" type="button" @click="openCategoryCreate">
+        <button
+          class="button button--small"
+          type="button"
+          :disabled="pending"
+          @click="openCategoryCreate"
+        >
           <Plus :size="15" /> {{ translate('settings.newCategory') }}
         </button>
       </div>
@@ -379,6 +384,7 @@ onBeforeUnmount(() => {
               type="button"
               :title="translate('common.edit')"
               :aria-label="translate('common.edit')"
+              :disabled="pending"
               @click="openCategoryEdit(item)"
             >
               <Pencil :size="16" />
@@ -389,6 +395,7 @@ onBeforeUnmount(() => {
               type="button"
               :title="translate('common.delete')"
               :aria-label="translate('common.delete')"
+              :disabled="pending"
               @click="removeCategory(item)"
             >
               <Trash2 :size="16" />
@@ -399,6 +406,7 @@ onBeforeUnmount(() => {
               type="button"
               :title="translate('common.restore')"
               :aria-label="translate('common.restore')"
+              :disabled="pending"
               @click="restoreCategory(item)"
             >
               <RotateCcw :size="16" />
@@ -426,7 +434,12 @@ onBeforeUnmount(() => {
           <input v-model="showDeleted" type="checkbox" />
           <span>{{ translate('settings.showDeleted') }}</span>
         </label>
-        <button class="button button--small" type="button" @click="openTagCreate">
+        <button
+          class="button button--small"
+          type="button"
+          :disabled="pending"
+          @click="openTagCreate"
+        >
           <Plus :size="15" /> {{ translate('settings.newTag') }}
         </button>
       </div>
@@ -451,6 +464,7 @@ onBeforeUnmount(() => {
               type="button"
               :title="translate('common.rename')"
               :aria-label="translate('common.rename')"
+              :disabled="pending"
               @click="openTagEdit(item.id, item.name)"
             >
               <Pencil :size="16" />
@@ -461,6 +475,7 @@ onBeforeUnmount(() => {
               type="button"
               :title="translate('common.delete')"
               :aria-label="translate('common.delete')"
+              :disabled="pending"
               @click="removeTag(item.id)"
             >
               <Trash2 :size="16" />
@@ -471,6 +486,7 @@ onBeforeUnmount(() => {
               type="button"
               :title="translate('common.restore')"
               :aria-label="translate('common.restore')"
+              :disabled="pending"
               @click="restoreTag(item.id)"
             >
               <RotateCcw :size="16" />
@@ -598,11 +614,11 @@ onBeforeUnmount(() => {
       <form class="settings-dialog-form" @submit.prevent="submitCategory">
         <label class="field">
           <span>{{ translate('settings.name') }}</span>
-          <input v-model.trim="categoryForm.name" required maxlength="128" />
+          <input v-model.trim="categoryForm.name" required maxlength="128" :disabled="pending" />
         </label>
         <label v-if="!editingCategory" class="field">
           <span>{{ translate('settings.parentCategory') }}</span>
-          <select v-model="categoryForm.parentId">
+          <select v-model="categoryForm.parentId" :disabled="pending">
             <option value="">{{ translate('settings.noParent') }}</option>
             <option v-for="item in parentOptions" :key="item.id" :value="item.id">
               {{ '· '.repeat(item.depth) }}{{ item.name }}
@@ -611,10 +627,20 @@ onBeforeUnmount(() => {
         </label>
         <label v-if="editingCategory" class="field">
           <span>{{ translate('settings.sortOrder') }}</span>
-          <input v-model.number="categoryForm.sortOrder" type="number" required />
+          <input
+            v-model.number="categoryForm.sortOrder"
+            type="number"
+            required
+            :disabled="pending"
+          />
         </label>
         <div class="modal-actions">
-          <button class="button button--quiet" type="button" @click="categoryDialogOpen = false">
+          <button
+            class="button button--quiet"
+            type="button"
+            :disabled="pending"
+            @click="categoryDialogOpen = false"
+          >
             {{ translate('common.cancel') }}</button
           ><button class="button" type="submit" :disabled="pending">
             <Save :size="16" /> {{ translate('common.save') }}
@@ -631,10 +657,15 @@ onBeforeUnmount(() => {
       <form class="settings-dialog-form" @submit.prevent="submitTag">
         <label class="field">
           <span>{{ translate('settings.name') }}</span>
-          <input v-model.trim="tagName" required maxlength="64" />
+          <input v-model.trim="tagName" required maxlength="64" :disabled="pending" />
         </label>
         <div class="modal-actions">
-          <button class="button button--quiet" type="button" @click="tagDialogOpen = false">
+          <button
+            class="button button--quiet"
+            type="button"
+            :disabled="pending"
+            @click="tagDialogOpen = false"
+          >
             {{ translate('common.cancel') }}</button
           ><button class="button" type="submit" :disabled="pending">
             <Save :size="16" /> {{ translate('common.save') }}
