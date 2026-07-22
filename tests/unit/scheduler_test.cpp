@@ -2,9 +2,11 @@
 
 #include "pfh/application/maintenance/cleanup_expired_sessions_use_case.h"
 #include "pfh/application/maintenance/cleanup_expired_idempotency_use_case.h"
+#include "pfh/application/maintenance/cleanup_published_outbox_use_case.h"
 #include "pfh/application/scheduler/i_timer_scheduler.h"
 #include "pfh/infrastructure/persistence/in_memory_job_lease_repository.h"
 #include "pfh/infrastructure/persistence/in_memory_idempotency_cleanup_repository.h"
+#include "pfh/infrastructure/persistence/in_memory_outbox_retention_repository.h"
 #include "pfh/infrastructure/persistence/in_memory_session_cleanup_repository.h"
 #include "pfh/infrastructure/scheduler/bounded_thread_pool.h"
 #include "pfh/infrastructure/scheduler/job_manager.h"
@@ -12,6 +14,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <future>
@@ -318,6 +321,76 @@ TEST(CleanupExpiredIdempotencyUseCaseTest,
     EXPECT_EQ(*second, 1U);
     EXPECT_FALSE(store.idempotency.contains("expired"));
     EXPECT_TRUE(store.idempotency.contains("future"));
+}
+
+TEST(CleanupPublishedOutboxUseCaseTest,
+     DeletesOnlyOldPublishedRowsWithinTheGlobalBatch) {
+    const auto now = std::chrono::system_clock::time_point{123456s};
+    const auto old = now - 31 * 24h;
+    InMemoryStore store;
+    const auto add = [&](std::string id,
+                         application::OutboxStatus status,
+                         std::chrono::system_clock::time_point published_at) {
+        application::OutboxMessage message;
+        message.id = std::move(id);
+        message.event_name = "TransactionCreated";
+        message.status = status;
+        message.created_at = old;
+        message.published_at = published_at;
+        store.outbox.push_back(std::move(message));
+    };
+    add("published-oldest", application::OutboxStatus::Published, old - 1h);
+    add("published-old", application::OutboxStatus::Published, old);
+    store.outbox.front().created_at = old - 1h;
+    add("published-boundary", application::OutboxStatus::Published, now - 30 * 24h);
+    add("pending-old", application::OutboxStatus::Pending, old);
+    add("processing-old", application::OutboxStatus::Processing, old);
+    add("failed-old", application::OutboxStatus::Failed, old);
+    add("dead-letter-old", application::OutboxStatus::DeadLetter, old);
+    store.outbox_handler_receipts.emplace("published-oldest", "audit");
+    store.outbox_handler_receipts.emplace("dead-letter-old", "audit");
+    store.outbox_retry_commands.emplace(
+        "operator:key",
+        InMemoryOutboxRetryCommand{
+            domain::UserId(1), "key", "published-oldest", "trace", old});
+
+    SchedulerClock clock(now);
+    InMemoryOutboxRetentionRepository repository(store);
+    application::CleanupPublishedOutboxUseCase use_case(
+        repository, clock, 30 * 24h, 1);
+
+    auto first = use_case.execute();
+    ASSERT_TRUE(first.has_value());
+    EXPECT_EQ(*first, 1U);
+    EXPECT_EQ(store.outbox.size(), 6U);
+    EXPECT_FALSE(store.outbox_handler_receipts.contains(
+        {"published-oldest", "audit"}));
+    EXPECT_TRUE(store.outbox_handler_receipts.contains(
+        {"dead-letter-old", "audit"}));
+    EXPECT_TRUE(store.outbox_retry_commands.empty());
+
+    auto second = use_case.execute();
+    ASSERT_TRUE(second.has_value());
+    EXPECT_EQ(*second, 1U);
+    auto repeated = use_case.execute();
+    ASSERT_TRUE(repeated.has_value());
+    EXPECT_EQ(*repeated, 0U);
+    EXPECT_EQ(store.outbox.size(), 5U);
+    EXPECT_TRUE(std::ranges::any_of(store.outbox, [](const auto& message) {
+        return message.id == "published-boundary";
+    }));
+    EXPECT_TRUE(std::ranges::any_of(store.outbox, [](const auto& message) {
+        return message.id == "pending-old";
+    }));
+    EXPECT_TRUE(std::ranges::any_of(store.outbox, [](const auto& message) {
+        return message.id == "processing-old";
+    }));
+    EXPECT_TRUE(std::ranges::any_of(store.outbox, [](const auto& message) {
+        return message.id == "failed-old";
+    }));
+    EXPECT_TRUE(std::ranges::any_of(store.outbox, [](const auto& message) {
+        return message.id == "dead-letter-old";
+    }));
 }
 
 TEST(RecurringJobTest, TimerOnlyEnqueuesAndLocalReentryIsRejected) {

@@ -13,6 +13,7 @@
 #include "pfh/application/events/supplemental_audit_handler.h"
 #include "pfh/application/maintenance/cleanup_expired_sessions_use_case.h"
 #include "pfh/application/maintenance/cleanup_expired_idempotency_use_case.h"
+#include "pfh/application/maintenance/cleanup_published_outbox_use_case.h"
 #include "pfh/application/use_cases/refresh_exchange_rates_use_case.h"
 #include "pfh/bootstrap/database_client_factory.h"
 #include "pfh/infrastructure/external/curl_http_transport.h"
@@ -26,6 +27,7 @@
 #include "pfh/infrastructure/persistence/postgres_job_lease_repository.h"
 #include "pfh/infrastructure/persistence/postgres_idempotency_cleanup_repository.h"
 #include "pfh/infrastructure/persistence/postgres_outbox_repository.h"
+#include "pfh/infrastructure/persistence/postgres_outbox_retention_repository.h"
 #include "pfh/infrastructure/persistence/postgres_operations_repository.h"
 #include "pfh/infrastructure/persistence/postgres_request_scope.h"
 #include "pfh/infrastructure/persistence/postgres_session_cleanup_repository.h"
@@ -131,6 +133,20 @@ application::VoidResult ProductionCompositionRoot::validate_config() const {
             application::ErrorCode::ConfigurationError,
             "Password pepper exceeds 1024 bytes"));
     }
+    const bool file_logging =
+        config_.logging.output == infrastructure::LogOutput::File ||
+        config_.logging.output == infrastructure::LogOutput::Both;
+    if (file_logging &&
+        (config_.logging.file.empty() ||
+         config_.logging.file.size() > 4096 ||
+         config_.logging.maximum_file_size_bytes < 64U * 1024U ||
+         config_.logging.maximum_file_size_bytes > 100U * 1024U * 1024U ||
+         config_.logging.maximum_file_count == 0 ||
+         config_.logging.maximum_file_count > 20)) {
+        return application::err(application::Error(
+            application::ErrorCode::ConfigurationError,
+            "File logging rotation configuration is invalid"));
+    }
     if (config_.server.request_worker_threads == 0 ||
         config_.server.request_worker_threads > 64 ||
         config_.server.request_queue_capacity == 0 ||
@@ -152,6 +168,8 @@ application::VoidResult ProductionCompositionRoot::validate_config() const {
             config_.scheduler.session_cleanup_batch_size >
                 static_cast<std::uint32_t>(
                     std::numeric_limits<std::int32_t>::max()) ||
+            config_.scheduler.outbox_retention_batch_size == 0 ||
+            config_.scheduler.outbox_retention_batch_size > 10000 ||
             config_.scheduler.outbox_publish_interval <=
                 std::chrono::seconds::zero() ||
             config_.scheduler.outbox_processing_timeout <=
@@ -160,6 +178,14 @@ application::VoidResult ProductionCompositionRoot::validate_config() const {
                 std::chrono::minutes::zero() ||
             config_.scheduler.session_cleanup_interval <=
                 std::chrono::minutes::zero() ||
+            config_.scheduler.outbox_retention_interval <=
+                std::chrono::minutes::zero() ||
+            config_.scheduler.outbox_retention_interval >
+                std::chrono::hours(24 * 7) ||
+            config_.scheduler.published_outbox_retention <
+                std::chrono::hours(24) ||
+            config_.scheduler.published_outbox_retention >
+                std::chrono::hours(24 * 3650) ||
             config_.scheduler.job_execution_timeout <=
                 std::chrono::seconds::zero() ||
             config_.scheduler.job_lease_duration <=
@@ -321,6 +347,14 @@ application::VoidResult ProductionCompositionRoot::initialize() {
                 *idempotency_cleanup_repository_,
                 *clock_,
                 config_.scheduler.session_cleanup_batch_size);
+        outbox_retention_repository_ = std::make_unique<
+            infrastructure::PostgresOutboxRetentionRepository>(request_db_);
+        cleanup_outbox_use_case_ = std::make_unique<
+            application::CleanupPublishedOutboxUseCase>(
+                *outbox_retention_repository_,
+                *clock_,
+                config_.scheduler.published_outbox_retention,
+                config_.scheduler.outbox_retention_batch_size);
         job_lease_repository_ =
             std::make_unique<infrastructure::PostgresJobLeaseRepository>(
                 request_db_);
@@ -346,6 +380,12 @@ application::VoidResult ProductionCompositionRoot::initialize() {
         const infrastructure::RecurringJobConfig cleanup_config{
             {},
             config_.scheduler.session_cleanup_interval,
+            config_.scheduler.job_execution_timeout,
+            config_.scheduler.job_lease_duration,
+            true};
+        const infrastructure::RecurringJobConfig retention_config{
+            {},
+            config_.scheduler.outbox_retention_interval,
             config_.scheduler.job_execution_timeout,
             config_.scheduler.job_lease_duration,
             true};
@@ -384,6 +424,15 @@ application::VoidResult ProductionCompositionRoot::initialize() {
                 *job_lease_repository_,
                 scheduler_instance_id_,
                 cleanup_config);
+        outbox_retention_job_ =
+            std::make_shared<infrastructure::OutboxRetentionJob>(
+                *timer_scheduler_,
+                *background_executor_,
+                *clock_,
+                *cleanup_outbox_use_case_,
+                *job_lease_repository_,
+                scheduler_instance_id_,
+                retention_config);
         job_manager_ = std::make_unique<infrastructure::JobManager>();
         for (const auto& job : {
                  std::static_pointer_cast<application::IJob>(outbox_job_),
@@ -391,7 +440,9 @@ application::VoidResult ProductionCompositionRoot::initialize() {
                  std::static_pointer_cast<application::IJob>(
                      session_cleanup_job_),
                  std::static_pointer_cast<application::IJob>(
-                     idempotency_cleanup_job_)}) {
+                     idempotency_cleanup_job_),
+                 std::static_pointer_cast<application::IJob>(
+                     outbox_retention_job_)}) {
             auto registered = job_manager_->register_job(job);
             if (!registered) {
                 return application::err(
@@ -433,7 +484,8 @@ application::VoidResult ProductionCompositionRoot::initialize() {
             outbox_job_.get(),
             rate_refresh_job_.get(),
             session_cleanup_job_.get(),
-            idempotency_cleanup_job_.get()};
+            idempotency_cleanup_job_.get(),
+            outbox_retention_job_.get()};
     }
     operations_service_ =
         std::make_unique<application::OperationsApplicationService>(

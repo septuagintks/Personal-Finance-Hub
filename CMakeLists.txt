@@ -158,6 +158,7 @@ set(PFH_APPLICATION_SOURCES
     src/application/outbox_publisher.cpp
     src/application/supplemental_audit_handler.cpp
     src/application/cleanup_expired_idempotency_use_case.cpp
+    src/application/cleanup_published_outbox_use_case.cpp
     src/application/operations_application_service.cpp
 )
 
@@ -188,6 +189,7 @@ set(PFH_POSTGRESQL_SOURCES
     src/infrastructure/persistence/postgres_session_cleanup_repository.cpp
     src/infrastructure/persistence/postgres_job_lease_repository.cpp
     src/infrastructure/persistence/postgres_idempotency_cleanup_repository.cpp
+    src/infrastructure/persistence/postgres_outbox_retention_repository.cpp
     src/infrastructure/persistence/postgres_operations_repository.cpp
     src/infrastructure/external/curl_http_transport.cpp
     src/infrastructure/scheduler/drogon_timer_scheduler.cpp

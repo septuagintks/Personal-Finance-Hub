@@ -76,6 +76,9 @@ struct LoggingConfig {
     LogLevel level = LogLevel::Info;
     LogOutput output = LogOutput::Console;
     std::string file = "logs/pfh.log";
+    std::uint64_t maximum_file_size_bytes = 10U * 1024U * 1024U;
+    // Total files on disk, including the active file.
+    std::uint32_t maximum_file_count = 5;
 };
 
 /// @brief Scheduler configuration
@@ -89,6 +92,9 @@ struct SchedulerConfig {
     std::chrono::minutes exchange_rate_refresh_interval{60};
     std::chrono::minutes session_cleanup_interval{1440};
     std::uint32_t session_cleanup_batch_size = 1000;
+    std::chrono::minutes outbox_retention_interval{1440};
+    std::chrono::hours published_outbox_retention{24 * 30};
+    std::uint32_t outbox_retention_batch_size = 1000;
     std::chrono::seconds job_execution_timeout{30};
     std::chrono::seconds job_lease_duration{120};
 };

@@ -9,9 +9,12 @@
 #include "pfh/domain/typed_id.h"
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
-#include <spdlog/sinks/basic_file_sink.h>
+#include <spdlog/sinks/rotating_file_sink.h>
 #include <memory>
+#include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace pfh::infrastructure {
 
@@ -20,6 +23,13 @@ class Logger {
 public:
     /// @brief Initialize global logger with configuration
     static void initialize(const LoggingConfig& config) {
+        if ((config.output == LogOutput::File ||
+             config.output == LogOutput::Both) &&
+            (config.file.empty() || config.maximum_file_size_bytes == 0 ||
+             config.maximum_file_count == 0)) {
+            throw std::invalid_argument(
+                "File logging rotation configuration is invalid");
+        }
         std::vector<spdlog::sink_ptr> sinks;
 
         // Console sink
@@ -31,7 +41,15 @@ public:
 
         // File sink
         if (config.output == LogOutput::File || config.output == LogOutput::Both) {
-            auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(config.file, true);
+            const auto backup_files = static_cast<std::size_t>(
+                config.maximum_file_count - 1U);
+            auto file_sink =
+                std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+                    config.file,
+                    static_cast<std::size_t>(
+                        config.maximum_file_size_bytes),
+                    backup_files,
+                    false);
             file_sink->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] [%t] %v");
             sinks.push_back(file_sink);
         }

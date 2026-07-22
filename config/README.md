@@ -49,6 +49,8 @@
 - `level`: Log level (`trace`, `debug`, `info`, `warn`, `error`, `critical`)
 - `output`: Output target (`console`, `file`, `both`)
 - `file`: Log file path
+- `maximum_file_size_bytes`: Maximum active/backup file size (64 KiB to 100 MiB; default 10 MiB)
+- `maximum_file_count`: Total retained files including the active file (1-20; default 5)
 
 #### Scheduler Settings
 - `enabled`: Enables all Phase 1 recurring jobs
@@ -60,6 +62,9 @@
 - `exchange_rate_refresh_interval_minutes`: Exchange-rate refresh interval
 - `session_cleanup_interval_minutes`: Expired authentication data cleanup interval
 - `session_cleanup_batch_size`: Per-table deletion limit for one cleanup run
+- `outbox_retention_interval_minutes`: Distributed-lease cleanup interval (at most seven days; default one day)
+- `published_outbox_retention_days`: Published Outbox retention period (1-3650 days; default 30)
+- `outbox_retention_batch_size`: Maximum published events deleted per cleanup run (1-10000; default 1000)
 - `job_execution_timeout_seconds`: Soft execution deadline used for warning logs
 - `job_lease_duration_seconds`: Distributed lease duration; must exceed the soft deadline
 
@@ -70,7 +75,7 @@
 
 HTTP event-loop callbacks validate request size before copying the body and use task-count plus retained-body-byte admission. Login and registration use a separate, smaller Argon2 pool and a bounded direct-peer rate limiter, so unauthenticated password work cannot consume ordinary API workers. Scheduler callbacks use a third bounded background pool. `job_execution_timeout_seconds` is a soft deadline because C++ worker threads are not terminated unsafely; external HTTP has its own hard timeout. Both `outbox_processing_timeout_seconds` and `job_lease_duration_seconds` must be longer than the soft deadline. FreeCurrencyAPI and exchangerate.fun may run sequentially, so twice `request_timeout_seconds` must fit within the soft deadline.
 
-The request-role database client performs Outbox transitions, exchange-rate appends, supplemental audit writes, token cleanup and job lease updates against non-RLS tables. The background BYPASSRLS/default-read-only client is reserved exclusively for the cross-tenant active-currency query.
+The Outbox retention job deletes only published events older than the configured period. Pending, processing, failed, and dead-letter events are retained. Handler receipts cascade with deleted events; retry-command facts are removed in the same transaction before their event. The request-role database client performs these writes and the other Outbox transitions, exchange-rate appends, supplemental audit writes, token cleanup and job lease updates against non-RLS tables. The background BYPASSRLS/default-read-only client is reserved exclusively for the cross-tenant active-currency query.
 
 ## Environment Variable Overlay
 

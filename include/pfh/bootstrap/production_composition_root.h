@@ -16,6 +16,7 @@ namespace pfh::application {
 class AuthService;
 class CleanupExpiredSessionsUseCase;
 class CleanupExpiredIdempotencyUseCase;
+class CleanupPublishedOutboxUseCase;
 class LocalEventBus;
 class OutboxPublisher;
 class RefreshExchangeRatesUseCase;
@@ -44,6 +45,7 @@ class PostgresActiveCurrencyQuery;
 class PostgresJobLeaseRepository;
 class PostgresIdempotencyCleanupRepository;
 class PostgresOutboxRepository;
+class PostgresOutboxRetentionRepository;
 class PostgresOperationsRepository;
 class PostgresRequestScopeFactory;
 class PostgresSessionCleanupRepository;
@@ -52,6 +54,7 @@ class RegistrationDefaultsRepositoryImpl;
 class OutboxPublisherJob;
 class SessionCleanupJob;
 class IdempotencyCleanupJob;
+class OutboxRetentionJob;
 class SystemClock;
 class UserRepositoryImpl;
 }
@@ -136,6 +139,10 @@ private:
         idempotency_cleanup_repository_;
     std::unique_ptr<application::CleanupExpiredIdempotencyUseCase>
         cleanup_idempotency_use_case_;
+    std::unique_ptr<infrastructure::PostgresOutboxRetentionRepository>
+        outbox_retention_repository_;
+    std::unique_ptr<application::CleanupPublishedOutboxUseCase>
+        cleanup_outbox_use_case_;
     std::unique_ptr<infrastructure::PostgresJobLeaseRepository>
         job_lease_repository_;
     std::unique_ptr<infrastructure::BoundedThreadPool> request_executor_;
@@ -147,6 +154,8 @@ private:
     std::shared_ptr<infrastructure::SessionCleanupJob> session_cleanup_job_;
     std::shared_ptr<infrastructure::IdempotencyCleanupJob>
         idempotency_cleanup_job_;
+    std::shared_ptr<infrastructure::OutboxRetentionJob>
+        outbox_retention_job_;
     std::unique_ptr<infrastructure::JobManager> job_manager_;
     std::string scheduler_instance_id_;
     std::unique_ptr<application::AuthService> auth_service_;

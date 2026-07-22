@@ -92,6 +92,9 @@ def main() -> int:
     idempotency_cleanup = read(
         "src/infrastructure/persistence/postgres_idempotency_cleanup_repository.cpp"
     )
+    outbox_retention = read(
+        "src/infrastructure/persistence/postgres_outbox_retention_repository.cpp"
+    )
     operations = read(
         "src/infrastructure/persistence/postgres_operations_repository.cpp"
     )
@@ -125,6 +128,7 @@ def main() -> int:
         "postgres_session_cleanup_repository.cpp",
         "postgres_job_lease_repository.cpp",
         "postgres_idempotency_cleanup_repository.cpp",
+        "postgres_outbox_retention_repository.cpp",
         "postgres_operations_repository.cpp",
         "curl_http_transport.cpp",
         "drogon_timer_scheduler.cpp",
@@ -390,6 +394,7 @@ def main() -> int:
         "PostgresSessionCleanupRepository",
         "PostgresJobLeaseRepository",
         "PostgresIdempotencyCleanupRepository",
+        "PostgresOutboxRetentionRepository",
         "PostgresOperationsRepository",
     ):
         require(
@@ -397,6 +402,24 @@ def main() -> int:
             f"{adapter} must use the ordinary request-role client",
             failures,
         )
+    require(
+        "status = 'published'::outbox_status" in outbox_retention
+        and "created_at <" in outbox_retention
+        and "ORDER BY created_at, id" in outbox_retention
+        and "FOR UPDATE SKIP LOCKED" in outbox_retention
+        and outbox_retention.find("DELETE FROM outbox_retry_commands")
+        < outbox_retention.find("DELETE FROM domain_events_outbox")
+        and "RETURNING id" in outbox_retention,
+        "Outbox retention must lock an indexed published batch and remove retry facts before events",
+        failures,
+    )
+    require(
+        "CleanupPublishedOutboxUseCase" in composition
+        and "OutboxRetentionJob" in composition
+        and "outbox_retention_job_.get()" in composition,
+        "Published Outbox retention must be wired as an observable leased job",
+        failures,
+    )
     require(
         re.search(
             r"PostgresActiveCurrencyQuery>\(\s*background_db_", composition

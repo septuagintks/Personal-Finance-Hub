@@ -52,13 +52,18 @@ constexpr const char* kValidConfig = R"({
                 "connection_timeout": 15 },
   "jwt": { "secret": "0123456789abcdef0123456789abcdef", "access_token_expiry_seconds": 600,
            "refresh_token_expiry_seconds": 120000 },
-  "logging": { "level": "warn", "output": "both", "file": "x.log" },
+  "logging": { "level": "warn", "output": "both", "file": "x.log",
+               "maximum_file_size_bytes": 2097152,
+               "maximum_file_count": 7 },
   "scheduler": { "enabled": true, "worker_threads": 3, "queue_capacity": 40,
                  "outbox_publish_interval_seconds": 4, "outbox_batch_size": 25,
                  "outbox_processing_timeout_seconds": 120,
                  "exchange_rate_refresh_interval_minutes": 30,
                  "session_cleanup_interval_minutes": 720,
                  "session_cleanup_batch_size": 250,
+                 "outbox_retention_interval_minutes": 360,
+                 "published_outbox_retention_days": 45,
+                 "outbox_retention_batch_size": 500,
                  "job_execution_timeout_seconds": 20,
                  "job_lease_duration_seconds": 90 },
   "exchange_rate": { "provider": "ecb", "api_key": "k",
@@ -97,6 +102,8 @@ TEST(JsonConfigLoader, WhenValidConfig_LoadsAllFields) {
     EXPECT_EQ(r->jwt.access_token_expiry, std::chrono::seconds(600));
     EXPECT_EQ(r->logging.level, LogLevel::Warning);
     EXPECT_EQ(r->logging.output, LogOutput::Both);
+    EXPECT_EQ(r->logging.maximum_file_size_bytes, 2U * 1024U * 1024U);
+    EXPECT_EQ(r->logging.maximum_file_count, 7U);
     EXPECT_TRUE(r->scheduler.enabled);
     EXPECT_EQ(r->scheduler.worker_threads, 3U);
     EXPECT_EQ(r->scheduler.queue_capacity, 40U);
@@ -106,6 +113,9 @@ TEST(JsonConfigLoader, WhenValidConfig_LoadsAllFields) {
     EXPECT_EQ(r->scheduler.exchange_rate_refresh_interval, std::chrono::minutes(30));
     EXPECT_EQ(r->scheduler.session_cleanup_interval, std::chrono::minutes(720));
     EXPECT_EQ(r->scheduler.session_cleanup_batch_size, 250U);
+    EXPECT_EQ(r->scheduler.outbox_retention_interval, std::chrono::minutes(360));
+    EXPECT_EQ(r->scheduler.published_outbox_retention, std::chrono::hours(24 * 45));
+    EXPECT_EQ(r->scheduler.outbox_retention_batch_size, 500U);
     EXPECT_EQ(r->scheduler.job_execution_timeout, std::chrono::seconds(20));
     EXPECT_EQ(r->scheduler.job_lease_duration, std::chrono::seconds(90));
     EXPECT_EQ(r->exchange_rate.provider, "ecb");
@@ -239,6 +249,31 @@ TEST(JsonConfigLoader, WhenRequestWorkerConfigurationIsInvalid_ReturnsError) {
     expect_invalid("\"auth_queue_capacity\":257");
     expect_invalid("\"auth_rate_limit_attempts\":0");
     expect_invalid("\"auth_rate_limit_sources\":1000001");
+}
+
+TEST(JsonConfigLoader, WhenRetentionOrLogRotationIsUnbounded_ReturnsError) {
+    const auto expect_invalid = [](const std::string& section) {
+        TempConfig cfg(
+            "{\"jwt\":{\"secret\":\"0123456789abcdef0123456789abcdef\"}," +
+            section + "}");
+        JsonConfigLoader loader(cfg.path());
+        auto result = loader.load();
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().code, ErrorCode::ConfigurationError);
+    };
+
+    expect_invalid(
+        "\"scheduler\":{\"published_outbox_retention_days\":0}");
+    expect_invalid(
+        "\"scheduler\":{\"published_outbox_retention_days\":3651}");
+    expect_invalid(
+        "\"scheduler\":{\"outbox_retention_batch_size\":10001}");
+    expect_invalid(
+        "\"logging\":{\"output\":\"file\","
+        "\"maximum_file_size_bytes\":65535}");
+    expect_invalid(
+        "\"logging\":{\"output\":\"file\","
+        "\"maximum_file_count\":21}");
 }
 
 // ---- Log level / output parsing ----

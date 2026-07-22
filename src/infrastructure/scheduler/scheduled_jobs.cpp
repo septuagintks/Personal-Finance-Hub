@@ -123,4 +123,29 @@ IdempotencyCleanupJob::IdempotencyCleanupJob(
           &leases,
           std::move(owner_id)) {}
 
+OutboxRetentionJob::OutboxRetentionJob(
+    application::ITimerScheduler& timers,
+    application::IBackgroundExecutor& executor,
+    const application::IClock& clock,
+    application::CleanupPublishedOutboxUseCase& use_case,
+    application::IJobLeaseRepository& leases,
+    std::string owner_id,
+    RecurringJobConfig config)
+    : RecurringJob(
+          named(std::move(config), "outbox-retention"),
+          timers,
+          executor,
+          clock,
+          [&use_case] {
+              auto cleaned = use_case.execute();
+              if (!cleaned) {
+                  return JobExecutionResult(std::unexpected(
+                      JobExecutionError{cleaned.error().message}));
+              }
+              return JobExecutionResult(
+                  "published_outbox=" + std::to_string(*cleaned));
+          },
+          &leases,
+          std::move(owner_id)) {}
+
 } // namespace pfh::infrastructure

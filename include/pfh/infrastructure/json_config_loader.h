@@ -143,6 +143,12 @@ public:
                 config.logging.level = parse_log_level(logging.value("level", std::string("info")));
                 config.logging.output = parse_log_output(logging.value("output", std::string("console")));
                 config.logging.file = logging.value("file", std::string("logs/pfh.log"));
+                config.logging.maximum_file_size_bytes =
+                    logging.value<std::uint64_t>(
+                        "maximum_file_size_bytes", 10U * 1024U * 1024U);
+                config.logging.maximum_file_count =
+                    logging.value<std::uint32_t>(
+                        "maximum_file_count", 5);
             }
 
             // Scheduler config
@@ -170,6 +176,21 @@ public:
                 config.scheduler.session_cleanup_batch_size =
                     scheduler.value<std::uint32_t>(
                         "session_cleanup_batch_size", 1000);
+                config.scheduler.outbox_retention_interval =
+                    std::chrono::minutes(scheduler.value<std::int64_t>(
+                        "outbox_retention_interval_minutes", 1440));
+                const auto retention_days = scheduler.value<std::int64_t>(
+                    "published_outbox_retention_days", 30);
+                if (retention_days < 1 || retention_days > 3650) {
+                    return std::unexpected(Error(
+                        application::ErrorCode::ConfigurationError,
+                        "Published Outbox retention is invalid"));
+                }
+                config.scheduler.published_outbox_retention =
+                    std::chrono::hours(24 * retention_days);
+                config.scheduler.outbox_retention_batch_size =
+                    scheduler.value<std::uint32_t>(
+                        "outbox_retention_batch_size", 1000);
                 config.scheduler.job_execution_timeout = std::chrono::seconds(
                     scheduler.value<std::int64_t>(
                         "job_execution_timeout_seconds", 30));
@@ -233,6 +254,21 @@ public:
                 return std::unexpected(Error(application::ErrorCode::ConfigurationError,
                     "Password pepper still holds a placeholder value; set a real pepper or leave it empty"));
             }
+            const bool file_logging =
+                config.logging.output == LogOutput::File ||
+                config.logging.output == LogOutput::Both;
+            if (file_logging &&
+                (config.logging.file.empty() ||
+                 config.logging.file.size() > 4096 ||
+                 config.logging.maximum_file_size_bytes < 64U * 1024U ||
+                 config.logging.maximum_file_size_bytes >
+                     100U * 1024U * 1024U ||
+                 config.logging.maximum_file_count == 0 ||
+                 config.logging.maximum_file_count > 20)) {
+                return std::unexpected(Error(
+                    application::ErrorCode::ConfigurationError,
+                    "File logging rotation configuration is invalid"));
+            }
             if (config.server.threads == 0 ||
                 config.server.threads > 64 ||
                 config.server.request_worker_threads == 0 ||
@@ -280,6 +316,8 @@ public:
                 config.scheduler.session_cleanup_batch_size >
                     static_cast<std::uint32_t>(
                         std::numeric_limits<std::int32_t>::max()) ||
+                config.scheduler.outbox_retention_batch_size == 0 ||
+                config.scheduler.outbox_retention_batch_size > 10000 ||
                 config.scheduler.outbox_publish_interval <=
                     std::chrono::seconds::zero() ||
                 config.scheduler.outbox_processing_timeout <=
@@ -288,6 +326,14 @@ public:
                     std::chrono::minutes::zero() ||
                 config.scheduler.session_cleanup_interval <=
                     std::chrono::minutes::zero() ||
+                config.scheduler.outbox_retention_interval <=
+                    std::chrono::minutes::zero() ||
+                config.scheduler.outbox_retention_interval >
+                    std::chrono::hours(24 * 7) ||
+                config.scheduler.published_outbox_retention <
+                    std::chrono::hours(24) ||
+                config.scheduler.published_outbox_retention >
+                    std::chrono::hours(24 * 3650) ||
                 config.scheduler.job_execution_timeout <=
                     std::chrono::seconds::zero() ||
                 config.scheduler.job_lease_duration <=

@@ -8,7 +8,9 @@
 
 #include "pfh/infrastructure/logger.h"
 #include <gtest/gtest.h>
+#include <spdlog/sinks/null_sink.h>
 #include <spdlog/sinks/ostream_sink.h>
+#include <filesystem>
 #include <memory>
 #include <sstream>
 
@@ -91,6 +93,43 @@ TEST(Logger, WhenMessageContainsBraces_DoesNotReparse) {
     Logger::info("t", "literal {{}} braces: {}", "ok");
     const std::string out = cap.text();
     EXPECT_NE(out.find("ok"), std::string::npos);
+}
+
+TEST(Logger, WhenFileOutputExceedsBudget_RetainsConfiguredFileCount) {
+    static std::uint64_t sequence = 0;
+    const auto directory = std::filesystem::temp_directory_path() /
+        ("pfh_log_rotation_" + std::to_string(sequence++));
+    std::filesystem::create_directories(directory);
+    const auto path = directory / "pfh.log";
+    LoggingConfig config;
+    config.output = LogOutput::File;
+    config.file = path.string();
+    config.maximum_file_size_bytes = 64U * 1024U;
+    config.maximum_file_count = 3;
+    Logger::initialize(config);
+
+    const std::string payload(8192, 'x');
+    for (int index = 0; index < 40; ++index) {
+        spdlog::info("{}", payload);
+    }
+    spdlog::default_logger()->flush();
+
+    std::size_t files = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(directory)) {
+        if (entry.is_regular_file()) ++files;
+    }
+    EXPECT_GE(files, 2U);
+    EXPECT_LE(files, config.maximum_file_count);
+    EXPECT_TRUE(std::filesystem::exists(path));
+    EXPECT_TRUE(std::filesystem::exists(directory / "pfh.1.log"));
+    EXPECT_FALSE(std::filesystem::exists(directory / "pfh.3.log"));
+
+    auto sink = std::make_shared<spdlog::sinks::null_sink_mt>();
+    spdlog::set_default_logger(
+        std::make_shared<spdlog::logger>("post-rotation", sink));
+    spdlog::drop("pfh");
+    std::error_code ignored;
+    std::filesystem::remove_all(directory, ignored);
 }
 
 } // namespace pfh::test
