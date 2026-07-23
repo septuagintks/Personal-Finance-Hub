@@ -30,6 +30,14 @@ class PerformanceToolContracts(unittest.TestCase):
         instant = performance.datetime(2026, 1, 15, tzinfo=performance.timezone.utc)
         self.assertEqual(performance.shifted_month(instant, -1), "2025-12")
         self.assertEqual(performance.shifted_month(instant, 12), "2027-01")
+        self.assertEqual(
+            performance.analysis_month_range("daily", instant),
+            ("2016-02", "2026-01"),
+        )
+        self.assertEqual(
+            performance.analysis_month_range("stress", instant),
+            ("2025-12", "2025-12"),
+        )
 
     def test_explain_summary_walks_nested_nodes(self) -> None:
         document = [

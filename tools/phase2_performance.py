@@ -333,6 +333,13 @@ def shifted_month(value: datetime, offset: int) -> str:
     return f"{year:04d}-{zero_based_month + 1:02d}"
 
 
+def analysis_month_range(profile_name: str, value: datetime) -> tuple[str, str]:
+    if profile_name == "daily":
+        return shifted_month(value, -119), shifted_month(value, 0)
+    previous_month = shifted_month(value, -1)
+    return previous_month, previous_month
+
+
 def measure_request(url: str, token: str, timeout: float) -> tuple[float, float, int]:
     request = Request(url, headers={"Authorization": f"Bearer {token}", "Accept": "*/*"})
     started = time.perf_counter()
@@ -363,6 +370,7 @@ def benchmark(arguments: argparse.Namespace) -> None:
     to_value = (now + timedelta(days=1)).isoformat().replace("+00:00", "Z")
     report_from = shifted_month(now, -119)
     report_to = shifted_month(now, 0)
+    analysis_from, analysis_to = analysis_month_range(arguments.profile, now)
     endpoints = {
         "transactions_first_page": (
             "/api/v1/transactions?" + urlencode({"pageSize": 50}),
@@ -393,8 +401,8 @@ def benchmark(arguments: argparse.Namespace) -> None:
             "/api/v1/reports/analysis?"
             + urlencode(
                 {
-                    "startDate": report_from,
-                    "endDate": report_to,
+                    "startDate": analysis_from,
+                    "endDate": analysis_to,
                     "dimension": "tag",
                 }
             ),

@@ -40,6 +40,10 @@ PostgresCashFlowProjection::aggregate_monthly(
         db_, tenant_user_id_, "aggregate monthly cash flow",
         [&](const auto& transaction) -> domain::RepositoryResult<
             std::vector<application::CashFlowMonthlyProjection>> {
+            // PostgreSQL greatly overestimates this LATERAL-heavy plan and can
+            // spend longer compiling JIT code than executing the bounded scan.
+            transaction->execSqlSync("SET LOCAL jit = off");
+
             // Source admission is evaluated before any rate lookup. Each
             // LATERAL lookup then uses idx_exchange_rates_pair_time and chooses
             // the newest rate at-or-before the business instant. The rounded

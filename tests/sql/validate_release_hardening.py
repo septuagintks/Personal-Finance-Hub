@@ -151,6 +151,13 @@ def main() -> int:
         failures,
     )
     require(
+        'if profile_name == "daily"' in performance
+        and "previous_month = shifted_month(value, -1)" in performance
+        and "analysis_from, analysis_to = analysis_month_range" in performance,
+        "Performance tag-report windows must respect the detailed-row budget",
+        failures,
+    )
+    require(
         "static_cast<volatile char*>(value.data())" in transport
         and 'CURLOPT_FOLLOWLOCATION, 0L' in transport
         and 'CURLOPT_PROTOCOLS_STR, "https"' in transport,

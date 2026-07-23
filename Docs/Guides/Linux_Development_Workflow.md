@@ -189,7 +189,7 @@ python3 tools/phase2_performance.py explain \
   --output /tmp/pfh-phase2-stress-plans.json
 ```
 
-每次 seed 会先清理该用户的 `PFH-PERF-*` 夹具，使 Daily 与 Stress 互斥。记录 p50/p95、响应大小、数据库/应用资源、页面指标和关键查询的 `EXPLAIN (ANALYZE, BUFFERS)` 脱敏摘要；不要提交完整数据库 URL、Token、原始日志或大体积结果。
+每次 seed 会先清理该用户的 `PFH-PERF-*` 夹具，使 Daily 与 Stress 互斥。Daily 标签报表覆盖 120 个月和全部 10,000 条夹具；Stress 标签报表固定使用上一个完整历史月，使均匀分布的夹具保持在 10,000 条 detailed-report 安全上限内，同时仍以接近上限的数据量验证 100,000 条总流水下的查询路径。记录 p50/p95、响应大小、数据库/应用资源、页面指标和关键查询的 `EXPLAIN (ANALYZE, BUFFERS)` 脱敏摘要；不要提交完整数据库 URL、Token、原始日志或大体积结果。
 
 ### 6.3 Sanitizer、压力与浏览器 Heap
 

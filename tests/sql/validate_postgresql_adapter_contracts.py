@@ -638,7 +638,8 @@ def main() -> int:
         failures,
     )
     require(
-        "WITH source AS MATERIALIZED" in cash_flow_projection
+        'execSqlSync("SET LOCAL jit = off")' in cash_flow_projection
+        and "WITH source AS MATERIALIZED" in cash_flow_projection
         and "timezone($4, entry.transaction_time)" in cash_flow_projection
         and "date_trunc(" in cash_flow_projection
         and "to_char(" in cash_flow_projection
@@ -671,9 +672,10 @@ def main() -> int:
         and "LEFT JOIN monthly ON TRUE" in cash_flow_projection
         and "pg::getOptionalString(row, 0)" in cash_flow_projection
         and "if (rows.size() == 1U)" in cash_flow_projection,
-        "Cash-flow trend must use one admission-bounded, timezone-aware SQL "
-        "projection with Decimal-equivalent rounding and map transfer-only "
-        "ranges to an empty result",
+        "Cash-flow trend must disable JIT transaction-locally, use one "
+        "admission-bounded, timezone-aware SQL projection with "
+        "Decimal-equivalent rounding, and map transfer-only ranges to an "
+        "empty result",
         failures,
     )
     require(
