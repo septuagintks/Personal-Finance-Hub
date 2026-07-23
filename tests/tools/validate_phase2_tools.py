@@ -140,12 +140,19 @@ class PressureToolContracts(unittest.TestCase):
             self.assertEqual(csv.headers["Accept"], "text/csv")
 
             queue = pressure.request_plan(self.arguments("queue", "--body-bytes", "128"))
-            self.assertEqual(len(queue.body or b""), 128)
-            self.assertEqual(json.loads(queue.body or b"{}"), {"padding": "x" * 114})
+            self.assertEqual(
+                (queue.method, queue.path, queue.body),
+                ("GET", "/api/v1/reports/dashboard-summary", None),
+            )
             self.assertFalse(queue.disconnect)
 
             disconnect = pressure.request_plan(
                 self.arguments("disconnect", "--body-bytes", "128")
+            )
+            self.assertEqual(len(disconnect.body or b""), 128)
+            self.assertEqual(
+                json.loads(disconnect.body or b"{}"),
+                {"padding": "x" * 114},
             )
             self.assertTrue(disconnect.disconnect)
 
@@ -191,7 +198,7 @@ process_resident_memory_bytes 12345
             ("requests", 0),
             ("requests", 100_001),
             ("concurrency", 0),
-            ("concurrency", 257),
+            ("concurrency", 513),
             ("body_bytes", 0),
             ("body_bytes", 8 * 1024 * 1024 + 1),
             ("timeout", 0),

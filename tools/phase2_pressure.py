@@ -150,7 +150,7 @@ def request_plan(arguments: argparse.Namespace) -> RequestPlan:
             f"PFH_PRESSURE_ACCESS_TOKEN is required for {arguments.scenario} pressure"
         )
 
-    if arguments.scenario == "read":
+    if arguments.scenario in {"read", "queue"}:
         return RequestPlan(
             "GET",
             "/api/v1/reports/dashboard-summary",
@@ -202,7 +202,7 @@ def request_plan(arguments: argparse.Namespace) -> RequestPlan:
         body,
         {**auth_headers(token), "Content-Type": "application/json"},
         frozenset({400, 413, 429, 503}),
-        disconnect=arguments.scenario == "disconnect",
+        disconnect=True,
     )
 
 
@@ -452,8 +452,8 @@ def validate_arguments(arguments: argparse.Namespace) -> None:
         raise PressureFailure("base URL must be an HTTP(S) origin without credentials")
     if arguments.requests <= 0 or arguments.requests > 100_000:
         raise PressureFailure("requests must be between 1 and 100000")
-    if arguments.concurrency <= 0 or arguments.concurrency > 256:
-        raise PressureFailure("concurrency must be between 1 and 256")
+    if arguments.concurrency <= 0 or arguments.concurrency > 512:
+        raise PressureFailure("concurrency must be between 1 and 512")
     if arguments.body_bytes < 1 or arguments.body_bytes > 8 * 1024 * 1024:
         raise PressureFailure("body bytes must be between 1 byte and 8 MiB")
     if (

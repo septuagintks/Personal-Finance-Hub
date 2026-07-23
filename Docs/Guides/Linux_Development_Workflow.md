@@ -218,13 +218,13 @@ python3 tools/phase2_pressure.py --scenario csv \
 python3 tools/phase2_pressure.py --scenario auth \
   --requests 100 --concurrency 8 --enforce --output /tmp/pfh-pressure-auth.json
 python3 tools/phase2_pressure.py --scenario queue \
-  --requests 500 --concurrency 64 --body-bytes 1048576 --enforce \
+  --requests 500 --concurrency 384 --enforce \
   --output /tmp/pfh-pressure-queue.json
 python3 tools/phase2_pressure.py --scenario disconnect \
   --requests 100 --concurrency 16 --enforce --output /tmp/pfh-pressure-disconnect.json
 ```
 
-每个场景都必须通过状态、恢复时间、峰值 RSS 与冷却后 RSS 预算；auth 与 queue 还必须在 Operator Metrics 中观察到对应 admission rejection 增长，否则不构成饱和测试。断连场景使用 Backend 直连 HTTP，避免把反向代理 TLS 行为误记为应用进程结果。
+每个场景都必须通过状态、恢复时间、峰值 RSS 与冷却后 RSS 预算；auth 与 queue 还必须在 Operator Metrics 中观察到对应 admission rejection 增长，否则不构成饱和测试。queue 使用无副作用的 Dashboard 慢读和高于默认 256 task queue 的并发，避免依赖 HTTP body 到达时序触发 admission；断连场景使用 Backend 直连 HTTP，避免把反向代理 TLS 行为误记为应用进程结果。
 
 Chromium heap 门禁与完整三浏览器矩阵分开执行：
 
