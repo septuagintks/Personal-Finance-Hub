@@ -12,6 +12,7 @@
 #include "pfh/infrastructure/persistence/exchange_rate_repository_impl.h"
 #include "pfh/infrastructure/persistence/postgres_cash_flow_projection.h"
 #include "pfh/infrastructure/persistence/postgres_job_lease_repository.h"
+#include "pfh/infrastructure/persistence/postgres_outbox_retention_repository.h"
 #include "pfh/infrastructure/persistence/postgres_outbox_repository.h"
 #include "pfh/infrastructure/persistence/postgres_session_cleanup_repository.h"
 #include "pfh/infrastructure/persistence/postgres_supplemental_audit_store.h"
@@ -1191,7 +1192,7 @@ TEST_F(PostgreSQLIntegrationTest, SupplementalAuditReceiptRollsBackWithInvalidAu
     EXPECT_EQ(scalar_count(database->admin, "SELECT count(*) FROM audit_logs"), 1);
 }
 
-TEST_F(PostgreSQLIntegrationTest, JobLeaseAndSessionCleanupUseDatabaseClock) {
+TEST_F(PostgreSQLIntegrationTest, JobLeaseAndCleanupUseDatabaseClock) {
     PostgresJobLeaseRepository first(database->request);
     PostgresJobLeaseRepository second(database->request);
     const auto app_future = std::chrono::system_clock::time_point::max();
@@ -1256,6 +1257,62 @@ TEST_F(PostgreSQLIntegrationTest, JobLeaseAndSessionCleanupUseDatabaseClock) {
     EXPECT_EQ(
         scalar_count(database->admin, "SELECT count(*) FROM revoked_sessions"),
         1);
+
+    database->admin->execSqlSync(R"SQL(
+        INSERT INTO domain_events_outbox (
+            id, event_name, payload, status, next_retry_at, occurred_at,
+            created_at, published_at)
+        VALUES
+            ('40000000-0000-0000-0000-000000000001',
+             'PublishedOldest', '{}'::jsonb, 'published',
+             NOW() - INTERVAL '3 days', NOW() - INTERVAL '3 days',
+             NOW() - INTERVAL '3 days', NOW() - INTERVAL '3 days'),
+            ('40000000-0000-0000-0000-000000000002',
+             'PublishedOld', '{}'::jsonb, 'published',
+             NOW() - INTERVAL '2 days', NOW() - INTERVAL '2 days',
+             NOW() - INTERVAL '2 days', NOW() - INTERVAL '2 days'),
+            ('40000000-0000-0000-0000-000000000003',
+             'PublishedRecent', '{}'::jsonb, 'published',
+             NOW() - INTERVAL '1 hour', NOW() - INTERVAL '1 hour',
+             NOW() - INTERVAL '1 hour', NOW() - INTERVAL '1 hour'),
+            ('40000000-0000-0000-0000-000000000004',
+             'PendingOld', '{}'::jsonb, 'pending',
+             NOW() - INTERVAL '3 days', NOW() - INTERVAL '3 days',
+             NOW() - INTERVAL '3 days', NULL)
+    )SQL");
+    database->admin->execSqlSync(R"SQL(
+        INSERT INTO outbox_handler_receipts (outbox_id, handler_name)
+        VALUES ('40000000-0000-0000-0000-000000000001', 'fixture-handler')
+    )SQL");
+    database->admin->execSqlSync(R"SQL(
+        INSERT INTO outbox_retry_commands (
+            operator_user_id, idempotency_key, outbox_id, trace_id)
+        VALUES ($1, 'retention-fixture',
+                '40000000-0000-0000-0000-000000000001',
+                'retention-fixture')
+    )SQL", user.value());
+
+    PostgresOutboxRetentionRepository retention_cleanup(database->request);
+    auto first_retained = retention_cleanup.cleanup_published(
+        app_past, 24h, 1);
+    ASSERT_TRUE(first_retained.has_value())
+        << first_retained.error().message;
+    EXPECT_EQ(*first_retained, 1U);
+    EXPECT_EQ(
+        scalar_count(database->admin, "SELECT count(*) FROM outbox_retry_commands"),
+        0);
+    EXPECT_EQ(
+        scalar_count(database->admin, "SELECT count(*) FROM outbox_handler_receipts"),
+        0);
+
+    auto remaining_retained = retention_cleanup.cleanup_published(
+        app_future, 24h, 10);
+    ASSERT_TRUE(remaining_retained.has_value())
+        << remaining_retained.error().message;
+    EXPECT_EQ(*remaining_retained, 1U);
+    EXPECT_EQ(
+        scalar_count(database->admin, "SELECT count(*) FROM domain_events_outbox"),
+        2);
 }
 
 TEST_F(PostgreSQLIntegrationTest, TransferThreeAccountLockConflictRollsBackWholeAggregate) {

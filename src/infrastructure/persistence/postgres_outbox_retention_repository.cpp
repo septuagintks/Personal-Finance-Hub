@@ -31,6 +31,7 @@ PostgresOutboxRetentionRepository::cleanup_published(
     // PostgreSQL time is authoritative across scheduler instances. The clock
     // argument remains part of the port for deterministic in-memory tests.
     (void)now;
+    const auto limit = static_cast<std::int64_t>(batch_size);
     return postgres::execute_transaction<std::size_t>(
         db_,
         std::nullopt,
@@ -48,7 +49,7 @@ PostgresOutboxRetentionRepository::cleanup_published(
                 ORDER BY created_at, id
                 LIMIT $2
                 FOR UPDATE SKIP LOCKED
-            )SQL", retention.count(), static_cast<std::int32_t>(batch_size));
+            )SQL", retention.count(), limit);
             if (candidates.empty()) return std::size_t{0};
 
             nlohmann::json ids = nlohmann::json::array();

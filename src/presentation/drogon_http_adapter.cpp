@@ -9,6 +9,7 @@
 #include <drogon/drogon.h>
 #include <spdlog/spdlog.h>
 
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <string>
@@ -167,6 +168,10 @@ void dispatch_request(
 } // namespace
 
 void DrogonHttpAdapter::configure() {
+    const auto upload_path =
+        std::filesystem::temp_directory_path() / "pfh-http-uploads";
+    drogon::app().setUploadPath(upload_path.string());
+
     auto register_static = [this](
                                const std::string& path,
                                HttpMethod core_method,
