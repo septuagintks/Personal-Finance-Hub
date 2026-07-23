@@ -32,11 +32,9 @@ RUN apt-get update \
 WORKDIR /src
 COPY . .
 
-RUN multiarch="$(dpkg-architecture -qDEB_HOST_MULTIARCH)" \
-    && cmake -S . -B /build -G Ninja \
+RUN cmake -S . -B /build -G Ninja \
         -DCMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE}" \
         -DPFH_BUILD_POSTGRESQL=ON \
-        -DMYSQL_LIBRARIES="/usr/lib/${multiarch}/libmysqlclient.so" \
     && cmake --build /build --target pfh_server --parallel 1
 
 FROM ubuntu:24.04 AS runtime

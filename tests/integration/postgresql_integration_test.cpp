@@ -1343,5 +1343,10 @@ int main(int argc, char** argv) {
         std::cerr << "PostgreSQL integration setup failed: " << error.what() << '\n';
         return 2;
     }
-    return RUN_ALL_TESTS();
+    const auto test_result = RUN_ALL_TESTS();
+    database->admin->closeAll();
+    database->request->closeAll();
+    database->background->closeAll();
+    database.reset();
+    return test_result;
 }

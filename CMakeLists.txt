@@ -125,6 +125,16 @@ find_package(Threads REQUIRED)
 option(PFH_BUILD_POSTGRESQL "Build PostgreSQL persistence adapters" OFF)
 
 if(PFH_BUILD_POSTGRESQL)
+    # Drogon's bundled FindMySQL.cmake omits Ubuntu's mysqlclient name.
+    # Resolve the standard client library before Drogon reads that module.
+    if(NOT MYSQL_LIBRARIES OR MYSQL_LIBRARIES MATCHES "-NOTFOUND$")
+        find_library(PFH_MYSQL_CLIENT_LIBRARY
+            NAMES mysqlclient mysqlclient_r mariadbclient)
+        if(PFH_MYSQL_CLIENT_LIBRARY)
+            set(MYSQL_LIBRARIES "${PFH_MYSQL_CLIENT_LIBRARY}"
+                CACHE FILEPATH "MySQL client library used by Drogon" FORCE)
+        endif()
+    endif()
     find_package(Drogon REQUIRED)
     find_package(PostgreSQL REQUIRED)
     find_package(OpenSSL REQUIRED)
