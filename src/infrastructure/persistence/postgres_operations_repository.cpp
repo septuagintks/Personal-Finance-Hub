@@ -134,7 +134,7 @@ PostgresOperationsRepository::summary(
                 ORDER BY handled_at DESC
                 LIMIT 10001
             ) AS recent_receipts
-        )SQL", result.window_start);
+        )SQL", pg::toDbTimestamp(result.window_start));
         if (receipts.size() == 1) {
             result.handler_receipt_count = bounded_count(
                 pg::getBigInt(receipts[0], 0));
